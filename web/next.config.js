@@ -1,5 +1,3 @@
-const path = require('path');
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -12,9 +10,6 @@ const nextConfig = {
   turbopack: {
     root: __dirname,
   },
-  // Belt-and-suspenders for the same monorepo confusion when Next runs the
-  // server-trace step (used by serverless output on Vercel).
-  outputFileTracingRoot: path.resolve(__dirname),
   // Universal-link manifests need a specific Content-Type or iOS / Android
   // refuse to verify them.
   async headers() {
