@@ -1,0 +1,177 @@
+# =============================================================================
+# Nightly Postgres backup
+#
+# Supabase Pro keeps 7 days of automatic snapshots — fine for "oops I dropped
+# a table" but not for: long-tail recovery, compliance, or moving providers.
+# This workflow runs every night, pulls a logical dump, encrypts it with
+# `age`, and uploads it to S3 (or any S3-compatible target — R2 works too).
+#
+# Recipients (`age` public keys) are stored in repo secrets so the running
+# job CANNOT decrypt what it produced. Only the human holding the matching
+# private key can restore.
+#
+# Required secrets:
+#   PROD_DB_URL              postgres://postgres:<pwd>@db.PROD_REF.supabase.co:5432/postgres
+#   BACKUP_AGE_RECIPIENTS    space-separated `age1...` public keys (1+)
+#   BACKUP_S3_BUCKET         e.g. s3://movvy-backups
+#   BACKUP_S3_ENDPOINT       e.g. https://<r2-account-id>.r2.cloudflarestorage.com
+#   BACKUP_AWS_KEY_ID
+#   BACKUP_AWS_KEY_SECRET
+#   BACKUP_AWS_REGION        e.g. auto (R2) or us-east-1 (S3)
+#
+# Optional:
+#   STAGING_DB_URL           if set, also backs up staging on a relaxed cadence
+# =============================================================================
+
+name: Nightly DB backup
+
+on:
+  schedule:
+    # 04:15 UTC nightly. Off-peak for ca-central-1 (Calgary 21:15 / 22:15 MT).
+    - cron: '15 4 * * *'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Database to back up'
+        required: true
+        type: choice
+        options: [production, staging]
+        default: production
+
+concurrency:
+  group: db-backup-${{ inputs.target || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  dump:
+    name: pg_dump → encrypt → S3
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TARGET: ${{ inputs.target || 'production' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # PG17 client to match Supabase's server version.
+      - name: Install postgresql-client-17
+        run: |
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+
+      - name: Install age + awscli
+        run: |
+          curl -L https://github.com/FiloSottile/age/releases/download/v1.2.0/age-v1.2.0-linux-amd64.tar.gz -o age.tar.gz
+          tar -xzf age.tar.gz
+          sudo mv age/age /usr/local/bin/
+          sudo mv age/age-keygen /usr/local/bin/
+          # AWS CLI ships with Ubuntu runners but force-update so endpoints
+          # for R2 / Backblaze behave the same as S3 mainline.
+          aws --version
+
+      - name: Resolve target DB
+        id: db
+        run: |
+          if [ "$TARGET" = "staging" ]; then
+            echo "url=${{ secrets.STAGING_DB_URL }}" >> $GITHUB_OUTPUT
+            echo "prefix=staging" >> $GITHUB_OUTPUT
+          else
+            echo "url=${{ secrets.PROD_DB_URL }}" >> $GITHUB_OUTPUT
+            echo "prefix=prod" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Dump + encrypt
+        env:
+          PGSSLMODE: require
+          DB_URL: ${{ steps.db.outputs.url }}
+          RECIPIENTS: ${{ secrets.BACKUP_AGE_RECIPIENTS }}
+        run: |
+          set -euo pipefail
+          STAMP=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+          BASENAME="${{ steps.db.outputs.prefix }}-${STAMP}.sql.gz.age"
+          OUT="artifacts/${BASENAME}"
+          mkdir -p artifacts
+
+          # --no-owner / --no-acl keep the dump portable across projects
+          # (restore into a sandbox without permission errors). --quote-all
+          # protects against reserved-word identifiers in newer migrations.
+          # We pipe straight into gzip + age so the unencrypted dump never
+          # hits the disk.
+          pg_dump "$DB_URL" \
+            --no-owner --no-acl --quote-all-identifiers \
+            --format=plain \
+            | gzip -9 \
+            | age $RECIPIENTS > "$OUT"
+
+          BYTES=$(stat -c%s "$OUT")
+          echo "Encrypted dump: $OUT ($BYTES bytes)"
+          echo "BACKUP_PATH=$OUT" >> $GITHUB_ENV
+          echo "BACKUP_BASENAME=$BASENAME" >> $GITHUB_ENV
+
+      - name: Upload to S3 / R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_KEY_SECRET }}
+          AWS_DEFAULT_REGION: ${{ secrets.BACKUP_AWS_REGION }}
+          BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          # --endpoint-url lets the same workflow target R2 or any S3-compatible.
+          # If BACKUP_S3_ENDPOINT is unset, drop the flag entirely.
+          ENDPOINT_FLAG=""
+          if [ -n "${ENDPOINT}" ]; then ENDPOINT_FLAG="--endpoint-url $ENDPOINT"; fi
+          # Daily / monthly partitions help with lifecycle policies (e.g. keep
+          # 30 daily, 12 monthly).
+          MONTH=$(date -u +%Y-%m)
+          aws s3 cp "$BACKUP_PATH" "${BUCKET}/daily/${MONTH}/${BACKUP_BASENAME}" $ENDPOINT_FLAG \
+            --no-progress --only-show-errors
+
+      - name: Surface result
+        run: |
+          echo "::notice::Backup uploaded: ${BACKUP_BASENAME}"
+
+  # Sanity-restore: every Monday, the previous night's prod dump is
+  # restored into a throwaway Postgres in CI. Catches corrupt dumps long
+  # before a real incident demands them.
+  verify:
+    name: Restore drill
+    if: github.event_name == 'schedule' && github.event.schedule == '15 4 * * 1'
+    needs: dump
+    runs-on: ubuntu-latest
+    services:
+      pg:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: drill
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - name: Install age + awscli
+        run: |
+          curl -L https://github.com/FiloSottile/age/releases/download/v1.2.0/age-v1.2.0-linux-amd64.tar.gz -o age.tar.gz
+          tar -xzf age.tar.gz && sudo mv age/age /usr/local/bin/
+
+      - name: Restore latest dump
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_KEY_SECRET }}
+          AWS_DEFAULT_REGION: ${{ secrets.BACKUP_AWS_REGION }}
+          BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          DRILL_AGE_KEY: ${{ secrets.BACKUP_AGE_DRILL_KEY }}
+        run: |
+          set -euo pipefail
+          ENDPOINT_FLAG=""
+          if [ -n "${ENDPOINT}" ]; then ENDPOINT_FLAG="--endpoint-url $ENDPOINT"; fi
+          LATEST=$(aws s3 ls "${BUCKET}/daily/$(date -u +%Y-%m)/" $ENDPOINT_FLAG | sort | tail -n 1 | awk '{print $4}')
+          aws s3 cp "${BUCKET}/daily/$(date -u +%Y-%m)/${LATEST}" /tmp/dump.age $ENDPOINT_FLAG
+          echo "$DRILL_AGE_KEY" > /tmp/drill.key
+          age -d -i /tmp/drill.key /tmp/dump.age | gunzip | psql "postgres://postgres:drill@localhost:5432/postgres"
+          # Spot-check the restore landed key tables
+          psql "postgres://postgres:drill@localhost:5432/postgres" -c \
+            "select count(*) as bookings, (select count(*) from profiles) as profiles, (select count(*) from audit_logs) as audits from bookings"

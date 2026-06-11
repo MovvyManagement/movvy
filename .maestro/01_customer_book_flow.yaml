@@ -1,0 +1,75 @@
+# =============================================================================
+# Customer happy path: welcome → sign up → quote → confirm → Moves tab
+#
+# Assumes Supabase is configured (.env.local set) so the booking actually
+# persists. Uses a throwaway email so re-runs don't collide.
+# =============================================================================
+appId: com.movvy.app
+---
+- launchApp:
+    clearState: true
+
+# --- Welcome screen --------------------------------------------------------
+- assertVisible: "Moving Made Easy"
+- assertVisible: "Vetted crews"
+- assertVisible: "500+ moves"
+- tapOn: "Get started"
+
+# --- Sign up ---------------------------------------------------------------
+- assertVisible: "Moving Made Easy,"
+- tapOn: "Full name"
+- inputText: "Test User"
+- tapOn: "Email"
+- inputText:
+    text: "test+${TIMESTAMP}@movvy.app"
+- tapOn: "Password"
+- inputText: "Password1234!"
+- tapOn:
+    id: "checkbox-accept-terms"
+    optional: true
+- tapOn: "Create account"
+- assertVisible:
+    text: "Check your email"
+    timeout: 8000
+- tapOn: "OK"
+
+# --- Sign in with the same creds (assume verification skipped in dev) ------
+- assertVisible: "Welcome back"
+- tapOn: "Email"
+- inputText:
+    text: "test+${TIMESTAMP}@movvy.app"
+- tapOn: "Password"
+- inputText: "Password1234!"
+- tapOn: "Sign in"
+
+# --- Home → start booking ---------------------------------------------------
+- assertVisible:
+    text: "Where to today?"
+    timeout: 6000
+- tapOn: "Pickup address"
+- inputText: "123 4 Ave SW"
+- tapOn:
+    text: "123 4 Ave SW.*Calgary"
+    timeout: 4000
+- tapOn: "Drop-off address"
+- inputText: "555 17 Ave SW"
+- tapOn:
+    text: "555 17 Ave SW.*Calgary"
+    timeout: 4000
+- tapOn: "Book a move"
+
+# --- Booking flow: type → details → schedule → confirm --------------------
+- tapOn: "Residential"
+- tapOn: "Continue"
+- tapOn: "Continue"   # default house details
+- tapOn: "Continue"   # default schedule
+- assertVisible: "Confirm move"
+- assertVisible: "Up to $5,000 in coverage"
+- tapOn:
+    text: "Confirm move.*"
+    timeout: 6000
+
+# --- Lands on Moves tab; live tracker should mount in ~real-time
+- assertVisible:
+    text: "My moves|Live move"
+    timeout: 10000

@@ -1,0 +1,47 @@
+# =============================================================================
+# Partner sign-in with code gate
+#
+# Validates that:
+#   1. The welcome → Join Movvy link goes to partner-signin (not the customer
+#      login).
+#   2. Code + email/phone + password are all required.
+#   3. An invalid code rejects with a friendly error.
+#   4. A valid (code, email) pair signs in and lands on the driver app.
+# =============================================================================
+appId: com.movvy.app
+---
+- launchApp:
+    clearState: true
+
+- assertVisible: "Moving Made Easy"
+- tapOn: "Join Movvy"
+
+# --- Wrong code → expect error ---------------------------------------------
+- assertVisible: "Partner sign-in"
+- tapOn: "Team / company code"
+- inputText: "TM-WRONG0"
+- tapOn: "Email"
+- inputText: "driver-seed@movvy.app"
+- tapOn: "Password"
+- inputText: "Password1234!"
+- tapOn: "Sign in"
+- assertVisible:
+    text: "couldn't find that team code|not on this team"
+    timeout: 6000
+
+# --- Right code → sign-in succeeds -----------------------------------------
+- tapOn: "Team / company code"
+- eraseText: 16
+- inputText: "TM-SEED01"
+- tapOn: "Sign in"
+- assertVisible:
+    text: "Available jobs|My jobs"
+    timeout: 8000
+
+# --- Cross-link to onboarding hub ------------------------------------------
+- back
+- assertVisible: "Partner sign-in"
+- tapOn: "Onboard as a new partner"
+- assertVisible:
+    text: "Two-person crew|Moving company"
+    timeout: 4000

@@ -1,0 +1,138 @@
+# =============================================================================
+# Maestro E2E on PR
+#
+# Runs the .maestro/*.yaml flows against an Android emulator on every PR
+# that touches app/, src/, or maestro files. Failing flows block merge.
+#
+# Why Android and not iOS:
+#   • macOS runners are 10× the cost
+#   • emulator launch is faster on Linux
+#   • iOS flows can run nightly on Mac runners as a follow-on workflow
+#
+# Why we build the dev client instead of using Expo Go:
+#   • Movvy depends on native modules (expo-secure-store, react-native-maps,
+#     expo-location, expo-print) that don't ship in Expo Go
+#   • Running flows against the actual binary catches bundling regressions
+# =============================================================================
+
+name: Maestro E2E
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'src/**'
+      - '.maestro/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'app.json'
+      - 'eas.json'
+  workflow_dispatch:
+
+concurrency:
+  group: maestro-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.0'
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # KVM is required for the emulator to boot in reasonable time.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> $GITHUB_PATH
+
+      - name: Install deps
+        run: npm ci
+
+      # Build the Android debug binary via `expo run:android` — keeps the
+      # bundle config aligned with the production build, unlike Expo Go.
+      - name: Setup EAS (auth only — local build)
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Prebuild Android project
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+          APP_ENV: staging
+        run: npx expo prebuild --platform android --non-interactive
+
+      - name: Build debug APK
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+          APP_ENV: staging
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon
+          cd ..
+          mkdir -p artifacts
+          cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/movvy.apk
+
+      - name: Boot emulator + run Maestro
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 4096M
+          heap-size: 1024M
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            adb install -r artifacts/movvy.apk
+            # Wait for package manager to settle
+            adb shell pm list packages | grep com.movvy.app || (echo "Install failed" && exit 1)
+            # Run every flow; first failure short-circuits + uploads logs
+            maestro test --format junit --output maestro-results.xml .maestro/
+
+      - name: Upload Maestro logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-results
+          path: |
+            maestro-results.xml
+            ~/.maestro/tests/**/screen-*.png
+
+      - name: Publish JUnit results
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Maestro
+          path: maestro-results.xml
+          reporter: java-junit

@@ -1,0 +1,57 @@
+# =============================================================================
+# Driver happy path: sign in → see job → accept → flag stops → complete
+#
+# Assumes a seed driver account exists with a pending searching booking in
+# Calgary. Drivers under a company can't accept directly, so this flow uses
+# a solo 2-person team driver.
+# =============================================================================
+appId: com.movvy.app
+---
+- launchApp:
+    clearState: true
+
+# --- Partner sign-in --------------------------------------------------------
+- assertVisible: "Moving Made Easy"
+- tapOn: "Join Movvy"
+- assertVisible: "Partner sign-in"
+- tapOn: "Team / company code"
+- inputText: "TM-SEED01"          # seeded team code
+- tapOn: "Email"
+- inputText: "driver-seed@movvy.app"
+- tapOn: "Password"
+- inputText: "Password1234!"
+- tapOn: "Sign in"
+
+# --- Jobs tab — accept first available -------------------------------------
+- assertVisible:
+    text: "Available jobs"
+    timeout: 6000
+- tapOn:
+    text: "Accept this job"
+    timeout: 8000
+- tapOn: "Accept"                 # confirmation dialog
+- assertVisible:
+    text: "Active|On the way"
+    timeout: 6000
+
+# --- Step through the 5 flags ----------------------------------------------
+- tapOn: "Left HQ"
+- tapOn: "Arrived at pickup"
+- tapOn: "Left pickup"
+- tapOn: "Arrived at drop-off"
+- tapOn: "Job done"
+
+# --- Rate the customer after completion ------------------------------------
+- assertVisible:
+    text: "Rate.*customer|How was"
+    timeout: 6000
+- tapOn:
+    index: 4
+    text: ""
+    selector: "star"   # 5-star rating
+    optional: true
+- tapOn: "Submit"
+
+- assertVisible:
+    text: "Move complete"
+    timeout: 4000

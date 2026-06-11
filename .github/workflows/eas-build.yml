@@ -1,0 +1,97 @@
+# =============================================================================
+# EAS Build + Submit
+#
+# Three trigger paths:
+#   • push to `main`            → staging build for iOS + Android (internal track)
+#   • git tag matching v*       → production build + auto-submit
+#   • manual `workflow_dispatch` → pick a profile + platform on demand
+#
+# Secrets the workflow needs (set in Repo → Settings → Secrets and variables):
+#   EXPO_TOKEN                  EAS auth token (`eas account:create-token`)
+#   PROD_SUPABASE_URL / _KEY    Production Supabase project
+#   STAGING_SUPABASE_URL / _KEY Staging Supabase project
+#   APPLE_ID / APPLE_TEAM_ID    For TestFlight + App Store submit
+#   APPLE_ASC_APP_ID            App Store Connect app id
+#   GOOGLE_PLAY_KEY_B64         Base64 of secrets/play-service-account.json
+# =============================================================================
+
+name: EAS Build & Submit
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'EAS profile'
+        required: true
+        type: choice
+        options: [staging, production]
+        default: staging
+      platform:
+        description: 'Target platform'
+        required: true
+        type: choice
+        options: [all, ios, android]
+        default: all
+      submit:
+        description: 'Auto-submit to App Store / Play Store after build'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: eas-${{ github.ref }}-${{ inputs.profile || 'default' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (${{ inputs.profile || (startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging') }})
+    runs-on: ubuntu-latest
+    env:
+      # Resolve profile + auto-submit from the triggering event
+      PROFILE: ${{ inputs.profile || (startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging') }}
+      PLATFORM: ${{ inputs.platform || 'all' }}
+      AUTO_SUBMIT: ${{ inputs.submit == true || startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.0'
+          cache: npm
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install deps
+        run: npm ci
+
+      # Decode the Play Store service account so EAS Submit can use it.
+      - name: Decode Play Store key
+        if: env.AUTO_SUBMIT == 'true'
+        run: |
+          mkdir -p secrets
+          echo "${{ secrets.GOOGLE_PLAY_KEY_B64 }}" | base64 --decode > secrets/play-service-account.json
+
+      - name: EAS Build
+        env:
+          STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          STAGING_SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+          PROD_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
+          PROD_SUPABASE_ANON_KEY: ${{ secrets.PROD_SUPABASE_ANON_KEY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ASC_APP_ID: ${{ secrets.APPLE_ASC_APP_ID }}
+        run: |
+          if [ "$AUTO_SUBMIT" = "true" ]; then
+            eas build --profile $PROFILE --platform $PLATFORM --non-interactive --auto-submit
+          else
+            eas build --profile $PROFILE --platform $PLATFORM --non-interactive
+          fi

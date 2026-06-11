@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-white text-ink-900;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+  /* Sticky-footer pattern — anchors copyright row at the bottom on short pages */
+  body, main {
+    min-height: 100vh;
+  }
+}
+
+/* Inter from Google's CDN, kept small (latin only) for fast first paint */
+@font-face {
+  font-family: 'Inter';
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('https://rsms.me/inter/font-files/InterVariable.woff2') format('woff2');
+}

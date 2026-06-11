@@ -1,0 +1,17 @@
+{
+  "name": "movvy-stripe-connect-sample",
+  "version": "0.1.0",
+  "description": "Sample Stripe Connect integration for Movvy — onboards partners as V2 connected accounts, lets them list products, and exposes a destination-charge storefront for customers.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "webhook:listen": "stripe listen --thin-events 'v2.core.account[requirements].updated,v2.core.account[configuration.recipient].capability_status_updated,v2.core.account[configuration.merchant].capability_status_updated' --forward-thin-to http://localhost:4242/webhook"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "stripe": "^22.2.0"
+  }
+}

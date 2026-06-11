@@ -1,0 +1,92 @@
+// =============================================================================
+// FAQ — preempts the most common support-inbox questions. Each Q maps to
+// a topic the mobile app already handles (pricing, cancellation, insurance,
+// service area).
+// =============================================================================
+
+'use client';
+
+import { useState } from 'react';
+
+const faqs = [
+  {
+    q: 'How much does a Movvy move cost?',
+    a: "Honest hourly pricing — you pay for the actual time the crew spends on site, plus a small travel and materials fee. A typical 2-bedroom Calgary move runs $400–$700 all-in. You see a live estimate the moment you enter your addresses.",
+  },
+  {
+    q: 'Can I cancel after I book?',
+    a: 'Yes. Cancellations are free up to 48 hours before your move. Inside 48 hours we charge a small fee — that goes straight to the crew who held the slot for you.',
+  },
+  {
+    q: 'Are the movers insured?',
+    a: 'Every Movvy crew carries $2M commercial liability insurance and is background-checked before their first job. If something ever goes wrong, the in-app claim flow opens a real ticket with our support team within minutes.',
+  },
+  {
+    q: "What if I don't need a full move — just one heavy item?",
+    a: 'Pick "Single Items" or "Labor Only" in the app. Same vetted crews, a fraction of the cost. Great for a couch, a fridge, or just an extra set of hands for the day.',
+  },
+  {
+    q: 'Which cities are covered?',
+    a: "Live in Calgary, Edmonton, and Red Deer. Several more Alberta markets are coming this year. Long-distance moves between supported cities are supported too — they're just priced by distance instead of the hour.",
+  },
+  {
+    q: 'How do I get paid as a driver or mover?',
+    a: 'Weekly direct deposit straight to your Canadian bank account. Your earnings update in the app the moment a job completes — no waiting for an invoice cycle.',
+  },
+];
+
+export function FAQ() {
+  const [open, setOpen] = useState<number | null>(0);
+  return (
+    <section id="faq" className="bg-white py-20">
+      <div className="mx-auto max-w-3xl px-5">
+        <div className="mb-10 text-center">
+          <p className="text-xs font-bold uppercase tracking-wider text-brand-700">FAQ</p>
+          <h2 className="mt-2 text-3xl font-bold text-ink-900 sm:text-4xl">
+            The Quick Answers, Before You Tap Download.
+          </h2>
+        </div>
+
+        <div className="divide-y divide-silver-200 rounded-2xl border border-silver-200 bg-white">
+          {faqs.map((f, i) => {
+            const isOpen = open === i;
+            return (
+              <div key={f.q}>
+                <button
+                  onClick={() => setOpen(isOpen ? null : i)}
+                  className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-silver-50"
+                  aria-expanded={isOpen}
+                >
+                  <span className="text-base font-semibold text-ink-900">{f.q}</span>
+                  <span
+                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-silver-100 transition ${
+                      isOpen ? 'rotate-45 bg-brand-50 text-brand-700' : 'text-ink-700'
+                    }`}
+                    aria-hidden
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                    </svg>
+                  </span>
+                </button>
+                {isOpen ? (
+                  <div className="px-5 pb-5 text-sm leading-6 text-silver-600">
+                    {f.a}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="mt-6 text-center text-sm text-silver-500">
+          Still curious? Email{' '}
+          <a className="font-semibold text-brand-700 underline" href="mailto:support@movvy.ca">
+            support@movvy.ca
+          </a>{' '}
+          and we'll write back the same day.
+        </p>
+      </div>
+    </section>
+  );
+}

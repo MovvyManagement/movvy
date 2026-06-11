@@ -1,0 +1,126 @@
+# Supabase project config — checked into source control.
+# Run `supabase init` to refresh, `supabase start` for local dev, `supabase db push` to deploy.
+
+project_id = "movvy"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324
+
+[auth]
+enabled = true
+site_url = "movvy://"
+additional_redirect_urls = ["movvy://reset-password", "http://localhost:8081", "https://admin.movvy.ca", "https://movvy.ca"]
+jwt_expiry = 3600                # 1 hour — short-lived as required
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+enable_anonymous_sign_ins = false
+enable_manual_linking = false
+minimum_password_length = 10
+# Mixed case + digits + symbols — stronger than the previous baseline.
+# HaveIBeenPwned breach check is enabled separately in the dashboard.
+password_requirements = "lower_upper_letters_digits_symbols"
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true       # require old + new email to confirm change
+enable_confirmations = true
+secure_password_change = true       # require current password on any change
+max_frequency = "1m"                # 60 s between email_change_token requests
+otp_expiry = 600                    # 10 min OTP TTL — tight reset window
+otp_length = 6
+
+[auth.sms]
+enable_signup = false           # Enabled later when Twilio is added
+enable_confirmations = false
+
+[auth.rate_limit]
+email_sent = 30                  # per hour
+sms_sent = 30
+sign_in_sign_ups = 30            # per 5 min per IP
+token_refresh = 150              # per 5 min per IP
+anonymous_users = 0              # we don't support anonymous sessions
+web3 = 0
+
+# Brute-force lockout — the [auth.lockout] block was removed from the
+# Supabase config schema. Configure max_failed_attempts + lockout_seconds
+# in the Auth dashboard instead (Authentication → Settings → Rate Limits).
+# Our rl_check_and_increment helper continues to cover edge functions.
+
+# MFA — OPTIONAL for customers, REQUIRED for movvy_admin + movvy_support
+# (enforced in supabase/functions/_shared/security.ts). Drivers and
+# dispatchers can opt in from Profile → Security.
+[auth.mfa]
+max_enrolled_factors = 3
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+[auth.mfa.phone]
+enroll_enabled = false           # Flip when Twilio is wired
+verify_enabled = false
+
+[functions.bookings-create]
+verify_jwt = true
+[functions.bookings-update-status]
+verify_jwt = true
+[functions.bookings-cancel]
+verify_jwt = true
+[functions.bookings-accept]
+verify_jwt = true
+[functions.ratings-submit]
+verify_jwt = true
+[functions.tracking-ping]
+verify_jwt = true
+[functions.documents-upload-url]
+verify_jwt = true
+[functions.geocoding-search]
+verify_jwt = true
+[functions.routes-distance]
+verify_jwt = true
+[functions.tips-submit]
+verify_jwt = true
+[functions.proxy-session-create]
+verify_jwt = true
+[functions.admin-verify-partner]
+verify_jwt = true
+[functions.admin-suspend-user]
+verify_jwt = true
+[functions.admin-reassign-booking]
+verify_jwt = true
+[functions.admin-resolve-dispute]
+verify_jwt = true
+[functions.admin-create-promo]
+verify_jwt = true
+[functions.promo-validate]
+verify_jwt = true
+[functions.disputes-open]
+verify_jwt = true
+[functions.chat-send]
+verify_jwt = true
+[functions.device-tokens-register]
+verify_jwt = true
+[functions.partners-broadcast]
+verify_jwt = true
+[functions.account-delete]
+verify_jwt = true
+[functions.notifications-send]
+verify_jwt = true
+[functions.support-sos]
+verify_jwt = true

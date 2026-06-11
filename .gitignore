@@ -1,0 +1,54 @@
+node_modules/
+.expo/
+dist/
+web-build/
+.DS_Store
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+ios/
+android/
+
+# =============================================================
+# SECRETS — never commit. Pre-commit hooks should scan for keys
+# matching: sk_live_*, sk_test_*, sb_secret_*, AIzaSy*, whsec_*
+# =============================================================
+
+# Env files
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
+.env.*
+!.env.example
+
+# Supabase local state
+supabase/.branches
+supabase/.temp
+supabase/.env
+supabase/.env.local
+
+# Key files (just in case)
+*.pem
+*.key
+*-key.json
+service-account*.json
+google-services.json
+
+# Editor SCM caches that sometimes ingest .env files
+.history/
+.cursorignore
+
+# Editors
+.vscode/
+.idea/
+expo-env.d.ts
+
+# Next.js (web/ landing page)
+.next/
+next-env.d.ts
+
+# Vercel CLI / deploy artifacts
+.vercel/
