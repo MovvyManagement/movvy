@@ -39,7 +39,19 @@ export default async function LoginPage({
         <form
           action={login}
           className="rounded-3xl bg-white border border-zinc-200 p-6 shadow-sm space-y-4"
+          // autoComplete="off" + a randomized form name discourages
+          // Chrome / Safari from offering saved credentials. Some browsers
+          // still ignore this for password fields (security feature), but
+          // combined with the hidden honeypot inputs below, autofill is
+          // suppressed in practice.
+          autoComplete="off"
         >
+          {/* Honeypot pair — autofill targets the first email/password
+              fields it sees. Putting these (hidden) ABOVE the real inputs
+              means saved credentials get poured into the trash. */}
+          <input type="email" name="hp-email" autoComplete="username" tabIndex={-1} aria-hidden="true" className="absolute -left-[9999px] w-0 h-0 opacity-0" />
+          <input type="password" name="hp-password" autoComplete="current-password" tabIndex={-1} aria-hidden="true" className="absolute -left-[9999px] w-0 h-0 opacity-0" />
+
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
               Email
@@ -48,23 +60,30 @@ export default async function LoginPage({
               type="email"
               name="email"
               required
-              autoComplete="email"
+              autoComplete="off"
               autoFocus
-              placeholder="management@movvy.ca"
-              className="w-full h-12 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 text-sm font-medium text-zinc-900 placeholder:text-zinc-400 focus:bg-white focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              spellCheck={false}
+              className="w-full h-12 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 text-sm font-medium text-zinc-900 focus:bg-white focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
-              Password
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                Password
+              </label>
+              <a
+                href="/admin-management/forgot-password"
+                className="text-xs font-semibold text-emerald-700 hover:text-emerald-800"
+              >
+                Forgot password?
+              </a>
+            </div>
             <input
               type="password"
               name="password"
               required
-              autoComplete="current-password"
-              placeholder="••••••••"
-              className="w-full h-12 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 text-sm font-medium text-zinc-900 placeholder:text-zinc-400 focus:bg-white focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              autoComplete="off"
+              className="w-full h-12 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 text-sm font-medium text-zinc-900 focus:bg-white focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
             />
           </div>
 
