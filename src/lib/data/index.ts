@@ -17,7 +17,6 @@ export * from './usePushTokens';
 export * from './useReferrals';
 export * from './useInvites';
 export * from './useDispatch';
-export * from './useReceipt';
 export * from './useNotifications';
 export * from './useAvailability';
 export * from './useReviewFeed';

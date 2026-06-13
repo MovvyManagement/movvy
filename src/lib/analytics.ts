@@ -40,7 +40,7 @@ export type AnalyticsEvent =
   | 'driver_completed_job'
   | 'review_submitted'
   | 'tip_submitted'
-  | 'receipt_emailed'
+  | 'receipt_downloaded'
   | 'invite_sent'
   | 'invite_accepted';
 

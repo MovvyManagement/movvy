@@ -57,7 +57,9 @@
       "Bash(node -e \"require\\('@babel/parser'\\).parse\\(require\\('fs'\\).readFileSync\\('src/components/AddressAutocomplete.tsx','utf8'\\),{sourceType:'module',plugins:['typescript','jsx']}\\); console.log\\('AddressAutocomplete.tsx OK'\\);\")",
       "Bash(~/.npm-global/bin/claude plugin *)",
       "Read(//Users/adamhmedat/.claude/plugins/**)",
-      "Read(//Users/adamhmedat/.claude/**)"
+      "Read(//Users/adamhmedat/.claude/**)",
+      "Bash(git checkout *)",
+      "Bash(git add *)"
     ]
   }
 }

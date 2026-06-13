@@ -135,12 +135,31 @@ handle(async (req) => {
         const r = await fetch(url);
         const json = await r.json();
         if (json.status === 'OK' || json.status === 'ZERO_RESULTS') {
-          results = (json.predictions ?? []).slice(0, 6).map((p: any) => ({
-            id: p.place_id,
-            label: p.structured_formatting?.main_text ?? p.description,
-            secondary: p.structured_formatting?.secondary_text ?? '',
-            place_id: p.place_id,
-          }));
+          // Google's strictbounds + 400km radius is a CIRCLE on top of
+          // Alberta's rectangle — it leaks into BC + SK at the edges.
+          // Movvy serves Alberta only. Post-filter every prediction to
+          // require an "AB" or "Alberta" term (Google's structured
+          // predictions split address parts into `terms[]`). Defense in
+          // depth on top of the bookings-create server check and the
+          // Nominatim viewbox.
+          const inAlbertaPrediction = (p: any): boolean => {
+            const terms = (p?.terms ?? []) as Array<{ value: string }>;
+            for (const t of terms) {
+              if (t?.value === 'AB' || t?.value === 'Alberta') return true;
+            }
+            const desc = (p?.description ?? '') as string;
+            return /\bAB\b|\bAlberta\b/.test(desc);
+          };
+
+          results = (json.predictions ?? [])
+            .filter(inAlbertaPrediction)
+            .slice(0, 6)
+            .map((p: any) => ({
+              id: p.place_id,
+              label: p.structured_formatting?.main_text ?? p.description,
+              secondary: p.structured_formatting?.secondary_text ?? '',
+              place_id: p.place_id,
+            }));
           source = 'google';
           costUsd = COST_GOOGLE_AUTOCOMPLETE;
         } else {

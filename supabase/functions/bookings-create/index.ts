@@ -102,11 +102,20 @@ serve(async (req) => {
     //    - If pickup isn't in Alberta at all → reject.
     const admin = adminClient();
 
-    // Province check first (loose box)
-    const inAlberta =
-      input.pickup.lat >= 49.0 && input.pickup.lat <= 60.0 &&
-      input.pickup.lng >= -120.0 && input.pickup.lng <= -110.0;
-    if (!inAlberta) throw httpError(400, 'Pickup address must be in Alberta');
+    // Province check first (loose box). Movvy serves Alberta only — both
+    // pickup AND drop-off must be inside the province. Cross-province
+    // long-haul moves are out of scope for the current operating area.
+    const isInAlberta = (lat: number, lng: number): boolean =>
+      lat >= 49.0 && lat <= 60.0 && lng >= -120.0 && lng <= -110.0;
+    if (!isInAlberta(input.pickup.lat, input.pickup.lng)) {
+      throw httpError(400, 'We currently move only within Alberta — pickup must be an Alberta address.');
+    }
+    if (
+      input.dropoff &&
+      !isInAlberta(input.dropoff.lat, input.dropoff.lng)
+    ) {
+      throw httpError(400, 'We currently move only within Alberta — drop-off must be an Alberta address.');
+    }
 
     let city: any = null;
     if (input.city_slug) {

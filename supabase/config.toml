@@ -48,8 +48,8 @@ otp_expiry = 600                    # 10 min OTP TTL — tight reset window
 otp_length = 6
 
 [auth.sms]
-enable_signup = false           # Enabled later when Twilio is added
-enable_confirmations = false
+enable_signup = true            # Customer signup requires both email + phone
+enable_confirmations = true     # 6-digit SMS OTP verifies the phone at signup
 
 [auth.rate_limit]
 email_sent = 30                  # per hour

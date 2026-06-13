@@ -1,19 +1,27 @@
+// =============================================================================
 // POST /proxy-session-create
-// Creates a Twilio Proxy session pairing the customer + driver of a booking.
-// Both sides see the same temporary Twilio number; Twilio routes to real numbers.
 //
-// STUB: Currently returns "twilio_not_configured" with a helpful message.
-// When Twilio is wired up, this function will:
-//   1. Check feature_flags.twilio_proxy_enabled
-//   2. Check api_budgets.twilio_proxy daily cap
-//   3. Pull a number from twilio_number_pool (assign or rotate)
-//   4. POST to Twilio Proxy API to create a session with both participants
-//   5. INSERT into phone_proxy_sessions with the proxy number
-//   6. Return the masked number to the client to dial
+// Creates (or refreshes) a phone_proxy_sessions row for the booking and
+// returns the Movvy/Twilio proxy number the caller should dial. The actual
+// routing happens in /twilio-voice-webhook — Twilio hits that webhook the
+// moment the proxy number rings, the webhook looks up the active session
+// based on caller ID, and returns TwiML that forwards the call to the
+// other party.
+//
+// What the receiving end sees: a regular incoming call from the Twilio
+// number (the iOS / Android system call UI), not a custom in-app screen.
+// =============================================================================
 
 import { z } from 'https://esm.sh/zod@3.23.8';
 import {
-  adminClient, audit, checkRateLimit, clientIp, httpError, HttpError, jsonResponse, requireAuth,
+  adminClient,
+  audit,
+  checkRateLimit,
+  clientIp,
+  httpError,
+  HttpError,
+  jsonResponse,
+  requireAuth,
 } from '../_shared/security.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { handle } from '../_shared/serve.ts';
@@ -21,6 +29,11 @@ import { handle } from '../_shared/serve.ts';
 const Body = z.object({
   booking_id: z.string().uuid(),
 });
+
+// We extend the session every time a participant requests a call so the
+// proxy stays alive for the duration of the move + a 24h cushion afterward
+// (chat-like nudges, "where are my shoes?", etc.).
+const SESSION_TTL_HOURS = 24;
 
 handle(async (req) => {
   const cors = corsHeaders(req);
@@ -33,7 +46,8 @@ handle(async (req) => {
     await checkRateLimit({
       bucketKey: `user:${user.id}:proxy_session_create`,
       endpoint: 'proxy-session-create',
-      limit: 10, windowSeconds: 3600,
+      limit: 10,
+      windowSeconds: 3600,
     });
 
     const parsed = Body.safeParse(await req.json().catch(() => ({})));
@@ -42,27 +56,33 @@ handle(async (req) => {
 
     const admin = adminClient();
 
-    // Check Twilio is actually enabled
+    // ─── Check the flag + secrets ───────────────────────────────────────────
+    // We require BOTH the flag flipped AND Twilio creds present so a half-
+    // configured env can't accidentally lock people out.
     const { data: flag } = await admin
       .from('feature_flags')
       .select('enabled')
       .eq('key', 'twilio_proxy_enabled')
       .single();
 
-    if (!flag?.enabled || !Deno.env.get('TWILIO_ACCOUNT_SID')) {
-      // STUB MODE — return a clear "not configured" payload that the UI can show
+    const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+    const twilioNumber =
+      Deno.env.get('TWILIO_FROM_NUMBER') ?? Deno.env.get('TWILIO_PHONE_NUMBER');
+
+    if (!flag?.enabled || !accountSid || !twilioNumber) {
       return jsonResponse(
         {
           ok: false,
           status: 'twilio_not_configured',
-          message: 'Phone proxy is not yet enabled. The customer can use the in-app Message button in the meantime.',
+          message:
+            "Phone calling isn't enabled yet. Use the in-app Message button to chat with your crew.",
         },
-        { status: 200 },  // 200 so the client treats it as a soft state, not an error
+        { status: 200 },
         cors,
       );
     }
 
-    // Verify booking + participants (admin client bypasses RLS for the lookup)
+    // ─── Resolve the booking + both phones ──────────────────────────────────
     const { data: booking } = await admin
       .from('bookings')
       .select('id, customer_id, assigned_driver_profile_id, status')
@@ -77,35 +97,112 @@ handle(async (req) => {
     }
 
     if (!booking.assigned_driver_profile_id) {
-      throw httpError(400, 'No driver assigned yet');
+      return jsonResponse(
+        {
+          ok: false,
+          status: 'no_driver_assigned',
+          message: "Your crew hasn't accepted yet — calling is available once they do.",
+        },
+        { status: 200 },
+        cors,
+      );
     }
 
-    // TODO when Twilio is live:
-    //   1. Look up customer + driver E.164 phones from profiles
-    //   2. Check phone_proxy_sessions for existing active session for this booking
-    //      → if exists and not expired, return it
-    //   3. Pull next available number from twilio_number_pool
-    //   4. Call Twilio Proxy: POST /v1/Services/<SID>/Sessions with 2 participants
-    //   5. Insert phone_proxy_sessions row
-    //   6. Mark twilio_number_pool.active_session_id
-    //   7. Log to api_spend_log (twilio_proxy service)
-    //   8. Return { proxy_number, session_id, expires_at }
+    const { data: profiles } = await admin
+      .from('profiles')
+      .select('id, phone')
+      .in('id', [booking.customer_id, booking.assigned_driver_profile_id]);
+    const customerPhone = profiles?.find((p) => p.id === booking.customer_id)?.phone;
+    const driverPhone = profiles?.find(
+      (p) => p.id === booking.assigned_driver_profile_id,
+    )?.phone;
+
+    if (!customerPhone || !/^\+[1-9]\d{6,14}$/.test(customerPhone)) {
+      return jsonResponse(
+        {
+          ok: false,
+          status: 'customer_phone_missing',
+          message:
+            "We don't have a verified phone for the customer. Add one in Profile → Phone to enable calls.",
+        },
+        { status: 200 },
+        cors,
+      );
+    }
+    if (!driverPhone || !/^\+[1-9]\d{6,14}$/.test(driverPhone)) {
+      return jsonResponse(
+        {
+          ok: false,
+          status: 'driver_phone_missing',
+          message:
+            "The driver hasn't verified a phone yet — they need to add one in Profile → Phone before calls work.",
+        },
+        { status: 200 },
+        cors,
+      );
+    }
+
+    // ─── Create or refresh the session ──────────────────────────────────────
+    // The unique constraint on booking_id means one session per booking.
+    // Re-calling this endpoint just extends the TTL.
+    const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 3600 * 1000).toISOString();
+    const { data: existing } = await admin
+      .from('phone_proxy_sessions')
+      .select('id, status, expires_at')
+      .eq('booking_id', booking_id)
+      .maybeSingle();
+
+    let sessionId: string;
+    if (existing) {
+      const { error } = await admin
+        .from('phone_proxy_sessions')
+        .update({
+          customer_phone_e164: customerPhone,
+          driver_phone_e164: driverPhone,
+          twilio_proxy_number: twilioNumber,
+          status: 'active',
+          expires_at: expiresAt,
+        })
+        .eq('id', existing.id);
+      if (error) throw error;
+      sessionId = existing.id;
+    } else {
+      const { data: created, error } = await admin
+        .from('phone_proxy_sessions')
+        .insert({
+          booking_id,
+          customer_profile_id: booking.customer_id,
+          driver_profile_id: booking.assigned_driver_profile_id,
+          customer_phone_e164: customerPhone,
+          driver_phone_e164: driverPhone,
+          twilio_proxy_number: twilioNumber,
+          status: 'active',
+          expires_at: expiresAt,
+        })
+        .select('id')
+        .single();
+      if (error) throw error;
+      sessionId = created.id;
+    }
 
     await audit({
       actorId: user.id,
       actorRole: user.role,
-      action: 'proxy.session_requested_stub',
+      action: 'proxy.session_active',
       entityType: 'booking',
       entityId: booking_id,
       ip: clientIp(req),
       ua: req.headers.get('user-agent') ?? undefined,
+      payload: { session_id: sessionId, proxy_number: twilioNumber },
     });
 
     return jsonResponse(
       {
-        ok: false,
-        status: 'twilio_not_configured',
-        message: 'Twilio integration is staged but not yet activated.',
+        ok: true,
+        proxy_number: twilioNumber,
+        session_id: sessionId,
+        expires_at: expiresAt,
+        message: 'Calling — your number stays private.',
       },
       { status: 200 },
       cors,

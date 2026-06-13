@@ -177,7 +177,7 @@ export default function MoverSafety() {
             label="Report an incident"
             onPress={() =>
               Linking.openURL(
-                'mailto:safety@movvy.ca?subject=Incident%20report',
+                'mailto:support@movvy.ca?subject=Incident%20report',
               ).catch(() => null)
             }
             border

@@ -180,7 +180,7 @@ export default function CompanyProfile() {
           label: 'Contact Movvy Support',
           onPress: () =>
             Linking.openURL(
-              `mailto:partners@movvy.ca?subject=Company%20support%20%E2%80%94%20${encodeURIComponent(
+              `mailto:partner@movvy.ca?subject=Company%20support%20%E2%80%94%20${encodeURIComponent(
                 companyName,
               )}`,
             ).catch(() => toast.error("Couldn't open mail.")),

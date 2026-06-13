@@ -138,6 +138,16 @@ export default function Profile() {
       onPress: () => router.push('/(customer)/bookings?tab=completed'),
     },
     {
+      // Dedicated PDF-receipts surface. Movvy doesn't email receipts; this
+      // screen lists every completed move with a one-tap "View / Save PDF"
+      // button. Accountants asked for real PDFs, not emails — this is where
+      // they live, always available, never bouncing in a spam folder.
+      icon: 'document-text-outline',
+      label: 'Receipts',
+      value: 'View PDFs',
+      onPress: () => router.push('/(customer)/receipts'),
+    },
+    {
       // Renamed from "Promo codes" — the sheet behind it calls
       // useApplyReferralCode, which is referral-only ("MOV1234" codes that
       // sit on another customer's profile row). Server promo codes like

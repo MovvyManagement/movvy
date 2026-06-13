@@ -32,6 +32,9 @@ export function Input({ label, hint, error, leftIcon, rightIcon, accessibilityLa
           placeholderTextColor={placeholderColor}
           accessibilityLabel={accessibilityLabel ?? label}
           className="flex-1 text-base text-ink-900 dark:text-mist-50"
+          // Left-aligned text, vertically centered via paddingVertical +
+          // the container's items-center. Standard text-field affordance —
+          // readers expect to start at the leading edge.
           style={{ paddingVertical: 14 }}
           {...rest}
         />

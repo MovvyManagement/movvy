@@ -7,6 +7,7 @@
 
 import Link from 'next/link';
 import { Logo } from './Logo';
+import { HiddenAdminTrigger } from './HiddenAdminTrigger';
 
 const columns = [
   {
@@ -69,7 +70,12 @@ export function Footer() {
         </div>
         <div className="mt-12 flex flex-col items-start justify-between gap-4 border-t border-silver-200 pt-6 md:flex-row md:items-center">
           <div className="flex items-center gap-2">
-            <Logo size={20} />
+            {/* Triple-click the Movvy logo → admin console login.
+                Invisible to anyone who doesn't already know it's there.
+                Cmd/Ctrl+Shift+M anywhere on the page does the same. */}
+            <HiddenAdminTrigger>
+              <Logo size={20} />
+            </HiddenAdminTrigger>
             <span className="text-sm font-semibold text-ink-900">Movvy Technologies Inc.</span>
           </div>
           <p className="text-xs text-silver-500">

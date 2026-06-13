@@ -29,6 +29,7 @@ import { Badge } from '@/components/Badge';
 import { EmptyState } from '@/components/EmptyState';
 import { CardSkeleton } from '@/components/Skeleton';
 import { BulkReassignSheet } from '@/components/BulkReassignSheet';
+import { AddDriverSheet } from '@/components/AddDriverSheet';
 import { useMyMembership, useCompanyDriverRoster } from '@/lib/data';
 import { supabaseConfigured } from '@/lib/supabase';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -51,6 +52,12 @@ export default function CompanyDrivers() {
     name: string;
   } | null>(null);
 
+  // Post-onboarding single-driver invite. The "+" button used to dump the
+  // dispatcher back into the onboarding wizard, which is wrong UX — they
+  // already onboarded. This sheet captures one driver and fires the invite
+  // email + SMS right away.
+  const [addDriverOpen, setAddDriverOpen] = useState(false);
+
   return (
     <SafeAreaView className="flex-1 bg-silver-50 dark:bg-night-900" edges={['top']}>
       <View className="bg-white dark:bg-night-100">
@@ -63,8 +70,10 @@ export default function CompanyDrivers() {
               <NotificationBell href="/(company)/notifications" />
               {isDispatcher ? (
                 <Pressable
-                  onPress={() => router.push('/(company)/onboarding/drivers')}
+                  onPress={() => setAddDriverOpen(true)}
                   className="h-10 w-10 rounded-full bg-brand-600 items-center justify-center active:opacity-90"
+                  accessibilityRole="button"
+                  accessibilityLabel="Invite a driver"
                 >
                   <Ionicons name="add" size={20} color="#fff" />
                 </Pressable>
@@ -96,7 +105,7 @@ export default function CompanyDrivers() {
           actionLabel={isDispatcher ? 'Invite drivers' : undefined}
           onAction={
             isDispatcher
-              ? () => router.push('/(company)/onboarding/drivers')
+              ? () => setAddDriverOpen(true)
               : undefined
           }
         />
@@ -211,6 +220,16 @@ export default function CompanyDrivers() {
           sourceDriverName={reassignTarget.name}
         />
       ) : null}
+
+      {/* Add-driver sheet — collects name + email (and optional phone),
+          fires partners-invite-send → branded HTML email + optional SMS
+          immediately. Driver gets the company code + app links and can
+          accept from any device. */}
+      <AddDriverSheet
+        visible={addDriverOpen}
+        companyId={companyId}
+        onClose={() => setAddDriverOpen(false)}
+      />
     </SafeAreaView>
   );
 }

@@ -128,7 +128,7 @@ export function buildAuditHtml(data: AuditExportData): string {
   <p class="muted" style="margin-top:24px">
     Issued at the request of the booking customer. Movvy retains these
     records for 1 year (see audit_logs retention). For longer-term records
-    or law-enforcement requests, contact <a href="mailto:legal@movvy.ca" style="color:#047857">legal@movvy.ca</a>.
+    or law-enforcement requests, contact <a href="mailto:management@movvy.ca" style="color:#047857">management@movvy.ca</a>.
   </p>
 </body>
 </html>`;
