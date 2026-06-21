@@ -6,7 +6,7 @@
 
 import { ImageResponse } from 'next/og';
 
-export const runtime = 'edge';
+// Node.js runtime — see opengraph-image.tsx for the why.
 export const size = { width: 180, height: 180 };
 export const contentType = 'image/png';
 
@@ -30,7 +30,10 @@ export default function AppleIcon() {
           <line x1="9" y1="64" x2="18" y2="64" stroke="white" strokeOpacity="0.45" strokeWidth="2.6" strokeLinecap="round" />
           <rect x="20" y="40" width="38" height="35" rx="3.5" fill="white" />
           <line x1="39" y1="40" x2="39" y2="75" stroke="#D1FAE5" strokeWidth="1.5" />
-          <text x="39.5" y="62" textAnchor="middle" fill="#047857" fontWeight="800" fontSize="9.5" fontFamily="sans-serif" letterSpacing="-0.3">Movvy</text>
+          {/* Inline "Movvy" wordmark — at 180×180 the text was barely
+              legible anyway, and Node-runtime Satori doesn't render
+              <text> nodes. iOS "Add to Home Screen" shows the app name
+              under the icon, so the brand is never missing. */}
           <path d="M58 50 L75 50 L80 60 L80 75 L58 75 Z" fill="white" />
           <path d="M62 53 L73 53 L76 60 L62 60 Z" fill="#A7F3D0" />
           <circle cx="78" cy="64" r="1.6" fill="#FBBF24" />

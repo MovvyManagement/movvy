@@ -10,7 +10,11 @@
 
 import { ImageResponse } from 'next/og';
 
-export const runtime = 'edge';
+// No `runtime = 'edge'` here on purpose. Next.js 14+ supports next/og on
+// the Node.js runtime, and as of Next.js 16 declaring edge runtime
+// blocks static generation for this route — which is the opposite of
+// what we want. We want this PNG to bake at build time and live in the
+// CDN forever, not regenerate per request.
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
@@ -48,9 +52,6 @@ export default function OG() {
               <rect width="100" height="100" rx="22" fill="#0E9F6E" />
               <rect x="20" y="40" width="38" height="35" rx="3.5" fill="white" />
               <line x1="39" y1="40" x2="39" y2="75" stroke="#D1FAE5" strokeWidth="1.5" />
-              <text x="39.5" y="62" textAnchor="middle" fill="#047857" fontWeight="800" fontSize="9.5" fontFamily="sans-serif">
-                Movvy
-              </text>
               <path d="M58 50 L75 50 L80 60 L80 75 L58 75 Z" fill="white" />
               <path d="M62 53 L73 53 L76 60 L62 60 Z" fill="#A7F3D0" />
               <circle cx="32" cy="78" r="6.2" fill="#1F2937" />
