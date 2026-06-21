@@ -12,6 +12,7 @@
 import Link from 'next/link';
 import { supabaseServer } from '@/lib/supabase/server';
 import { fmtRelative, fmtStatus } from '@/lib/format';
+import { RealtimeRefresh } from '../_components/RealtimeRefresh';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,12 +42,20 @@ export default async function ApprovalsPage() {
 
   return (
     <div className="px-8 py-8">
+      {/* Live: new applicants pop in the queue as they submit; approving
+          one in another tab removes it instantly here. Also watches
+          verification_documents so doc-upload progress can hint future UX. */}
+      <RealtimeRefresh
+        channel="admin-approvals"
+        tables={['partner_teams', 'companies', 'verification_documents']}
+      />
+
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-zinc-900">Approvals</h1>
         <p className="text-sm text-zinc-500 mt-1">
           {total > 0
-            ? `${total} applicant${total === 1 ? '' : 's'} awaiting review. Click any row to view their documents.`
-            : 'No applicants in the queue right now. Newly submitted teams and companies show up here.'}
+            ? `${total} applicant${total === 1 ? '' : 's'} awaiting review. Updates live as they submit.`
+            : 'No applicants in the queue right now. New applications show up here automatically.'}
         </p>
       </div>
 
