@@ -11,6 +11,7 @@ import { PriceBreakdownView } from '@/components/PriceBreakdown';
 import { useBookingStore } from '@/store/bookingStore';
 import { estimatePrice } from '@/lib/pricing';
 import { fmtCurrency } from '@/lib/format';
+import { COVERAGE_AMOUNT } from '@/lib/brand';
 
 export default function PricingStep() {
   const draft = useBookingStore((s) => s.draft);
@@ -25,22 +26,23 @@ export default function PricingStep() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}>
         <Text className="text-2xl font-bold text-ink-900 mt-2">Your estimate</Text>
         <Text className="mt-1 text-sm text-silver-500">
-          Billed at a flat $175/hr on total service time (travel + on-site).
+          Hourly billing on the actual time your crew is working — leaving
+          HQ through finishing the drop-off.
         </Text>
 
         <View className="mt-5 rounded-3xl bg-ink-900 p-6">
           <Text className="text-white/70 text-xs font-semibold uppercase tracking-wider">
-            Estimated total
+            Estimate
           </Text>
           <Text className="mt-1 text-white text-5xl font-bold">{fmtCurrency(price.totalCents / 100)}</Text>
           <Text className="mt-1 text-white/70 text-xs">
-            Flat $175/hr · GST included · Driver tip optional
+            {`${Math.round(price.hourlyRateCustomerCents / 100)}/hr · ${price.recommendedCrew}-person crew · GST included`}
           </Text>
 
           <View className="mt-4 flex-row items-center">
             <Ionicons name="shield-checkmark" size={16} color="#34D399" />
             <Text className="ml-2 text-white/80 text-xs">
-              Damage protection included up to $2,500
+              {`Damage protection included up to ${COVERAGE_AMOUNT}`}
             </Text>
           </View>
         </View>
@@ -71,8 +73,9 @@ export default function PricingStep() {
         <View className="mt-5 rounded-2xl bg-silver-50 p-4 flex-row">
           <Ionicons name="information-circle-outline" size={18} color="#71717A" />
           <Text className="ml-2 flex-1 text-xs text-silver-500 leading-5">
-            Your card is authorized but not charged until the move is completed. Final charge may
-            differ if your move runs longer or adds stops.
+            Final price is set at the end of the move based on actual hours
+            worked. If your crew finishes early you pay less; if it runs over,
+            the extra hours are added.
           </Text>
         </View>
       </ScrollView>

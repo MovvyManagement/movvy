@@ -1,17 +1,59 @@
+// =============================================================================
+// PriceBreakdownView — customer-facing rate-card breakdown.
+//
+// Matches the model spelled out in src/lib/pricing.ts:
+//   • Move time   = property hours × rate (matrix, bundles load + drive + unload)
+//   • Travel      = HQ → pickup hours × rate (drive to get to the customer)
+//   • Materials   = $50 flat
+//   • Fuel        = $50 base + $25/half-hour above 60 min total drive
+//   • GST         = 5%
+//   • Estimate    = ceil(subtotal + gst, $1)
+//
+// pickup → dropoff drive is NOT shown as a separate line — it's bundled
+// into the matrix "move time" + naturally captured by the actual timer.
+// Insurance / packing-as-extra-hours used to live here; both removed
+// from the model per founder direction.
+// =============================================================================
+
 import React from 'react';
 import { View, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fmtCurrency, fmtDuration } from '@/lib/format';
 import type { PriceBreakdown as PB } from '@/lib/pricing';
+import { COVERAGE_AMOUNT } from '@/lib/brand';
 
-function Row({ label, value, bold, sub, accent }: { label: string; value: string; bold?: boolean; sub?: string; accent?: boolean }) {
+function Row({
+  label,
+  value,
+  bold,
+  sub,
+  accent,
+}: {
+  label: string;
+  value: string;
+  bold?: boolean;
+  sub?: string;
+  accent?: boolean;
+}) {
   return (
     <View className="flex-row justify-between py-2">
       <View className="flex-1 pr-3">
-        <Text className={`${bold ? 'font-bold text-ink-900' : accent ? 'text-brand-700 font-semibold' : 'text-ink-700'} text-sm`}>{label}</Text>
+        <Text
+          className={`${
+            bold ? 'font-bold text-ink-900' : accent ? 'text-brand-700 font-semibold' : 'text-ink-700'
+          } text-sm`}
+        >
+          {label}
+        </Text>
         {sub ? <Text className="text-[11px] text-silver-400 mt-0.5">{sub}</Text> : null}
       </View>
-      <Text className={`${bold ? 'font-bold text-ink-900' : accent ? 'text-brand-700 font-semibold' : 'text-ink-700'} text-sm`}>{value}</Text>
+      <Text
+        className={`${
+          bold ? 'font-bold text-ink-900' : accent ? 'text-brand-700 font-semibold' : 'text-ink-700'
+        } text-sm`}
+      >
+        {value}
+      </Text>
     </View>
   );
 }
@@ -42,82 +84,48 @@ export function PriceBreakdownView({ price }: { price: PB }) {
           <Text className="text-xs text-silver-500">
             {price.trucksIncluded === 0
               ? 'Labor only · no truck'
-              : `${price.trucksIncluded} truck${price.trucksIncluded > 1 ? 's' : ''} included · travel + on-site at the same rate`}
+              : `${price.trucksIncluded} truck${price.trucksIncluded > 1 ? 's' : ''} included · billed for actual time on move day`}
           </Text>
         </View>
       </View>
 
-      <SectionHeader>Time</SectionHeader>
+      <SectionHeader>Estimate</SectionHeader>
       <Row
-        label="On-site work"
-        value={fmtDuration(price.propertyHours * 60)}
-        sub="Property-size estimate"
-      />
-      {price.packingHours > 0 ? <Row label="Packing service" value={fmtDuration(price.packingHours * 60)} /> : null}
-      {price.additionalHours > 0 ? <Row label="Additional items" value={fmtDuration(price.additionalHours * 60)} /> : null}
-      <Row
-        label="Travel time"
-        value={fmtDuration(price.travelHours * 60)}
-        sub={price.intraCity ? 'Intra-city · 1 hr flat' : `HQ → pickup → drop-off · ~${price.routeKm.toFixed(0)} km`}
-      />
-      <View className="h-px bg-silver-200 my-1" />
-      <Row
-        label="Total billable time"
-        value={fmtDuration(price.totalServiceHours * 60)}
-        sub={
-          price.minimumApplied
-            ? `4-hour minimum applied · billed at ${rateLabel(price.hourlyRateCustomerCents)}`
-            : `Billed at ${rateLabel(price.hourlyRateCustomerCents)}`
-        }
-        bold
-      />
-
-      <SectionHeader>Service</SectionHeader>
-      <Row
-        label="On-site cost"
+        label={`Move time · ${price.propertyHours}h × ${rateLabel(price.hourlyRateCustomerCents)}`}
         value={cents(price.serviceCostCents)}
-        sub={`${price.billableOnSiteHours.toFixed(1)} hr × ${rateLabel(price.hourlyRateCustomerCents)}${price.minimumApplied ? ' · padded to 4-hr minimum' : ''}`}
+        sub="Load, drive between addresses, and unload — typical for your property size"
       />
       <Row
-        label="Travel cost"
+        label={`Travel to your address · ${price.travelHours}h × ${rateLabel(price.hourlyRateCustomerCents)}`}
         value={cents(price.travelCostCents)}
-        sub={`${price.travelHours} hr × ${rateLabel(price.hourlyRateCustomerCents)}`}
+        sub="Time for the crew to get from HQ to your pickup"
       />
-
-      <SectionHeader>Materials & add-ons</SectionHeader>
       <Row
-        label="Packing materials"
+        label="Materials"
         value={cents(price.materialsCents)}
         sub="Flat rate · boxes, wrap, tape"
       />
-      {price.insuranceCents > 0 ? (
-        <Row label="Moving insurance" value={cents(price.insuranceCents)} sub="Up to $2,500 protection" />
-      ) : null}
+      <Row
+        label="Fuel"
+        value={cents(price.longHaulCustomerCents)}
+        sub="$50 base · +$25 per half-hour over 1 hr total drive"
+      />
 
       <SectionHeader>Tax</SectionHeader>
       <Row label="GST (5%)" value={cents(price.gstCents)} />
 
       <View className="h-px bg-silver-200 my-2" />
-      <Row label="Estimated total" value={cents(price.totalCents)} bold />
-      <Row
-        label="Deposit due today (20%)"
-        value={cents(price.depositCents)}
-        accent
-        sub="Non-refundable · subtracted from your final charge"
-      />
-      <Row
-        label="Balance after move"
-        value={cents(price.balanceDueOnCompletionCents)}
-        sub="Captured when the job is marked complete"
-      />
+      <Row label="Estimate" value={cents(price.totalCents)} bold />
 
-      {/* Estimate-may-change disclaimer */}
+      {/* Actual-time billing disclaimer */}
       <View className="mt-4 rounded-2xl bg-amber-50 border border-amber-100 p-3 flex-row">
         <Ionicons name="information-circle-outline" size={18} color="#B45309" />
         <Text className="ml-2 flex-1 text-[11px] text-amber-900 leading-5">
-          This is an <Text className="font-bold">estimate</Text>. The final charge can go up or down
-          depending on how long the move actually takes. Hours are billed at the same{' '}
-          {rateLabel(price.hourlyRateCustomerCents)} rate.
+          <Text className="font-bold">Estimate, not your final bill.</Text> Your crew
+          starts a timer the moment they leave HQ and stops it the moment they
+          finish your drop-off. You pay for the actual time at the same{' '}
+          {rateLabel(price.hourlyRateCustomerCents)} rate — finish early, you
+          pay less. {COVERAGE_AMOUNT} damage protection included.
         </Text>
       </View>
     </View>

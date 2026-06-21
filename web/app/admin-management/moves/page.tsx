@@ -50,8 +50,12 @@ export default async function MovesPage({ searchParams }: PageProps) {
     .slice(0, 10);
 
   // Build the active-tab query; the other two tabs share the same SELECT.
+  // We pull BOTH the estimate columns (price_total_cents, movvy_margin_cents)
+  // AND the actual_* columns. For upcoming / in-progress bookings the
+  // actual_* fields are null and we render the estimate. For completed
+  // bookings we render estimate vs actual side-by-side.
   const baseSelect =
-    'id, short_code, status, pickup_city, pickup_line1, dropoff_city, dropoff_line1, scheduled_for_date, scheduled_for_window, price_total_cents, movvy_margin_cents, created_at, distance_km, duration_min, customer_id, assigned_team_id, assigned_company_id';
+    'id, short_code, status, pickup_city, pickup_line1, dropoff_city, dropoff_line1, scheduled_for_date, scheduled_for_window, price_total_cents, movvy_margin_cents, created_at, distance_km, duration_min, customer_id, assigned_team_id, assigned_company_id, actual_total_cents, actual_driver_payout_cents, actual_commission_cents, actual_hours';
 
   let query = supabase.from('bookings').select(baseSelect);
   if (activeTab === 'active') {
@@ -186,14 +190,7 @@ export default async function MovesPage({ searchParams }: PageProps) {
                       <StatusBadge status={b.status} />
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-sm font-bold text-zinc-900">
-                      {fmtCents(b.price_total_cents)}
-                    </div>
-                    <div className="text-xs text-emerald-700 font-semibold">
-                      +{fmtCents(b.movvy_margin_cents)} to Movvy
-                    </div>
-                  </div>
+                  <PriceBlock booking={b} />
                 </div>
 
                 <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-zinc-100">
@@ -236,6 +233,83 @@ export default async function MovesPage({ searchParams }: PageProps) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// Money block on each booking card.
+//   • Upcoming / in-progress → show the estimate only.
+//   • Completed              → show estimate + actual stacked, with a
+//                              delta chip (green = under, amber = over).
+//   • Cancelled              → show the estimate but dim it.
+function PriceBlock({ booking }: { booking: any }) {
+  const isCompleted = booking.status === 'completed';
+  const hasActual =
+    booking.actual_total_cents != null && booking.actual_total_cents !== 0;
+
+  if (isCompleted && hasActual) {
+    const estimate = booking.price_total_cents ?? 0;
+    const actual = booking.actual_total_cents ?? 0;
+    const delta = actual - estimate;
+    const deltaPct = estimate > 0 ? Math.round((delta / estimate) * 100) : 0;
+    const movvyTake = booking.actual_commission_cents ?? 0;
+    return (
+      <div className="text-right min-w-[180px]">
+        <div className="text-xs uppercase tracking-wider font-semibold text-zinc-500">
+          Estimate
+        </div>
+        <div className="text-sm text-zinc-500 line-through">
+          {fmtCents(estimate)}
+        </div>
+        <div className="mt-2 text-xs uppercase tracking-wider font-semibold text-zinc-500">
+          Actual billed
+        </div>
+        <div className="text-base font-bold text-zinc-900">
+          {fmtCents(actual)}
+        </div>
+        <div className="flex items-center justify-end gap-2 mt-1">
+          <span
+            className={`px-1.5 py-0.5 rounded-md text-xs font-bold ${
+              delta < 0
+                ? 'bg-emerald-100 text-emerald-700'
+                : delta > 0
+                ? 'bg-amber-100 text-amber-700'
+                : 'bg-zinc-100 text-zinc-600'
+            }`}
+          >
+            {delta === 0 ? 'exact' : `${delta > 0 ? '+' : ''}${deltaPct}%`}
+          </span>
+          <span className="text-xs text-zinc-500">
+            · {booking.actual_hours ?? '—'}h
+          </span>
+        </div>
+        <div className="text-xs text-emerald-700 font-semibold mt-1">
+          +{fmtCents(movvyTake)} to Movvy
+        </div>
+      </div>
+    );
+  }
+
+  // Upcoming / in-progress / cancelled — estimate-only view.
+  const dim = booking.status === 'cancelled';
+  return (
+    <div className="text-right min-w-[140px]">
+      <div className="text-xs uppercase tracking-wider font-semibold text-zinc-500">
+        Estimate
+      </div>
+      <div
+        className={`text-sm font-bold ${dim ? 'text-zinc-400 line-through' : 'text-zinc-900'}`}
+      >
+        {fmtCents(booking.price_total_cents)}
+      </div>
+      <div
+        className={`text-xs font-semibold ${dim ? 'text-zinc-400' : 'text-emerald-700'}`}
+      >
+        +{fmtCents(booking.movvy_margin_cents)} to Movvy
+      </div>
+      <div className="text-[10px] text-zinc-400 mt-1">
+        billed on actual time
+      </div>
     </div>
   );
 }
