@@ -29,6 +29,68 @@ import {
 import { corsHeaders } from '../_shared/cors.ts';
 import { computeServerPricing } from '../_shared/pricing.ts';
 
+// ─── Distance / duration helpers ──────────────────────────────────────────
+// Copied from src/lib/distance.ts (haversineKm + roadKm). Edge functions
+// can't import client code, so we mirror the math here. Off by < 5% from
+// Google Routes API for inner-city moves, ~10% for inter-city — close
+// enough for the job-details summary the mover sees on the accept screen.
+function haversineKm(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const R = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/**
+ * Best-effort pickup → dropoff driving distance + duration. Used to
+ * populate bookings.distance_km / duration_min at insert time so the
+ * mover's job-details screen shows real numbers instead of "0 km · 0 min".
+ *
+ * We pick the urban vs highway speed band off the straight-line distance:
+ *   ≤ 30 km → 40 km/h (city stop-and-go) + 5 min handling buffer
+ *   > 30 km → 80 km/h (Hwy 2, QE2, etc.) + 5 min on-ramp / merge buffer
+ *
+ * Skipped (returns null) when either endpoint lacks coords — labor-only
+ * jobs without a dropoff fall in this bucket and that's the right answer
+ * (distance/duration aren't meaningful when there's only one location).
+ */
+function estimateBookingRoute(
+  pickup: { lat: number | null; lng: number | null } | null | undefined,
+  dropoff: { lat: number | null; lng: number | null } | null | undefined,
+): { distance_km: number; duration_min: number } | null {
+  if (
+    !pickup ||
+    !dropoff ||
+    pickup.lat == null ||
+    pickup.lng == null ||
+    dropoff.lat == null ||
+    dropoff.lng == null
+  ) {
+    return null;
+  }
+  const straight = haversineKm(
+    { lat: pickup.lat, lng: pickup.lng },
+    { lat: dropoff.lat, lng: dropoff.lng },
+  );
+  // road factor — straight-line × 1.3 is the standard urban grid correction
+  const roadKm = straight * 1.3;
+  const speedKph = roadKm <= 30 ? 40 : 80;
+  const driveMin = Math.round((roadKm / speedKph) * 60) + 5;
+  return {
+    distance_km: Math.round(roadKm * 10) / 10, // 1 decimal
+    duration_min: driveMin,
+  };
+}
+
 // Mirror of src/lib/validation/schemas.ts BookingCreateInput.
 // Edge functions can't import from the app, so we copy + keep in sync.
 // (Future: extract to a shared npm package or codegen.)
@@ -224,12 +286,26 @@ serve(async (req) => {
     // 7) Insert through user-scoped client so RLS still applies.
     // RLS ensures customer_id === auth.uid().
     const supabase = userClient(req.headers.get('Authorization'));
+
+    // Real pickup→dropoff distance + duration so the mover's job-details
+    // summary doesn't render "0 km · 0 min" when the row reaches them.
+    // Returns null for labor-only (no dropoff); the column stays null
+    // and the UI displays the same "0 km" placeholder it always did.
+    const route = estimateBookingRoute(
+      { lat: input.pickup.lat, lng: input.pickup.lng },
+      input.dropoff
+        ? { lat: input.dropoff.lat, lng: input.dropoff.lng }
+        : null,
+    );
+
     const { data: booking, error: insertErr } = await supabase
       .from('bookings')
       .insert({
         customer_id: user.id,
         city_id: city.id,
         move_type: input.details.moveType,
+        distance_km: route?.distance_km ?? null,
+        duration_min: route?.duration_min ?? null,
         // TODO Phase 3: insert as 'draft', flip to 'pending' on deposit capture,
         // then to 'searching' on payment success. Until Stripe is wired we
         // insert directly as 'searching' so partners can see the job.
@@ -266,6 +342,10 @@ serve(async (req) => {
         price_tax_cents: pricing.gstCents,
         price_total_cents: totalCentsFinal,
         price_commission_cents: pricing.movvyTotalMarginCents,
+        // Fuel surcharge captured at booking time. Needed at completion
+        // (bookings-update-status → computeActualBill) so the actual bill
+        // can re-add it without knowing the route.
+        fuel_cents: pricing.longHaulCustomerCents,
         pricing_breakdown: { ...pricing, discount_cents: discountCents, promo_id: promoId } as any,
         promo_code_id: promoId,
 

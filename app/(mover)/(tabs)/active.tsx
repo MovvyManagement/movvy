@@ -18,6 +18,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { RatingStars } from '@/components/RatingStars';
 import { ChatSheet } from '@/components/ChatSheet';
+import { BillingTimer } from '@/components/BillingTimer';
 import { useRef, useEffect } from 'react';
 import { openInMaps } from '@/lib/maps';
 import { supabaseConfigured } from '@/lib/supabase';
@@ -48,14 +49,22 @@ interface Flag {
   currentMessage: string;
 }
 
+// Three big buttons drive the day. Customer is billed for the elapsed
+// time between "We've left HQ" and "Finish Move":
+//   • "We've left HQ" (status → on_the_way) starts the billing timer
+//   • "Arrived at pickup" / "Loaded" / etc. are status updates only —
+//     they advance the customer's notification copy but don't touch
+//     the meter.
+//   • "Finish Move" (status → completed) stops the timer + computes
+//     the actual bill server-side via computeActualBill().
 const FLAGS: Flag[] = [
   {
     key: 'left_hq',
-    label: "I've left HQ",
-    icon: 'car-sport-outline',
+    label: "We've left HQ",
+    icon: 'play-circle-outline',
     fromStatus: ['assigned', 'confirmed'],
     toStatus: 'on_the_way',
-    currentMessage: 'On the way to pickup',
+    currentMessage: 'On the way to pickup · billing live',
   },
   {
     key: 'arrived_pickup',
@@ -63,7 +72,7 @@ const FLAGS: Flag[] = [
     icon: 'flag-outline',
     fromStatus: ['on_the_way'],
     toStatus: 'arrived',
-    currentMessage: 'Arrived at pickup · loading',
+    currentMessage: 'At pickup · loading',
   },
   {
     key: 'left_pickup',
@@ -83,7 +92,7 @@ const FLAGS: Flag[] = [
   },
   {
     key: 'completed',
-    label: 'Job done',
+    label: 'Finish Move',
     icon: 'checkmark-done-outline',
     fromStatus: ['unloading'],
     toStatus: 'completed',
@@ -291,6 +300,20 @@ export default function MoverActive() {
             headedTo === 'dropoff' ? `Headed to drop-off: ${booking.dropoff.line1}` :
             (next?.currentMessage ?? 'Job complete')
           }
+        />
+
+        {/* Billing timer — only relevant for the actual crew (not the
+            company dispatcher viewing remotely). Shows the running clock
+            once Begin Move is pressed, the final number once Finish Move
+            is pressed, and a "Press Begin Move to start" empty state
+            before the move kicks off. */}
+        <BillingTimer
+          startedAt={(liveJob as any)?.started_at ?? null}
+          completedAt={(liveJob as any)?.completed_at ?? null}
+          hourlyRateCustomerCents={(liveJob as any)?.hourly_rate_customer_cents ?? null}
+          actualTotalCents={(liveJob as any)?.actual_total_cents ?? null}
+          actualDriverPayoutCents={(liveJob as any)?.actual_driver_payout_cents ?? null}
+          showDriverPayout
         />
 
         {/* In-app turn-by-turn navigation. Replaces the previous "Open in

@@ -28,6 +28,7 @@ import { Avatar } from '@/components/Avatar';
 import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { LiveMap } from '@/components/LiveMap';
+import { BillingTimer } from '@/components/BillingTimer';
 import { MovvyMark } from '@/components/MovvyMark';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
 import { StepProgressBar } from '@/components/StepProgressBar';
@@ -169,6 +170,41 @@ export default function LiveMove() {
   // Chat sheet — slide-up modal that replaces the deleted /chat/[id] route
   const [showChat, setShowChat] = useState(false);
 
+  // Customer-service entry — route into the support hub (same screen the
+  // Profile → Customer Service row opens). The hub bundles "Message Movvy
+  // support" (live chat), Trigger SOS, insurance claim, dispute, audit
+  // export, and emergency contact — so every safety/support path is one
+  // tap from the live tracker. Headset icon in the header AND "Report an
+  // issue" button both come here.
+  const openSupportHub = () => router.push('/(customer)/support');
+
+  // Cancel-booking flow — Alert confirm → useCancelBooking → toast + tab back.
+  const cancelMutation = useCancelBooking();
+  const onCancelBooking = () => {
+    if (!booking) return;
+    Alert.alert(
+      'Cancel this move?',
+      'Your crew has held this slot. Cancellations inside 48 hours of your move incur a small fee that goes to the crew. Continue?',
+      [
+        { text: 'Keep my move', style: 'cancel' },
+        {
+          text: 'Cancel move',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await cancelMutation.mutateAsync({ booking_id: booking.id });
+              haptic.success();
+              toast.success('Move cancelled.');
+              router.replace('/(customer)/home');
+            } catch (e: any) {
+              toast.error(e?.message ?? "Couldn't cancel — try again or contact support.");
+            }
+          },
+        },
+      ],
+    );
+  };
+
   // ── Phone proxy (Uber-style masked call) ───────────────────────────────────
   // Routes through proxy-session-create → the native dialer hits a Movvy
   // number that bridges to the driver. Neither side ever sees the other's
@@ -223,7 +259,7 @@ export default function LiveMove() {
       setReviewTarget({
         id: booking.id,
         totalDollars: booking.totalDollars,
-        moverName: crewName ?? 'Your crew',
+        moverName: crewName ?? 'Movvy Crew',
       });
       setShowReview(true);
     }
@@ -262,7 +298,7 @@ export default function LiveMove() {
           visible={showReview && !!reviewTarget}
           bookingId={reviewTarget?.id ?? ''}
           bookingTotalDollars={reviewTarget?.totalDollars ?? 0}
-          moverName={reviewTarget?.moverName ?? 'Your crew'}
+          moverName={reviewTarget?.moverName ?? 'Movvy Crew'}
           onClose={() => setShowReview(false)}
         />
       </SafeAreaView>
@@ -279,25 +315,21 @@ export default function LiveMove() {
           showBack={false}
           right={
             <View className="flex-row items-center gap-2">
-              {/* Mid-move SOS shortcut — opens the hold-to-confirm panic
-                  button. Kept in the header (not as a floating button) so
-                  it's never obscured by the keyboard / bottom sheets. */}
+              {/* Customer-service shortcut — opens the support chat directly.
+                  Replaces the SOS button per design: SOS still lives at
+                  /(customer)/support/sos for emergencies, but the more common
+                  in-flight need is "I want to talk to Movvy" which is now
+                  one tap from the live-move header. */}
               {!isCompleted ? (
                 <Pressable
-                  onPress={() => router.push('/(customer)/support/sos')}
+                  onPress={openSupportHub}
                   hitSlop={6}
                   accessibilityRole="button"
-                  accessibilityLabel="Trigger SOS"
-                  accessibilityHint="Alerts Movvy support and your emergency contact"
-                  className="h-9 px-3 rounded-full bg-danger flex-row items-center active:opacity-90"
+                  accessibilityLabel="Customer service"
+                  accessibilityHint="Opens the Movvy support hub"
+                  className="h-9 w-9 rounded-full bg-ink-900 items-center justify-center active:opacity-90"
                 >
-                  <Ionicons name="warning" size={14} color="#fff" />
-                  <Text
-                    className="ml-1 text-[11px] font-bold uppercase tracking-wider text-white"
-                    maxFontSizeMultiplier={1.2}
-                  >
-                    SOS
-                  </Text>
+                  <Ionicons name="headset" size={16} color="#fff" />
                 </Pressable>
               ) : null}
               <MovvyMark size="sm" />
@@ -342,6 +374,17 @@ export default function LiveMove() {
           }
         />
 
+        {/* Billing timer — running clock + dollar amount while the crew
+            is on site, final actual_total_cents once they press Finish
+            Move. Customer view, so showDriverPayout=false (they see the
+            customer-side total, not the driver's 80% take). */}
+        <BillingTimer
+          startedAt={(booking as any).started_at ?? null}
+          completedAt={(booking as any).completed_at ?? null}
+          hourlyRateCustomerCents={(booking as any).hourly_rate_customer_cents ?? null}
+          actualTotalCents={(booking as any).actual_total_cents ?? null}
+        />
+
         {/* Live ETA pulse banner */}
         {!isCompleted && dest && eta != null ? (
           <RNAnimated.View
@@ -377,7 +420,7 @@ export default function LiveMove() {
             <View className="ml-3 flex-1">
               <View className="flex-row items-center">
                 <Text className="text-base font-bold text-ink-900" numberOfLines={1}>
-                  {crewName ?? 'Your crew'}
+                  {crewName ?? 'Movvy Crew'}
                 </Text>
                 {/* Only badge a genuinely verified partner (mock is always
                     "verified" in dev so the UI still demos with a badge). */}
@@ -487,11 +530,25 @@ export default function LiveMove() {
           </View>
         </Card>
 
-        {/* Bottom actions */}
+        {/* Bottom actions — Report an issue routes through the same
+            support-chat thread the headset icon opens, so the customer
+            doesn't have to learn two different paths to reach Movvy.
+            Cancel opens the destructive confirm + cancellation flow. */}
         {!isCompleted ? (
           <View className="mt-4 gap-2">
-            <Button label="Report an issue" variant="secondary" fullWidth />
-            <Button label="Cancel move" variant="ghost" fullWidth />
+            <Button
+              label="Report an Issue"
+              variant="secondary"
+              fullWidth
+              onPress={openSupportHub}
+            />
+            <Button
+              label="Cancel"
+              variant="ghost"
+              fullWidth
+              onPress={onCancelBooking}
+              loading={cancelMutation.isPending}
+            />
           </View>
         ) : null}
       </ScrollView>
@@ -531,7 +588,7 @@ export default function LiveMove() {
         visible={showReview}
         bookingId={booking.id}
         bookingTotalDollars={booking.totalDollars}
-        moverName={moverName ?? 'Your crew'}
+        moverName={moverName ?? 'Movvy Crew'}
         onClose={() => setShowReview(false)}
       />
 
@@ -539,9 +596,10 @@ export default function LiveMove() {
       <ChatSheet
         visible={showChat}
         bookingId={booking.id}
-        peerName={moverName ?? 'Your crew'}
+        peerName={moverName ?? 'Movvy Crew'}
         onClose={() => setShowChat(false)}
       />
+
     </SafeAreaView>
   );
 }

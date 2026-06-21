@@ -26,13 +26,13 @@ export const COVERAGE_SHORT = `${COVERAGE_AMOUNT} coverage`;
  *  "you'll earn $X" figure from this so the number can never drift between
  *  screens. The authoritative post-move payout is still driver_payouts.net_cents;
  *  this rate only powers the pre-acceptance ESTIMATE. */
-export const PARTNER_COMMISSION_RATE = 0.17;
+export const PARTNER_COMMISSION_RATE = 0.20;
 /** Partner's keep rate — the complement of the commission. */
-export const PARTNER_SHARE_RATE = 1 - PARTNER_COMMISSION_RATE; // 0.83
+export const PARTNER_SHARE_RATE = 1 - PARTNER_COMMISSION_RATE; // 0.80
 
 /** Movvy commission rate as displayed to partners. Keep the copy in sync with
  *  PARTNER_COMMISSION_RATE above if the rate ever changes. */
-export const COMMISSION_RATE_LABEL = "Movvy keeps 17% · you keep 83%";
+export const COMMISSION_RATE_LABEL = "Movvy keeps 20% · you keep 80%";
 
 // =============================================================================
 // LEGAL / TERMS

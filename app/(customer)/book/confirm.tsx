@@ -387,33 +387,39 @@ export default function ConfirmStep() {
             value={fmtCurrency(price.serviceCostCents / 100)}
           />
           <PriceLine
-            label={`Travel time · ${price.travelHours}h × $${(price.hourlyRateCustomerCents / 100).toFixed(0)}/hr`}
+            label={`Travel to your address · ${price.travelHours}h × $${(price.hourlyRateCustomerCents / 100).toFixed(0)}/hr`}
             value={fmtCurrency(price.travelCostCents / 100)}
           />
           <PriceLine
             label="Materials (boxes, wrap, tape)"
             value={fmtCurrency(price.materialsCents / 100)}
           />
-          {price.longHaulCustomerCents > 0 ? (
-            <PriceLine
-              label={`Long-haul fuel · ${price.routeKm} km one-way`}
-              value={fmtCurrency(price.longHaulCustomerCents / 100)}
-            />
-          ) : null}
+          {/* Fuel — every move has a $50 base, longer drives add $25 per
+              half-hour over the first hour. Always shown so customers
+              never get a surprise fuel charge on the actual bill. */}
+          <PriceLine
+            label="Fuel"
+            value={fmtCurrency(price.longHaulCustomerCents / 100)}
+          />
           <PriceLine label="GST (5%)" value={fmtCurrency(price.gstCents / 100)} />
           <View className="h-px bg-silver-200 my-2" />
           <PriceLine
-            label="Estimated total"
+            label="Estimate"
             value={fmtCurrency(price.totalCents / 100)}
             bold
           />
-          {/* Hourly · subject-to-change callout */}
+          {/* Actual-time billing callout — this is the ESTIMATE, not the
+              final bill. The crew starts a timer the moment they arrive at
+              pickup (Begin Move) and stops it when they're done (Finish
+              Move). Customer is billed for actual elapsed time × rate. */}
           <View className="mt-3 rounded-xl bg-amber-50 border border-amber-100 p-3 flex-row items-start">
             <Ionicons name="time-outline" size={14} color="#92400E" />
             <Text className="ml-2 flex-1 text-[11px] text-amber-800 leading-4">
-              <Text className="font-bold">Hourly · subject to change.</Text> The crew
-              bills for actual time on site. If they finish early you pay less; if
-              the job runs over, the extra hours are added to the final invoice.
+              <Text className="font-bold">Estimate, not the final bill.</Text> Your
+              crew presses <Text className="font-bold">Begin Move</Text> when
+              they arrive at your pickup, and <Text className="font-bold">Finish Move</Text> when
+              the job's done. You pay for the actual time recorded — finish
+              early, you pay less. Runs over, you pay more.
             </Text>
           </View>
         </Card>
