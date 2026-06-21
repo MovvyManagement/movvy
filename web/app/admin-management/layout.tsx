@@ -17,6 +17,7 @@ import { redirect } from 'next/navigation';
 import { supabaseServer } from '@/lib/supabase/server';
 import { logout } from './login/actions';
 import { LoginGate } from './_components/LoginGate';
+import { AdminLiveCenter } from './_components/AdminLiveCenter';
 
 export default async function AdminLayout({
   children,
@@ -92,6 +93,11 @@ export default async function AdminLayout({
       <main className="flex-1 overflow-y-auto">
         {children}
       </main>
+
+      {/* Live updates + toasts + sound + reconnect handling. Mounted
+          once globally — every admin page picks up real-time data,
+          context-aware notifications, and offline resync for free. */}
+      <AdminLiveCenter />
     </div>
   );
 }

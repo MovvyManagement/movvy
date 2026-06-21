@@ -14,7 +14,6 @@
 import Link from 'next/link';
 import { supabaseServer } from '@/lib/supabase/server';
 import { fmtCents, fmtDate, fmtStatus, fmtRelative } from '@/lib/format';
-import { RealtimeRefresh } from '../_components/RealtimeRefresh';
 
 const ACTIVE_STATUSES = [
   'assigned',
@@ -129,14 +128,6 @@ export default async function MovesPage({ searchParams }: PageProps) {
 
   return (
     <div className="px-8 py-8">
-      {/* Live: every booking create/update/delete triggers a refresh.
-          Includes status transitions on move day so the Active tab
-          ticks through pending → assigned → in_transit in real time. */}
-      <RealtimeRefresh
-        channel="admin-moves"
-        tables={['bookings']}
-      />
-
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-zinc-900">Moves</h1>
         <p className="text-sm text-zinc-500 mt-1">

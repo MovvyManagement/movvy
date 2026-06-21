@@ -18,7 +18,6 @@
 import Link from 'next/link';
 import { supabaseServer } from '@/lib/supabase/server';
 import { fmtCents, fmtRelative, fmtStatus } from '@/lib/format';
-import { RealtimeRefresh } from '../_components/RealtimeRefresh';
 
 // In-progress statuses (booking_status enum). Mirrors the mover-app's
 // ACTIVE_STATUSES set so the count matches what drivers see.
@@ -115,20 +114,6 @@ export default async function DashboardPage() {
 
   return (
     <div className="px-8 py-8">
-      {/* Subscribes to every table the dashboard reads. Any insert/update
-          on any of these triggers a server re-render in the background —
-          no full page reload, no manual refresh. */}
-      <RealtimeRefresh
-        channel="admin-dashboard"
-        tables={[
-          'bookings',
-          'chat_threads',
-          'disputes',
-          'partner_teams',
-          'companies',
-        ]}
-      />
-
       <div className="flex items-end justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-zinc-900">Dashboard</h1>

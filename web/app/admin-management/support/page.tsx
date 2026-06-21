@@ -14,7 +14,6 @@
 import Link from 'next/link';
 import { supabaseServer } from '@/lib/supabase/server';
 import { fmtRelative } from '@/lib/format';
-import { RealtimeRefresh } from '../_components/RealtimeRefresh';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,15 +53,6 @@ export default async function SupportInboxPage() {
 
   return (
     <div className="px-8 py-8">
-      {/* Live: a new customer message pushes the thread to the top + flips
-          its "Waiting" badge instantly. Subscribes to BOTH chat_threads
-          (new threads, last_message_at bumps) AND chat_messages (new
-          customer replies update the waiting state). */}
-      <RealtimeRefresh
-        channel="admin-support-inbox"
-        tables={['chat_threads', 'chat_messages']}
-      />
-
       <div className="mb-8 flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-bold text-zinc-900">Support inbox</h1>
