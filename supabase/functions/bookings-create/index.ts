@@ -28,6 +28,15 @@ import {
 } from '../_shared/security.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { computeServerPricing } from '../_shared/pricing.ts';
+import { sendBrandedEmail } from '../_shared/email.ts';
+import { bookingConfirmed } from '../_shared/emails/index.ts';
+import {
+  fmtAddress,
+  fmtDateTime,
+  fmtMoney,
+  fmtTimeWindow,
+  startHourFromWindow,
+} from '../_shared/format.ts';
 
 // ─── Distance / duration helpers ──────────────────────────────────────────
 // Copied from src/lib/distance.ts (haversineKm + roadKm). Edge functions
@@ -468,6 +477,37 @@ serve(async (req) => {
       }
     } catch (broadcastErr) {
       console.warn('[bookings-create] partner broadcast failed (non-fatal)', broadcastErr);
+    }
+
+    // 10) Branded booking-confirmed email. Fire-and-forget — never blocks
+    //     the response. Resend hiccups don't kill the booking flow.
+    try {
+      const { data: profile } = await admin
+        .from('profiles')
+        .select('email, full_name')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (profile?.email) {
+        const startHour = startHourFromWindow(input.schedule.window);
+        sendBrandedEmail({
+          to: profile.email,
+          template: bookingConfirmed({
+            fullName: profile.full_name,
+            shortCode: booking.short_code,
+            pickupAddress: fmtAddress(input.pickup.line1, input.pickup.city),
+            dropoffAddress: input.dropoff
+              ? fmtAddress(input.dropoff.line1, input.dropoff.city)
+              : 'In-home / labor only',
+            scheduledStart: fmtDateTime(input.schedule.date, startHour),
+            scheduledWindow: fmtTimeWindow(input.schedule.window),
+            crewSize: pricing.recommendedCrew ?? 2,
+            estimatedTotalDollars: fmtMoney(totalCentsFinal),
+            bookingUrl: `https://movvy.ca/app/bookings/${booking.id}`,
+          }),
+        }).catch((e) => console.warn('[bookings-create] email send failed', e));
+      }
+    } catch (emailErr) {
+      console.warn('[bookings-create] email setup failed (non-fatal)', emailErr);
     }
 
     return jsonResponse(

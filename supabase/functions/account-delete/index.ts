@@ -14,6 +14,9 @@ import {
 } from '../_shared/security.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { handle } from '../_shared/serve.ts';
+import { sendBrandedEmail } from '../_shared/email.ts';
+import { accountDeleted } from '../_shared/emails/index.ts';
+import { fmtDatePlusDays } from '../_shared/format.ts';
 
 const Body = z.object({
   reason: z.string().max(500).optional(),
@@ -41,12 +44,16 @@ handle(async (req) => {
     const admin = adminClient();
 
     // Confirm the typed email/phone matches the account — friction so a stray
-    // tap doesn't nuke an account.
+    // tap doesn't nuke an account. We pull full_name too because the deletion-
+    // confirmation email we send below fires AFTER PII is stripped, so we
+    // need to capture it now.
     const { data: profile } = await admin
       .from('profiles')
-      .select('email, phone')
+      .select('email, phone, full_name')
       .eq('id', user.id)
       .single();
+    const emailBeforeDelete = profile?.email ?? null;
+    const fullNameBeforeDelete = profile?.full_name ?? null;
 
     const typed = confirm_email_or_phone.trim().toLowerCase();
     const emailMatch = profile?.email && typed === String(profile.email).toLowerCase();
@@ -87,6 +94,19 @@ handle(async (req) => {
       ip: clientIp(req), ua: req.headers.get('user-agent') ?? undefined,
       payload: { reason },
     });
+
+    // PIPEDA-compliant deletion confirmation. We pre-captured email +
+    // full_name above so the RPC's PII strip doesn't leave us without an
+    // address to send to.
+    if (emailBeforeDelete) {
+      sendBrandedEmail({
+        to: emailBeforeDelete,
+        template: accountDeleted({
+          fullName: fullNameBeforeDelete,
+          hardDeleteOn: fmtDatePlusDays(30),
+        }),
+      }).catch((e) => console.warn('[account-delete] email send failed', e));
+    }
 
     return jsonResponse({ ok: true }, { status: 200 }, cors);
   } catch (e) {

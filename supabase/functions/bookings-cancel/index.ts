@@ -14,6 +14,9 @@ import {
 } from '../_shared/security.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { handle } from '../_shared/serve.ts';
+import { sendBrandedEmail } from '../_shared/email.ts';
+import { bookingCancelled } from '../_shared/emails/index.ts';
+import { fmtDateShort, fmtMoney } from '../_shared/format.ts';
 
 const Body = z.object({
   booking_id: z.string().uuid(),
@@ -51,7 +54,7 @@ handle(async (req) => {
     // Load the booking — admin client bypasses RLS so we can read for ownership check
     const { data: booking, error: loadErr } = await admin
       .from('bookings')
-      .select('id, customer_id, status, scheduled_for_window_starts_at, scheduled_for_date, price_total_cents, assigned_team_id, assigned_company_id')
+      .select('id, short_code, customer_id, status, scheduled_for_window_starts_at, scheduled_for_date, price_total_cents, assigned_team_id, assigned_company_id')
       .eq('id', booking_id)
       .single();
 
@@ -101,6 +104,32 @@ handle(async (req) => {
 
     // Stripe refund is issued in a later phase — for now we just record the eligible amount.
     // TODO: enqueue refund job once Stripe Connect is wired in Phase 3.
+
+    // Branded cancellation email — fire-and-forget so a Resend hiccup
+    // never blocks the cancel response.
+    try {
+      const { data: customer } = await admin
+        .from('profiles')
+        .select('email, full_name')
+        .eq('id', booking.customer_id)
+        .maybeSingle();
+      if (customer?.email) {
+        sendBrandedEmail({
+          to: customer.email,
+          template: bookingCancelled({
+            fullName: customer.full_name,
+            shortCode: (booking as any).short_code ?? booking.id.slice(0, 8).toUpperCase(),
+            scheduledStart: fmtDateShort(booking.scheduled_for_date),
+            cancelledBy: isAdmin ? 'movvy' : 'customer',
+            reason,
+            refundedAmount: fmtMoney(refundCents),
+            rebookUrl: 'https://movvy.ca/app/book',
+          }),
+        }).catch((e) => console.warn('[bookings-cancel] email send failed', e));
+      }
+    } catch (emailErr) {
+      console.warn('[bookings-cancel] email setup failed (non-fatal)', emailErr);
+    }
 
     return jsonResponse(
       { ok: true, refund_percent: refundPct, refund_cents: refundCents },

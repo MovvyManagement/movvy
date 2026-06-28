@@ -28,6 +28,9 @@ import {
 import { corsHeaders } from '../_shared/cors.ts';
 import { handle } from '../_shared/serve.ts';
 import { computeActualBill } from '../_shared/pricing.ts';
+import { sendBrandedEmail } from '../_shared/email.ts';
+import { moveComplete } from '../_shared/emails/index.ts';
+import { fmtHours, fmtMoney } from '../_shared/format.ts';
 
 const Body = z.object({
   booking_id: z.string().uuid(),
@@ -139,6 +142,43 @@ handle(async (req) => {
       ua: req.headers.get('user-agent') ?? undefined,
       payload: { new_status, reason, actual_bill: actualBill },
     });
+
+    // ─── Move-complete email ────────────────────────────────────────────────
+    // Fires only on the completed transition + only if we computed an actual
+    // bill (which requires both started_at + completed_at). Fire-and-forget.
+    if (new_status === 'completed' && actualBill) {
+      try {
+        const admin = adminClient();
+        const { data: bookingFull } = await admin
+          .from('bookings')
+          .select(
+            'id, short_code, customer_id, assigned_driver_profile_id, customer:profiles!bookings_customer_id_fkey(email, full_name), crew_lead:profiles!bookings_assigned_driver_profile_id_fkey(full_name)',
+          )
+          .eq('id', booking_id)
+          .maybeSingle();
+        const customerEmail = (bookingFull as any)?.customer?.email;
+        const customerName = (bookingFull as any)?.customer?.full_name;
+        const crewLeadName = (bookingFull as any)?.crew_lead?.full_name ?? null;
+        if (customerEmail) {
+          sendBrandedEmail({
+            to: customerEmail,
+            template: moveComplete({
+              fullName: customerName,
+              shortCode: data.short_code,
+              crewLeadName,
+              actualHours: fmtHours(actualBill.actualHours),
+              actualTotalDollars: fmtMoney(actualBill.actualTotalCents),
+              receiptUrl: `https://movvy.ca/app/receipts/${booking_id}`,
+              rateUrl: `https://movvy.ca/app/rate/${booking_id}`,
+            }),
+          }).catch((e) =>
+            console.warn('[bookings-update-status] email send failed', e),
+          );
+        }
+      } catch (emailErr) {
+        console.warn('[bookings-update-status] email setup failed (non-fatal)', emailErr);
+      }
+    }
 
     return jsonResponse(
       { ok: true, booking: data, actual_bill: actualBill },

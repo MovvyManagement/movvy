@@ -9,6 +9,11 @@ import {
 } from '../_shared/security.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { handle } from '../_shared/serve.ts';
+import { sendBrandedEmail } from '../_shared/email.ts';
+import {
+  moverApproved,
+  moverApplicationDeclined,
+} from '../_shared/emails/index.ts';
 
 const Body = z.object({
   subject_type: z.enum(['team', 'company']),
@@ -99,6 +104,40 @@ handle(async (req) => {
       payload: { notes },
     });
 
+    // ─── Branded "you're approved" / "we won't be moving forward" email ────
+    // Fire-and-forget. `request_more` doesn't send anything here — that
+    // case is for "the application is back in_review" which is handled by
+    // in-app notifications, and any *specific* doc flag goes through a
+    // separate endpoint that calls docNeedsResubmission directly.
+    if (decision === 'approve' || decision === 'reject') {
+      try {
+        const ownerProfile = await fetchPartnerOwnerProfile(
+          admin,
+          subject_type,
+          subject_id,
+        );
+        if (ownerProfile?.email) {
+          const template =
+            decision === 'approve'
+              ? moverApproved({
+                  fullName: ownerProfile.full_name,
+                  appUrl: 'https://movvy.ca/app',
+                })
+              : moverApplicationDeclined({
+                  fullName: ownerProfile.full_name,
+                  reason: notes ?? 'Your application did not meet our current onboarding criteria.',
+                  reapplyAfter: null,
+                });
+          sendBrandedEmail({
+            to: ownerProfile.email,
+            template,
+          }).catch((e) => console.warn('[admin-verify-partner] email send failed', e));
+        }
+      } catch (emailErr) {
+        console.warn('[admin-verify-partner] email setup failed (non-fatal)', emailErr);
+      }
+    }
+
     return jsonResponse({ ok: true, status: data.onboarding_status }, { status: 200 }, cors);
   } catch (e) {
     if (e instanceof HttpError) return jsonResponse({ error: e.message }, { status: e.status }, cors);
@@ -106,3 +145,39 @@ handle(async (req) => {
     return jsonResponse({ error: 'Internal server error' }, { status: 500 }, cors);
   }
 });
+
+// ─── Helper: resolve owner contact ───────────────────────────────────────────
+// Pulls the "primary contact" profile for a team or company so the approval /
+// decline email goes to the right inbox. For teams we use the first member
+// (small operators are typically solo). For companies we prefer the owner.
+
+async function fetchPartnerOwnerProfile(
+  admin: ReturnType<typeof adminClient>,
+  subjectType: 'team' | 'company',
+  subjectId: string,
+): Promise<{ email: string | null; full_name: string | null } | null> {
+  if (subjectType === 'team') {
+    const { data } = await admin
+      .from('partner_team_members')
+      .select('profiles!partner_team_members_profile_id_fkey(email, full_name)')
+      .eq('team_id', subjectId)
+      .is('removed_at', null)
+      .limit(1)
+      .maybeSingle();
+    return ((data as any)?.profiles ?? null) as
+      | { email: string | null; full_name: string | null }
+      | null;
+  }
+  // company
+  const { data } = await admin
+    .from('company_members')
+    .select('role, profiles!company_members_profile_id_fkey(email, full_name)')
+    .eq('company_id', subjectId)
+    .eq('role', 'owner')
+    .is('removed_at', null)
+    .limit(1)
+    .maybeSingle();
+  return ((data as any)?.profiles ?? null) as
+    | { email: string | null; full_name: string | null }
+    | null;
+}
