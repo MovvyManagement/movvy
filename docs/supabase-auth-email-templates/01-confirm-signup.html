@@ -1,0 +1,76 @@
+<!--
+  Supabase Auth template: Confirm signup
+  Subject line: Confirm your Movvy account
+
+  Sent when a user signs up with email + password. The CTA verifies their
+  address by hitting Supabase's confirmation endpoint.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Confirm your Movvy account</title></head>
+<body style="margin:0;padding:0;background:#F4F4F5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0A0A0A;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F4F5;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#FFFFFF;border-radius:18px;overflow:hidden;border:1px solid #E4E4E7;">
+
+        <!-- HERO -->
+        <tr><td style="background:linear-gradient(135deg,#047857 0%,#0E9F6E 50%,#16A34A 100%);padding:36px 32px;text-align:center;">
+          <svg viewBox="0 0 100 100" width="64" height="64" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;">
+            <rect width="100" height="100" rx="22" fill="#FFFFFF"/>
+            <rect x="20" y="40" width="38" height="35" rx="3.5" fill="#0E9F6E"/>
+            <line x1="39" y1="40" x2="39" y2="75" stroke="#FFFFFF" stroke-width="1.5"/>
+            <path d="M58 50 L75 50 L80 60 L80 75 L58 75 Z" fill="#0E9F6E"/>
+            <path d="M62 53 L73 53 L76 60 L62 60 Z" fill="#A7F3D0"/>
+            <circle cx="32" cy="78" r="6.2" fill="#1F2937"/>
+            <circle cx="70" cy="78" r="6.2" fill="#1F2937"/>
+            <rect x="18" y="73" width="64" height="2.5" rx="1" fill="#A7F3D0"/>
+            <circle cx="76" cy="22" r="10" fill="#0E9F6E"/>
+            <path d="M76 32 L72 38 L80 38 Z" fill="#0E9F6E"/>
+            <circle cx="76" cy="22" r="4.2" fill="#FFFFFF"/>
+          </svg>
+          <div style="margin-top:14px;color:#FFFFFF;font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;opacity:0.9;">Welcome to Movvy</div>
+          <div style="margin-top:6px;color:#FFFFFF;font-size:28px;font-weight:800;letter-spacing:-0.5px;line-height:1.2;">Confirm your email to get started.</div>
+        </td></tr>
+
+        <!-- BODY -->
+        <tr><td style="padding:32px;font-size:15px;line-height:1.6;color:#0A0A0A;">
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#404040;">Hi there,</p>
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#404040;">
+            Thanks for signing up for Movvy — Alberta's easiest way to book a move.
+            Click the button below to verify your email and finish creating your account.
+          </p>
+
+          <!-- CONFIRM BUTTON -->
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;">
+            <tr><td align="center">
+              <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#047857;color:#FFFFFF;text-decoration:none;border-radius:12px;padding:14px 28px;font-weight:700;font-size:15px;">Confirm Email Address</a>
+            </td></tr>
+          </table>
+
+          <p style="margin:0 0 16px;font-size:13px;line-height:1.5;color:#71717A;">
+            If the button doesn't work, copy and paste this URL into your browser:<br>
+            <a href="{{ .ConfirmationURL }}" style="color:#047857;word-break:break-all;">{{ .ConfirmationURL }}</a>
+          </p>
+
+          <p style="margin:24px 0 0;font-size:13px;line-height:1.5;color:#71717A;">
+            Didn't sign up for Movvy? You can safely ignore this email — no account
+            is created until the link above is clicked.
+          </p>
+        </td></tr>
+
+        <!-- FOOTER -->
+        <tr><td style="background:#FAFAFA;padding:20px 32px;text-align:center;border-top:1px solid #E4E4E7;">
+          <div style="font-size:12px;color:#71717A;line-height:1.6;">
+            <strong style="color:#0A0A0A;">Movvy Technologies Inc.</strong><br>
+            Calgary, AB · Alberta-wide<br>
+            Questions? Write to
+            <a href="mailto:support@movvy.ca" style="color:#047857;text-decoration:none;">support@movvy.ca</a>
+            · <a href="https://movvy.ca" style="color:#047857;text-decoration:none;">movvy.ca</a>
+          </div>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
