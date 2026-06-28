@@ -19,9 +19,11 @@ import { supabaseBrowser } from '@/lib/supabase/client';
 export function DecisionPanel({
   subjectType,
   subjectId,
+  backgroundCheckPassed,
 }: {
   subjectType: 'team' | 'company';
   subjectId: string;
+  backgroundCheckPassed: boolean;
 }) {
   const supabase = supabaseBrowser();
   const router = useRouter();
@@ -32,6 +34,21 @@ export function DecisionPanel({
     setBusy(decision);
     setError(null);
     try {
+      // Safety gate: approving without a passed background check requires
+      // an explicit override confirmation. Catches the "I forgot to run
+      // the check" foot-gun before someone ends up moving boxes inside a
+      // customer's home unvetted.
+      if (decision === 'approve' && !backgroundCheckPassed) {
+        const override = window.confirm(
+          'No passed background check on file for this applicant.\n\n' +
+            'Approving anyway exposes Movvy to liability if anything goes wrong on a job. ' +
+            'Are you sure you want to override?',
+        );
+        if (!override) {
+          setBusy(null);
+          return;
+        }
+      }
       const notes =
         decision === 'reject'
           ? window.prompt('Reason (shown to applicant):') ?? ''
@@ -78,11 +95,29 @@ export function DecisionPanel({
         <button
           onClick={() => decide('approve')}
           disabled={!!busy}
-          className="h-10 px-5 rounded-2xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+          className={`h-10 px-5 rounded-2xl text-white text-sm font-bold disabled:opacity-50 transition-colors ${
+            backgroundCheckPassed
+              ? 'bg-emerald-600 hover:bg-emerald-700'
+              : 'bg-amber-500 hover:bg-amber-600'
+          }`}
+          title={
+            backgroundCheckPassed
+              ? 'Background check passed — safe to approve'
+              : 'No passed background check on file — approval requires override'
+          }
         >
-          {busy === 'approve' ? 'Approving…' : 'Approve'}
+          {busy === 'approve'
+            ? 'Approving…'
+            : backgroundCheckPassed
+              ? 'Approve'
+              : 'Approve ⚠'}
         </button>
       </div>
+      {!backgroundCheckPassed ? (
+        <div className="text-[11px] text-amber-700 font-semibold max-w-xs text-right">
+          ⚠ No passed background check on file
+        </div>
+      ) : null}
       {error ? (
         <div className="text-xs text-red-600 max-w-xs text-right">{error}</div>
       ) : null}

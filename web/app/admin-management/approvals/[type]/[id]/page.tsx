@@ -18,6 +18,7 @@ import Link from 'next/link';
 import { supabaseServer } from '@/lib/supabase/server';
 import { fmtDateTime, fmtStatus } from '@/lib/format';
 import { DecisionPanel } from './DecisionPanel';
+import { BackgroundCheckPanel } from './BackgroundCheckPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -133,9 +134,23 @@ export default async function ApplicantDetailPage({ params }: PageProps) {
     }),
   );
 
+  // Latest background check for this subject — drives the BackgroundCheckPanel.
+  const { data: bgCheck } = await supabase
+    .from('background_checks')
+    .select(
+      'id, status, provider, provider_ref, consent_signed_at, requested_at, completed_at, expires_at, result_summary, result_document_url, notes, hit_count',
+    )
+    .eq('subject_type', type)
+    .eq('subject_id', id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   const finalStatus =
     subject!.onboarding_status === 'verified' ||
     subject!.onboarding_status === 'rejected';
+
+  const bgPassed = bgCheck?.status === 'passed';
 
   return (
     <div className="px-8 py-8 max-w-6xl">
@@ -163,6 +178,7 @@ export default async function ApplicantDetailPage({ params }: PageProps) {
           <DecisionPanel
             subjectType={type as 'team' | 'company'}
             subjectId={subject!.id}
+            backgroundCheckPassed={bgPassed}
           />
         ) : (
           <span
@@ -176,6 +192,15 @@ export default async function ApplicantDetailPage({ params }: PageProps) {
           </span>
         )}
       </div>
+
+      {/* Background check — must be 'passed' before approval */}
+      {!finalStatus ? (
+        <BackgroundCheckPanel
+          subjectType={type as 'team' | 'company'}
+          subjectId={subject!.id}
+          existing={(bgCheck as any) ?? null}
+        />
+      ) : null}
 
       {/* Team members (teams only) */}
       {type === 'team' && members.length > 0 ? (
