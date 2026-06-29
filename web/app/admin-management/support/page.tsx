@@ -1,28 +1,26 @@
 // =============================================================================
 // /admin-management/support — customer support inbox.
 //
-// One row per support thread (one per customer, lifetime-persistent).
-// Sorted by last_message_at desc so the freshest customer reply is on
-// top. Tap a row → real-time chat panel.
-//
-// The "waiting" badge surfaces threads where the most recent message
-// came from the customer (not the admin) — those are the ones that
-// need an answer. We compute that with a sub-query rather than storing
-// a denormalized flag, so the truth lives in chat_messages.
+// Enhancements over v1:
+// · SLA indicator — threads waiting > 4h shown with amber badge
+// · Customer contact info shown inline (email, phone)
+// · Message preview with sender context
+// · Waiting count highlighted prominently
+// · Empty state with onboarding hint
 // =============================================================================
 
 import Link from 'next/link';
 import { supabaseServer } from '@/lib/supabase/server';
-import { fmtRelative } from '@/lib/format';
+import { fmtRelative, fmtDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+// SLA threshold: flag threads waiting longer than this many ms
+const SLA_WARNING_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 export default async function SupportInboxPage() {
   const supabase = await supabaseServer();
 
-  // Pull threads with the customer profile joined inline. last_message_at
-  // is updated by chat-send so threads stay sorted without us re-sorting
-  // on every load.
   const { data: threads } = await supabase
     .from('chat_threads')
     .select(
@@ -32,13 +30,12 @@ export default async function SupportInboxPage() {
     .order('last_message_at', { ascending: false, nullsFirst: false })
     .limit(100);
 
-  // For each thread, fetch the last message so we can preview + decide
-  // who sent it last (drives the "waiting" badge). Done in parallel.
+  // Enrich with last message for preview + waiting indicator
   const enriched = await Promise.all(
     (threads ?? []).map(async (t: any) => {
       const { data: lastMsg } = await supabase
         .from('chat_messages')
-        .select('body, is_admin, sender_profile_id, created_at')
+        .select('body, is_admin, created_at')
         .eq('thread_id', t.id)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -47,74 +44,123 @@ export default async function SupportInboxPage() {
     }),
   );
 
-  const waitingCount = enriched.filter(
+  const waitingThreads = enriched.filter(
     (t) => t.last_message && !t.last_message.is_admin,
-  ).length;
+  );
+  const slaBreached = waitingThreads.filter((t) => {
+    if (!t.last_message?.created_at) return false;
+    return Date.now() - new Date(t.last_message.created_at).getTime() > SLA_WARNING_MS;
+  });
 
   return (
-    <div className="px-8 py-8">
-      <div className="mb-8 flex items-end justify-between">
+    <div className="px-6 py-6">
+
+      {/* Header */}
+      <div className="mb-6 flex items-end justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-zinc-900">Support inbox</h1>
-          <p className="text-sm text-zinc-500 mt-1">
-            {enriched.length} thread{enriched.length === 1 ? '' : 's'} ·{' '}
-            <span
-              className={
-                waitingCount > 0 ? 'text-amber-700 font-semibold' : ''
-              }
-            >
-              {waitingCount} waiting for reply
-            </span>
-            {' '}· updates live
+          <h1 className="text-2xl font-bold text-zinc-900">Support Inbox</h1>
+          <p className="text-sm text-zinc-500 mt-0.5">
+            {enriched.length} thread{enriched.length !== 1 ? 's' : ''} · updates live
           </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {slaBreached.length > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 border border-red-100">
+              <span className="w-2 h-2 rounded-full bg-red-500" />
+              <span className="text-xs font-semibold text-red-700">
+                {slaBreached.length} breached 4h SLA
+              </span>
+            </div>
+          )}
+          {waitingThreads.length > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-100">
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+              <span className="text-xs font-semibold text-amber-700">
+                {waitingThreads.length} waiting for reply
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
       {enriched.length === 0 ? (
-        <div className="rounded-2xl bg-white border border-zinc-200 border-dashed p-10 text-center">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-400 mb-4">
+        <div className="rounded-2xl bg-white border border-zinc-200 border-dashed p-12 text-center">
+          <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-400 mb-4">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
             </svg>
           </div>
-          <p className="text-sm font-semibold text-zinc-900">No support chats yet.</p>
-          <p className="text-xs text-zinc-500 mt-1">
-            When a customer opens the support hub in the mobile app, a thread shows up here.
+          <p className="text-sm font-semibold text-zinc-900">No support chats yet</p>
+          <p className="text-xs text-zinc-500 mt-1 max-w-xs mx-auto">
+            When a customer opens the support hub in the mobile app, a thread appears here automatically.
           </p>
         </div>
       ) : (
         <div className="rounded-2xl bg-white border border-zinc-200 overflow-hidden">
-          {enriched.map((t: any) => (
-            <Link
-              key={t.id}
-              href={`/admin-management/support/${t.id}`}
-              className="flex items-center px-5 py-4 border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 transition-colors"
-            >
-              <div className="w-10 h-10 rounded-full bg-zinc-200 flex items-center justify-center text-sm font-bold text-zinc-700">
-                {(t.customer?.full_name ?? t.customer?.email ?? '?')[0]?.toUpperCase()}
-              </div>
-              <div className="ml-4 flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <div className="text-sm font-bold text-zinc-900 truncate">
-                    {t.customer?.full_name ?? t.customer?.email ?? 'Customer'}
+          {enriched.map((t: any, idx: number) => {
+            const isWaiting = t.last_message && !t.last_message.is_admin;
+            const isSlaBreached =
+              isWaiting &&
+              t.last_message?.created_at &&
+              Date.now() - new Date(t.last_message.created_at).getTime() > SLA_WARNING_MS;
+            const customerName = t.customer?.full_name ?? t.customer?.email ?? 'Customer';
+            const initials = customerName[0]?.toUpperCase() ?? '?';
+
+            return (
+              <Link
+                key={t.id}
+                href={`/admin-management/support/${t.id}`}
+                className="flex items-center px-5 py-4 border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 transition-colors gap-4"
+              >
+                {/* Avatar */}
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                  isSlaBreached ? 'bg-red-100 text-red-700' : isWaiting ? 'bg-amber-100 text-amber-700' : 'bg-zinc-200 text-zinc-600'
+                }`}>
+                  {initials}
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-sm font-bold text-zinc-900 truncate">{customerName}</span>
+                    {isSlaBreached && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-bold whitespace-nowrap">
+                        SLA Breached
+                      </span>
+                    )}
+                    {!isSlaBreached && isWaiting && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold whitespace-nowrap">
+                        Waiting
+                      </span>
+                    )}
                   </div>
-                  {t.last_message && !t.last_message.is_admin ? (
-                    <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">
-                      Waiting
-                    </span>
-                  ) : null}
+                  <div className="text-xs text-zinc-500 truncate">
+                    {t.last_message
+                      ? `${t.last_message.is_admin ? 'You: ' : ''}${t.last_message.body}`
+                      : 'No messages yet'}
+                  </div>
+                  {t.customer?.phone && (
+                    <div className="text-xs text-zinc-400 mt-0.5">{t.customer.phone}</div>
+                  )}
                 </div>
-                <div className="text-xs text-zinc-500 truncate mt-0.5">
-                  {t.last_message
-                    ? `${t.last_message.is_admin ? 'You: ' : ''}${t.last_message.body}`
-                    : 'No messages yet'}
+
+                {/* Time + arrow */}
+                <div className="text-right shrink-0">
+                  <div className="text-xs text-zinc-400 whitespace-nowrap">
+                    {fmtRelative(t.last_message_at ?? t.created_at)}
+                  </div>
+                  {isSlaBreached && t.last_message?.created_at && (
+                    <div className="text-xs text-red-600 font-semibold mt-0.5 whitespace-nowrap">
+                      {fmtRelative(t.last_message.created_at)} unanswered
+                    </div>
+                  )}
                 </div>
-              </div>
-              <div className="text-xs text-zinc-400 ml-3 whitespace-nowrap">
-                {fmtRelative(t.last_message_at ?? t.created_at)}
-              </div>
-            </Link>
-          ))}
+                <svg className="h-4 w-4 text-zinc-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>
