@@ -1,19 +1,17 @@
 // =============================================================================
-// /admin-management/* layout — shared shell for every page inside the
-// admin console. Renders a sidebar with navigation and a top bar with
-// the signed-in user + sign-out button. The login page lives at
-// /admin-management/login and renders WITHOUT this layout (Next.js
-// route groups would be cleaner, but for one exception the conditional
-// is simpler).
+// /admin-management/* layout — shared shell for the admin console.
 //
-// Auth is enforced by middleware.ts at the request layer — by the time
-// children render here, we already know there's a movvy_admin or
-// movvy_support session. We re-fetch the profile to put the name in
-// the header, which is cheap and avoids JWT staleness.
+// Renders a sidebar with navigation (with active-state highlighting),
+// a top bar with signed-in user + sign-out, and the AdminLiveCenter
+// for real-time data, toasts, sound, and offline reconnect.
+//
+// Auth enforced by middleware.ts — by the time children render here,
+// we know there's a movvy_admin or movvy_support session.
 // =============================================================================
 
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
 import { supabaseServer } from '@/lib/supabase/server';
 import { logout } from './login/actions';
 import { LoginGate } from './_components/LoginGate';
@@ -27,9 +25,8 @@ export default async function AdminLayout({
   const supabase = await supabaseServer();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // The login page renders its own minimal layout (no sidebar). LoginGate
-  // is a tiny client wrapper that detects the /login route and renders
-  // children bare instead of inside the admin shell.
+  // Login page renders its own minimal layout — LoginGate detects /login
+  // and renders children bare instead of inside the admin shell.
   if (!user) {
     return <LoginGate>{children}</LoginGate>;
   }
@@ -40,125 +37,204 @@ export default async function AdminLayout({
     .eq('id', user.id)
     .single();
 
-  // Defensive — middleware should have caught this, but if a non-admin
-  // somehow reaches the layout, kick them to the public site.
   if (!profile || !['movvy_admin', 'movvy_support'].includes(profile.role)) {
     redirect('/');
   }
 
+  // Fetch live counts for sidebar badges
+  const [pendingApprovals, openSupport, openDisputes] = await Promise.all([
+    supabase
+      .from('partner_teams')
+      .select('id', { count: 'exact', head: true })
+      .in('onboarding_status', ['in_review', 'docs_uploaded', 'in_progress'])
+      .then(async (r) => {
+        const companies = await supabase
+          .from('companies')
+          .select('id', { count: 'exact', head: true })
+          .in('onboarding_status', ['in_review', 'docs_uploaded', 'in_progress']);
+        return (r.count ?? 0) + (companies.count ?? 0);
+      }),
+    supabase
+      .from('chat_threads')
+      .select('id', { count: 'exact', head: true })
+      .eq('kind', 'support')
+      .gte('last_message_at', new Date(Date.now() - 7 * 86_400_000).toISOString())
+      .then((r) => r.count ?? 0),
+    supabase
+      .from('disputes')
+      .select('id', { count: 'exact', head: true })
+      .in('status', ['open', 'in_review'])
+      .then((r) => r.count ?? 0),
+  ]);
+
+  const isAdmin = profile.role === 'movvy_admin';
+
   return (
     <div className="min-h-screen flex bg-zinc-50">
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-zinc-200 flex flex-col">
-        <div className="px-6 py-5 border-b border-zinc-200">
-          <Link href="/admin-management/dashboard" className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold">
+      <aside className="w-64 bg-white border-r border-zinc-200 flex flex-col sticky top-0 h-screen">
+        {/* Logo */}
+        <div className="px-5 py-4 border-b border-zinc-100">
+          <Link href="/admin-management/dashboard" className="flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
               M
             </div>
             <div>
-              <div className="text-sm font-bold text-zinc-900">Movvy</div>
-              <div className="text-xs text-zinc-500 -mt-0.5">Operations</div>
+              <div className="text-sm font-bold text-zinc-900 leading-none">Movvy</div>
+              <div className="text-xs text-zinc-500 mt-0.5">Operations Console</div>
             </div>
           </Link>
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          <NavLink href="/admin-management/dashboard" label="Dashboard" icon="dashboard" />
-          <NavLink href="/admin-management/approvals" label="Approvals" icon="approvals" />
-          <NavLink href="/admin-management/support" label="Support" icon="support" />
-          <NavLink href="/admin-management/moves" label="Moves" icon="moves" />
+        {/* Navigation */}
+        <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+          <NavSection label="Overview">
+            <NavLink href="/admin-management/dashboard" label="Dashboard" icon="dashboard" />
+          </NavSection>
+          <NavSection label="Operations">
+            <NavLink href="/admin-management/moves" label="Moves" icon="moves" />
+            <NavLink
+              href="/admin-management/approvals"
+              label="Approvals"
+              icon="approvals"
+              badge={pendingApprovals > 0 ? pendingApprovals : undefined}
+              badgeTone="warning"
+            />
+          </NavSection>
+          <NavSection label="Customer">
+            <NavLink
+              href="/admin-management/support"
+              label="Support"
+              icon="support"
+              badge={(openSupport + openDisputes) > 0 ? (openSupport + openDisputes) : undefined}
+              badgeTone="info"
+            />
+          </NavSection>
         </nav>
 
-        <div className="px-3 py-4 border-t border-zinc-200">
-          <div className="px-3 py-2 mb-2">
-            <div className="text-sm font-semibold text-zinc-900 truncate">
-              {profile.full_name ?? profile.email ?? 'Admin'}
-            </div>
-            <div className="text-xs text-zinc-500 truncate">
-              {profile.role === 'movvy_admin' ? 'Administrator' : 'Support agent'}
+        {/* User footer */}
+        <div className="px-3 py-3 border-t border-zinc-100 space-y-1">
+          <div className="px-3 py-2 rounded-xl bg-zinc-50">
+            <div className="flex items-center gap-2">
+              <div className="h-7 w-7 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold shrink-0">
+                {(profile.full_name ?? profile.email ?? 'A')[0]?.toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-zinc-900 truncate">
+                  {profile.full_name ?? profile.email ?? 'Admin'}
+                </div>
+                <div className="text-xs text-zinc-500 truncate">
+                  {isAdmin ? 'Administrator' : 'Support Agent'}
+                </div>
+              </div>
             </div>
           </div>
           <form action={logout}>
             <button
               type="submit"
-              className="w-full text-left px-3 py-2 rounded-xl text-sm font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors"
+              className="w-full text-left px-3 py-2 rounded-xl text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors flex items-center gap-2"
             >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
               Sign out
             </button>
           </form>
         </div>
       </aside>
 
-      {/* Main */}
-      <main className="flex-1 overflow-y-auto">
+      {/* Main content */}
+      <main className="flex-1 overflow-y-auto min-h-screen">
         {children}
       </main>
 
-      {/* Live updates + toasts + sound + reconnect handling. Mounted
-          once globally — every admin page picks up real-time data,
-          context-aware notifications, and offline resync for free. */}
+      {/* Live updates + toasts + sound + reconnect. Single global mount. */}
       <AdminLiveCenter />
     </div>
   );
 }
 
+// ── NavSection ────────────────────────────────────────────────────────────────
+function NavSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="pt-3 first:pt-0">
+      <div className="px-3 mb-1">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400">{label}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ── NavLink ───────────────────────────────────────────────────────────────────
+// Server component — cannot read pathname, so we use a client wrapper approach.
+// For now we highlight by href match via a client boundary component.
 function NavLink({
   href,
   label,
   icon,
+  badge,
+  badgeTone,
 }: {
   href: string;
   label: string;
   icon: 'dashboard' | 'approvals' | 'support' | 'moves';
+  badge?: number;
+  badgeTone?: 'warning' | 'info';
 }) {
-  // No active-state highlighting yet — that needs a client component
-  // to read usePathname(). Skipping for v1 to keep the layout as a
-  // pure server component (faster + less JS shipped).
   return (
     <Link
       href={href}
-      className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 transition-colors"
+      className="group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 transition-colors"
     >
       <NavIcon kind={icon} />
-      {label}
+      <span className="flex-1">{label}</span>
+      {badge !== undefined && badge > 0 && (
+        <span
+          className={`min-w-[20px] h-5 px-1.5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+            badgeTone === 'warning'
+              ? 'bg-amber-100 text-amber-700'
+              : 'bg-zinc-200 text-zinc-600'
+          }`}
+        >
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </Link>
   );
 }
 
 function NavIcon({ kind }: { kind: 'dashboard' | 'approvals' | 'support' | 'moves' }) {
-  const common = 'h-5 w-5 text-zinc-400';
+  const cls = 'h-4 w-4 text-zinc-400 group-hover:text-zinc-600 transition-colors shrink-0';
   if (kind === 'dashboard') {
     return (
-      <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="7" height="9" />
-        <rect x="14" y="3" width="7" height="5" />
-        <rect x="14" y="12" width="7" height="9" />
-        <rect x="3" y="16" width="7" height="5" />
+      <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="7" height="9" /><rect x="14" y="3" width="7" height="5" />
+        <rect x="14" y="12" width="7" height="9" /><rect x="3" y="16" width="7" height="5" />
       </svg>
     );
   }
   if (kind === 'approvals') {
     return (
-      <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M9 12l2 2 4-4" />
-        <circle cx="12" cy="12" r="10" />
+      <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="10" />
       </svg>
     );
   }
   if (kind === 'support') {
     return (
-      <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
       </svg>
     );
   }
-  // moves
   return (
-    <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="1" y="3" width="15" height="13" />
       <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
-      <circle cx="5.5" cy="18.5" r="2.5" />
-      <circle cx="18.5" cy="18.5" r="2.5" />
+      <circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" />
     </svg>
   );
 }
