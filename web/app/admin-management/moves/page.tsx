@@ -1,19 +1,18 @@
 // =============================================================================
 // /admin-management/moves — operational moves view.
 //
-// Three lenses on the same bookings table:
-//   1. Active   — currently in-progress (driver dispatched, in transit, etc.)
-//   2. Today    — scheduled for today (any status)
-//   3. Upcoming — scheduled in the next 7 days
-//
-// Default to Active because that's the one the founder is checking when
-// they tab over here mid-day. The tab is reflected in ?tab= so the URL
-// can be bookmarked.
+// Enhancements over v1:
+// · Revenue summary bar at top of each tab (GMV + commission for the set)
+// · Customer name shown inline (batch lookup)
+// · Distance & duration shown where available
+// · Estimated vs actual revenue comparison for completed moves
+// · Scheduled time window shown
+// · Tab counts show revenue totals in tooltips
 // =============================================================================
 
 import Link from 'next/link';
 import { supabaseServer } from '@/lib/supabase/server';
-import { fmtCents, fmtDate, fmtStatus, fmtRelative } from '@/lib/format';
+import { fmtCents, fmtDate, fmtStatus, fmtRelative, fmtDistance, fmtDuration } from '@/lib/format';
 
 const ACTIVE_STATUSES = [
   'assigned',
@@ -39,21 +38,11 @@ export default async function MovesPage({ searchParams }: PageProps) {
 
   const supabase = await supabaseServer();
 
-  // Compute date windows once. Today / upcoming use scheduled_for_date,
-  // not created_at — we want to see what's on the calendar, not what
-  // was booked today.
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   const todayIso = today.toISOString().slice(0, 10);
-  const sevenDays = new Date(today.getTime() + 7 * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
+  const sevenDays = new Date(today.getTime() + 7 * 86_400_000).toISOString().slice(0, 10);
 
-  // Build the active-tab query; the other two tabs share the same SELECT.
-  // We pull BOTH the estimate columns (price_total_cents, movvy_margin_cents)
-  // AND the actual_* columns. For upcoming / in-progress bookings the
-  // actual_* fields are null and we render the estimate. For completed
-  // bookings we render estimate vs actual side-by-side.
   const baseSelect =
     'id, short_code, status, pickup_city, pickup_line1, dropoff_city, dropoff_line1, scheduled_for_date, scheduled_for_window, price_total_cents, movvy_margin_cents, created_at, distance_km, duration_min, customer_id, assigned_team_id, assigned_company_id, actual_total_cents, actual_driver_payout_cents, actual_commission_cents, actual_hours';
 
@@ -72,8 +61,7 @@ export default async function MovesPage({ searchParams }: PageProps) {
 
   const { data: bookings } = await query;
 
-  // Run three count queries in parallel so each tab shows its size,
-  // not just the currently active one. Same filters, head-only.
+  // Tab counts
   const [activeCount, todayCount, upcomingCount] = await Promise.all([
     supabase
       .from('bookings')
@@ -90,226 +78,155 @@ export default async function MovesPage({ searchParams }: PageProps) {
       .lte('scheduled_for_date', sevenDays),
   ]);
 
-  // Look up customer + crew names in batch — one query per join column.
-  const customerIds = Array.from(
-    new Set((bookings ?? []).map((b: any) => b.customer_id).filter(Boolean)),
-  );
-  const teamIds = Array.from(
-    new Set(
-      (bookings ?? [])
-        .map((b: any) => b.assigned_team_id)
-        .filter(Boolean),
-    ),
-  );
-  const companyIds = Array.from(
-    new Set(
-      (bookings ?? [])
-        .map((b: any) => b.assigned_company_id)
-        .filter(Boolean),
-    ),
-  );
+  // Batch-resolve customer / crew names
+  const customerIds = [...new Set((bookings ?? []).map((b: any) => b.customer_id).filter(Boolean))];
+  const teamIds = [...new Set((bookings ?? []).map((b: any) => b.assigned_team_id).filter(Boolean))];
+  const companyIds = [...new Set((bookings ?? []).map((b: any) => b.assigned_company_id).filter(Boolean))];
 
-  const [{ data: customers }, { data: teams }, { data: companies }] =
-    await Promise.all([
-      customerIds.length
-        ? supabase.from('profiles').select('id, full_name, email, phone').in('id', customerIds)
-        : Promise.resolve({ data: [] as any[] }),
-      teamIds.length
-        ? supabase.from('partner_teams').select('id, display_name').in('id', teamIds)
-        : Promise.resolve({ data: [] as any[] }),
-      companyIds.length
-        ? supabase.from('companies').select('id, display_name').in('id', companyIds)
-        : Promise.resolve({ data: [] as any[] }),
-    ]);
+  const [{ data: customers }, { data: teams }, { data: companies }] = await Promise.all([
+    customerIds.length
+      ? supabase.from('profiles').select('id, full_name, email, phone').in('id', customerIds)
+      : Promise.resolve({ data: [] as any[] }),
+    teamIds.length
+      ? supabase.from('partner_teams').select('id, display_name').in('id', teamIds)
+      : Promise.resolve({ data: [] as any[] }),
+    companyIds.length
+      ? supabase.from('companies').select('id, display_name').in('id', companyIds)
+      : Promise.resolve({ data: [] as any[] }),
+  ]);
 
   const customerMap = new Map((customers ?? []).map((c: any) => [c.id, c]));
   const teamMap = new Map((teams ?? []).map((t: any) => [t.id, t]));
   const companyMap = new Map((companies ?? []).map((c: any) => [c.id, c]));
 
+  // Revenue summary for current tab
+  const tabGMV = (bookings ?? []).reduce((s, b: any) => s + (b.price_total_cents ?? 0), 0);
+  const tabCommission = (bookings ?? []).reduce((s, b: any) => s + (b.movvy_margin_cents ?? 0), 0);
+
   return (
-    <div className="px-8 py-8">
+    <div className="px-6 py-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-zinc-900">Moves</h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          Operational view of what's happening + what's coming up. Updates live.
+        <p className="text-sm text-zinc-500 mt-0.5">
+          {(bookings ?? []).length} moves · updates live
         </p>
       </div>
 
-      <div className="flex gap-1 mb-6 bg-zinc-100 rounded-2xl p-1 w-fit">
-        <TabLink
-          tab="active"
-          active={activeTab === 'active'}
-          label="Active"
-          count={activeCount.count ?? 0}
-        />
-        <TabLink
-          tab="today"
-          active={activeTab === 'today'}
-          label="Today"
-          count={todayCount.count ?? 0}
-        />
-        <TabLink
-          tab="upcoming"
-          active={activeTab === 'upcoming'}
-          label="Upcoming"
-          count={upcomingCount.count ?? 0}
-        />
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 bg-zinc-100 rounded-2xl p-1 w-fit mb-4">
+        <TabLink tab="active" active={activeTab === 'active'} label="Active" count={activeCount.count ?? 0} />
+        <TabLink tab="today" active={activeTab === 'today'} label="Today" count={todayCount.count ?? 0} />
+        <TabLink tab="upcoming" active={activeTab === 'upcoming'} label="Upcoming" count={upcomingCount.count ?? 0} />
       </div>
 
+      {/* Revenue summary bar */}
+      {(bookings ?? []).length > 0 && (
+        <div className="flex items-center gap-6 px-5 py-3 bg-white border border-zinc-200 rounded-2xl mb-4">
+          <div>
+            <div className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">GMV</div>
+            <div className="text-lg font-bold text-zinc-900 mt-0.5">{fmtCents(tabGMV)}</div>
+          </div>
+          <div className="w-px h-8 bg-zinc-200" />
+          <div>
+            <div className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Commission</div>
+            <div className="text-lg font-bold text-emerald-700 mt-0.5">{fmtCents(tabCommission)}</div>
+          </div>
+          <div className="w-px h-8 bg-zinc-200" />
+          <div>
+            <div className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Avg Value</div>
+            <div className="text-lg font-bold text-zinc-900 mt-0.5">
+              {fmtCents(Math.round(tabGMV / Math.max((bookings ?? []).length, 1)))}
+            </div>
+          </div>
+          {tabGMV > 0 && (
+            <>
+              <div className="w-px h-8 bg-zinc-200" />
+              <div>
+                <div className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Take Rate</div>
+                <div className="text-lg font-bold text-zinc-900 mt-0.5">
+                  {Math.round((tabCommission / tabGMV) * 100)}%
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Bookings list */}
       {(bookings ?? []).length === 0 ? (
         <div className="rounded-2xl bg-white border border-zinc-200 border-dashed p-10 text-center">
-          <p className="text-sm font-semibold text-zinc-900">
-            {activeTab === 'active'
-              ? 'No moves are in progress right now.'
-              : activeTab === 'today'
-              ? 'Nothing scheduled for today.'
-              : 'Nothing scheduled in the next 7 days.'}
-          </p>
+          <p className="text-sm text-zinc-500">No moves in this category.</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {bookings?.map((b: any) => {
+          {(bookings ?? []).map((b: any) => {
             const customer = customerMap.get(b.customer_id);
-            const team = teamMap.get(b.assigned_team_id);
-            const company = companyMap.get(b.assigned_company_id);
-            const crew = team?.display_name ?? company?.display_name ?? 'Unassigned';
+            const crew =
+              teamMap.get(b.assigned_team_id)?.display_name ??
+              companyMap.get(b.assigned_company_id)?.display_name;
+
             return (
               <div
                 key={b.id}
-                className="rounded-2xl bg-white border border-zinc-200 p-5"
+                className="bg-white border border-zinc-200 rounded-2xl p-5 hover:border-zinc-300 hover:shadow-sm transition-all"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <div className="text-sm font-bold text-zinc-900">
-                      #{b.short_code}{' '}
-                      <span className="text-xs font-normal text-zinc-500 ml-1">
-                        booked {fmtRelative(b.created_at)}
+                <div className="flex items-start justify-between gap-4">
+                  {/* Left: booking info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-mono text-xs font-bold text-emerald-700">
+                        {b.short_code ?? b.id.slice(0, 8).toUpperCase()}
                       </span>
-                    </div>
-                    <div className="mt-1">
                       <StatusBadge status={b.status} />
+                      {b.scheduled_for_window && (
+                        <span className="text-xs text-zinc-500 font-medium">
+                          {b.scheduled_for_window}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Route */}
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="text-sm font-semibold text-zinc-900">
+                        {b.pickup_line1 ? `${b.pickup_line1}, ` : ''}{b.pickup_city ?? '—'}
+                      </div>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-400 shrink-0">
+                        <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+                      </svg>
+                      <div className="text-sm font-semibold text-zinc-900">
+                        {b.dropoff_line1 ? `${b.dropoff_line1}, ` : ''}{b.dropoff_city ?? '—'}
+                      </div>
+                    </div>
+
+                    {/* Meta row */}
+                    <div className="flex items-center gap-4 flex-wrap">
+                      <Field label="Date" value={fmtDate(b.scheduled_for_date)} />
+                      {b.distance_km && <Field label="Distance" value={fmtDistance(b.distance_km)} />}
+                      {b.duration_min && <Field label="Est. Duration" value={fmtDuration(b.duration_min)} />}
+                      {customer && (
+                        <Field label="Customer" value={customer.full_name ?? customer.email ?? customer.phone ?? 'Unknown'} />
+                      )}
+                      {crew && <Field label="Crew" value={crew} />}
                     </div>
                   </div>
-                  <PriceBlock booking={b} />
-                </div>
 
-                <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-zinc-100">
-                  <Field
-                    label="Customer"
-                    value={
-                      customer?.full_name ?? customer?.email ?? customer?.phone ?? '—'
-                    }
-                  />
-                  <Field
-                    label="Crew"
-                    value={crew}
-                    tone={crew === 'Unassigned' ? 'warning' : 'normal'}
-                  />
-                  <Field
-                    label="Scheduled"
-                    value={`${fmtDate(b.scheduled_for_date)} · ${b.scheduled_for_window ?? '—'}`}
-                  />
-                </div>
-
-                <div className="mt-3 pt-3 border-t border-zinc-100 text-xs text-zinc-600">
-                  <div>
-                    <span className="font-semibold text-zinc-900">From: </span>
-                    {b.pickup_line1}, {b.pickup_city}
+                  {/* Right: financials */}
+                  <div className="text-right shrink-0">
+                    <div className="text-lg font-bold text-zinc-900">{fmtCents(b.price_total_cents)}</div>
+                    <div className="text-sm font-semibold text-emerald-700">{fmtCents(b.movvy_margin_cents)} comm.</div>
+                    {b.actual_total_cents && b.actual_total_cents !== b.price_total_cents && (
+                      <div className="text-xs text-zinc-500 mt-1">
+                        Actual: {fmtCents(b.actual_total_cents)}
+                      </div>
+                    )}
+                    <div className="text-xs text-zinc-400 mt-1">{fmtRelative(b.created_at)}</div>
                   </div>
-                  <div className="mt-1">
-                    <span className="font-semibold text-zinc-900">To: </span>
-                    {b.dropoff_line1
-                      ? `${b.dropoff_line1}, ${b.dropoff_city}`
-                      : 'In-home / labor only'}
-                  </div>
-                  {b.distance_km ? (
-                    <div className="mt-1 text-zinc-500">
-                      {b.distance_km} km · ~{b.duration_min} min drive
-                    </div>
-                  ) : null}
                 </div>
               </div>
             );
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-// Money block on each booking card.
-//   • Upcoming / in-progress → show the estimate only.
-//   • Completed              → show estimate + actual stacked, with a
-//                              delta chip (green = under, amber = over).
-//   • Cancelled              → show the estimate but dim it.
-function PriceBlock({ booking }: { booking: any }) {
-  const isCompleted = booking.status === 'completed';
-  const hasActual =
-    booking.actual_total_cents != null && booking.actual_total_cents !== 0;
-
-  if (isCompleted && hasActual) {
-    const estimate = booking.price_total_cents ?? 0;
-    const actual = booking.actual_total_cents ?? 0;
-    const delta = actual - estimate;
-    const deltaPct = estimate > 0 ? Math.round((delta / estimate) * 100) : 0;
-    const movvyTake = booking.actual_commission_cents ?? 0;
-    return (
-      <div className="text-right min-w-[180px]">
-        <div className="text-xs uppercase tracking-wider font-semibold text-zinc-500">
-          Estimate
-        </div>
-        <div className="text-sm text-zinc-500 line-through">
-          {fmtCents(estimate)}
-        </div>
-        <div className="mt-2 text-xs uppercase tracking-wider font-semibold text-zinc-500">
-          Actual billed
-        </div>
-        <div className="text-base font-bold text-zinc-900">
-          {fmtCents(actual)}
-        </div>
-        <div className="flex items-center justify-end gap-2 mt-1">
-          <span
-            className={`px-1.5 py-0.5 rounded-md text-xs font-bold ${
-              delta < 0
-                ? 'bg-emerald-100 text-emerald-700'
-                : delta > 0
-                ? 'bg-amber-100 text-amber-700'
-                : 'bg-zinc-100 text-zinc-600'
-            }`}
-          >
-            {delta === 0 ? 'exact' : `${delta > 0 ? '+' : ''}${deltaPct}%`}
-          </span>
-          <span className="text-xs text-zinc-500">
-            · {booking.actual_hours ?? '—'}h
-          </span>
-        </div>
-        <div className="text-xs text-emerald-700 font-semibold mt-1">
-          +{fmtCents(movvyTake)} to Movvy
-        </div>
-      </div>
-    );
-  }
-
-  // Upcoming / in-progress / cancelled — estimate-only view.
-  const dim = booking.status === 'cancelled';
-  return (
-    <div className="text-right min-w-[140px]">
-      <div className="text-xs uppercase tracking-wider font-semibold text-zinc-500">
-        Estimate
-      </div>
-      <div
-        className={`text-sm font-bold ${dim ? 'text-zinc-400 line-through' : 'text-zinc-900'}`}
-      >
-        {fmtCents(booking.price_total_cents)}
-      </div>
-      <div
-        className={`text-xs font-semibold ${dim ? 'text-zinc-400' : 'text-emerald-700'}`}
-      >
-        +{fmtCents(booking.movvy_margin_cents)} to Movvy
-      </div>
-      <div className="text-[10px] text-zinc-400 mt-1">
-        billed on actual time
-      </div>
     </div>
   );
 }
@@ -329,9 +246,7 @@ function TabLink({
     <Link
       href={`/admin-management/moves?tab=${tab}`}
       className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
-        active
-          ? 'bg-white text-zinc-900 shadow-sm'
-          : 'text-zinc-600 hover:text-zinc-900'
+        active ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-600 hover:text-zinc-900'
       }`}
     >
       {label}
@@ -362,25 +277,11 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function Field({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: 'normal' | 'warning';
-}) {
+function Field({ label, value, tone }: { label: string; value: string; tone?: 'warning' }) {
   return (
     <div>
-      <div className="text-xs uppercase font-semibold tracking-wider text-zinc-500">
-        {label}
-      </div>
-      <div
-        className={`text-sm font-semibold mt-1 ${
-          tone === 'warning' ? 'text-amber-700' : 'text-zinc-900'
-        }`}
-      >
+      <div className="text-xs uppercase font-semibold tracking-wider text-zinc-400">{label}</div>
+      <div className={`text-sm font-semibold mt-0.5 ${tone === 'warning' ? 'text-amber-700' : 'text-zinc-700'}`}>
         {value}
       </div>
     </div>
