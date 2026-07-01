@@ -1,27 +1,32 @@
 // =============================================================================
-// Project-root proxy — runs before every request that matches the
-// `config.matcher` below. (Next.js 16 renamed the `middleware` file
-// convention to `proxy`; the export name changed to match.) We use it for:
+// Root Next.js proxy (was `middleware.ts` pre-Next.js-16) — runs BEFORE
+// every request that matches the `matcher` config below. Responsibilities:
 //
-//   1. Refresh the Supabase auth session (so it doesn't expire mid-browse).
-//   2. Gate /admin-management/* — unsigned users get punted to the login
-//      page, signed-in non-admins get punted back to the public landing.
+//   1. Refresh the Supabase auth session cookie on every request so it
+//      doesn't silently expire mid-browse (previously the layout re-checked
+//      but never refreshed; users hit "unauthorized" errors mid-session).
 //
-// Role enforcement happens HERE at the proxy layer rather than only
-// inside each Server Component, so a leaked URL can't render even briefly
-// before the role check runs.
+//   2. Gate /admin-management/* routes:
+//        • No session at all → redirect to /admin-management/login
+//        • Session but not admin/support → redirect to public site
+//        • Login page itself always renders (so we don't infinite-loop)
+//
+//   3. Copy-URL-in-new-browser is now DEFINITIVELY safe: the new browser
+//      has no session cookie, middleware sees the request, redirects to
+//      login before ANY page renders. No flash of protected content.
+//
+// Everything outside /admin-management/* falls through untouched — the
+// public site (movvy.ca/) doesn't need session state.
 // =============================================================================
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { updateSession } from './lib/supabase/middleware';
-import { createServerClient } from '@supabase/ssr';
 
-const ADMIN_ROLES = new Set(['movvy_admin', 'movvy_support']);
+const ADMIN_PREFIX = '/admin-management';
+const AUTH_PREFIX = '/admin-management/login';
 
-// Routes inside /admin-management that DON'T require an admin session.
-// Login is the entry door; forgot/reset cover the recovery flow for
-// admins who've forgotten their password. Adding more here is rare —
-// most admin pages need an authenticated session.
+// Paths that must render without a session so unauthenticated users can
+// actually GET to login / recover their password.
 const PUBLIC_ADMIN_PATHS = [
   '/admin-management/login',
   '/admin-management/forgot-password',
@@ -29,82 +34,46 @@ const PUBLIC_ADMIN_PATHS = [
 ];
 
 export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Only gate the admin subtree — everything else (landing page, /partners,
+  // /join, /legal, marketing pages) is public.
+  if (!pathname.startsWith(ADMIN_PREFIX)) {
+    return NextResponse.next();
+  }
+
+  // Refresh the session cookie so it doesn't silently expire.
   const { response, user } = await updateSession(request);
-  const pathname = request.nextUrl.pathname;
 
-  // Recovery flow: forgot-password + reset-password are always public.
-  // Don't bounce a locked-out admin who clicks the email link.
-  if (
-    pathname.startsWith('/admin-management/forgot-password') ||
-    pathname.startsWith('/admin-management/reset-password')
-  ) {
-    return response;
+  const isPublicPath = PUBLIC_ADMIN_PATHS.some((p) => pathname.startsWith(p));
+
+  // Unauthenticated user hitting a protected admin route → redirect to login
+  if (!user && !isPublicPath) {
+    const loginUrl = new URL(AUTH_PREFIX, request.url);
+    // Preserve intended destination so login can bounce them back
+    if (pathname !== ADMIN_PREFIX) {
+      loginUrl.searchParams.set('next', pathname);
+    }
+    return NextResponse.redirect(loginUrl);
   }
 
-  // Login: anonymous users land here. Already-signed-in admins get
-  // bounced to the dashboard so they don't have to sign in again.
-  if (pathname.startsWith('/admin-management/login')) {
-    if (user) {
-      // Verify role before letting them skip the login form.
-      const role = await fetchRole(request, user.id);
-      if (role && ADMIN_ROLES.has(role)) {
-        return NextResponse.redirect(
-          new URL('/admin-management/dashboard', request.url),
-        );
-      }
-    }
-    return response;
-  }
-
-  // Everything else under /admin-management requires a signed-in admin.
-  if (pathname.startsWith('/admin-management')) {
-    if (!user) {
-      return NextResponse.redirect(
-        new URL('/admin-management/login', request.url),
-      );
-    }
-    const role = await fetchRole(request, user.id);
-    if (!role || !ADMIN_ROLES.has(role)) {
-      // Signed in as a non-admin (customer or driver) — kick to public site.
-      return NextResponse.redirect(new URL('/', request.url));
-    }
+  // Authenticated user hitting the login page → send them to the dashboard
+  // (avoids a "back to login" loop after signing in).
+  if (user && pathname.startsWith(AUTH_PREFIX)) {
+    return NextResponse.redirect(new URL('/admin-management/dashboard', request.url));
   }
 
   return response;
 }
 
-// One-shot role lookup. We don't cache here — the request middleware
-// runs on every navigation, so a stale cache could lock out a just-promoted
-// admin. Hits a single indexed `select` against profiles via the anon key
-// + the user's session cookie, so RLS still applies.
-async function fetchRole(
-  request: NextRequest,
-  userId: string,
-): Promise<string | null> {
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll() {
-          /* read-only here */
-        },
-      },
-    },
-  );
-  const { data } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', userId)
-    .single();
-  return (data as { role?: string } | null)?.role ?? null;
-}
-
+// Only fire middleware on the admin subtree. This keeps the public site
+// (landing + marketing pages) as fast static rendering as possible.
 export const config = {
-  // Match all /admin-management/* routes. Static assets, the public landing,
-  // and the existing /partners/legal/privacy routes are left untouched.
-  matcher: ['/admin-management/:path*'],
+  matcher: [
+    /*
+     * Run on all /admin-management/* routes.
+     * Skip Next.js internals (_next/*, favicon.ico, etc.) and API routes.
+     */
+    '/admin-management/:path*',
+  ],
 };
