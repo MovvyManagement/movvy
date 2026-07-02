@@ -69,6 +69,7 @@ handle(async (req) => {
         .select('profile_id, partner_teams!inner(id, primary_city_id, onboarding_status)')
         .eq('partner_teams.primary_city_id', booking.city_id)
         .eq('partner_teams.onboarding_status', 'verified')
+        .eq('status', 'active')
         .is('removed_at', null),
       admin
         .from('company_members')
@@ -76,6 +77,7 @@ handle(async (req) => {
         .eq('companies.primary_city_id', booking.city_id)
         .eq('companies.onboarding_status', 'verified')
         .in('role', ['owner', 'dispatcher'])
+        .eq('status', 'active')
         .is('removed_at', null),
     ]);
 

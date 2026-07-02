@@ -161,6 +161,7 @@ async function fetchPartnerOwnerProfile(
       .from('partner_team_members')
       .select('profiles!partner_team_members_profile_id_fkey(email, full_name)')
       .eq('team_id', subjectId)
+      .eq('status', 'active')
       .is('removed_at', null)
       .limit(1)
       .maybeSingle();
@@ -174,6 +175,7 @@ async function fetchPartnerOwnerProfile(
     .select('role, profiles!company_members_profile_id_fkey(email, full_name)')
     .eq('company_id', subjectId)
     .eq('role', 'owner')
+    .eq('status', 'active')
     .is('removed_at', null)
     .limit(1)
     .maybeSingle();

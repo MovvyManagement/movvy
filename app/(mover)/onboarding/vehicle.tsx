@@ -7,6 +7,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { StepIndicator } from '@/components/StepIndicator';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
+import { usePartnerStore } from '@/store/partnerStore';
 
 const vehicleTypes = [
   { key: 'cargo_van', label: 'Cargo van', sub: 'Up to 250 cu ft' },
@@ -16,9 +17,20 @@ const vehicleTypes = [
 ];
 
 export default function VehicleInfo() {
+  // Driver's license number used to live on the "Your team" step. Now that
+  // step only collects the mover's info + HQ address, the license question
+  // belongs here — it's about driving credentials, same context as the
+  // vehicle being driven. We push it into the partner store so
+  // useCreatePartnerTeam (in documents.tsx) still picks it up.
+  const teamDriver = usePartnerStore((s) => s.teamDriver);
+  const setTeamDriver = usePartnerStore((s) => s.setTeamDriver);
+
   const [type, setType] = useState<string>('');
   const [year, setYear] = useState('');
   const [plate, setPlate] = useState('');
+
+  const licenseOk = (teamDriver.licenseNumber ?? '').trim().length >= 4;
+  const canContinue = !!type && licenseOk;
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={['top', 'bottom']}>
@@ -77,6 +89,16 @@ export default function VehicleInfo() {
             onChangeText={setPlate}
             leftIcon={<Ionicons name="pricetag-outline" size={18} color="#71717A" />}
           />
+          <Input
+            label="Driver license number"
+            placeholder="Alberta class 5 or equivalent"
+            autoCapitalize="characters"
+            autoCorrect={false}
+            value={teamDriver.licenseNumber}
+            onChangeText={(t) => setTeamDriver({ licenseNumber: t })}
+            leftIcon={<Ionicons name="card-outline" size={18} color="#71717A" />}
+            hint="Movvy verifies this against the photo in your Documents step."
+          />
         </View>
       </ScrollView>
       <View className="px-5 pt-3 pb-4 border-t border-silver-100 bg-white">
@@ -84,7 +106,7 @@ export default function VehicleInfo() {
           label="Continue"
           size="lg"
           fullWidth
-          disabled={!type}
+          disabled={!canContinue}
           onPress={() => router.push('/(mover)/onboarding/documents')}
         />
       </View>

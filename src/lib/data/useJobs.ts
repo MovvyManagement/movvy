@@ -135,6 +135,7 @@ export function useMyTeamCurrentJob() {
         .from('partner_team_members')
         .select('team_id')
         .eq('profile_id', user!.id)
+        .eq('status', 'active')
         .is('removed_at', null)
         .limit(1)
         .maybeSingle();

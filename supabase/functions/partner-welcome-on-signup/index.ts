@@ -64,6 +64,7 @@ handle(async (req) => {
     .from('partner_team_members')
     .select('profiles!partner_team_members_profile_id_fkey(email, full_name)')
     .eq('team_id', teamId)
+    .eq('status', 'active')
     .is('removed_at', null)
     .limit(1)
     .maybeSingle();

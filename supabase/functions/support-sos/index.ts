@@ -100,6 +100,7 @@ handle(async (req) => {
           .select('profile_id, role')
           .eq('company_id', booking.assigned_company_id)
           .in('role', ['owner', 'dispatcher'])
+          .eq('status', 'active')
           .is('removed_at', null)
       : Promise.resolve({ data: [] });
     const [adminRes, dispatcherRes] = await Promise.all([adminQuery, dispatcherQuery]);

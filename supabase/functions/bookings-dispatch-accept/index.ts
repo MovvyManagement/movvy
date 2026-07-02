@@ -49,12 +49,14 @@ handle(async (req) => {
 
     const admin = adminClient();
 
-    // Verify the caller is owner or dispatcher of this company
+    // Verify the caller is an ACTIVE owner or dispatcher of this company.
+    // status='active' excludes pending_approval / rejected self-joins.
     const { data: membership } = await admin
       .from('company_members')
       .select('role')
       .eq('company_id', company_id)
       .eq('profile_id', user.id)
+      .eq('status', 'active')
       .is('removed_at', null)
       .maybeSingle();
     if (!membership) throw httpError(403, 'You are not a member of this company');

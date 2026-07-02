@@ -1,19 +1,22 @@
 // =============================================================================
-// /(auth)/partner-join
+// /(auth)/partner-join  —  Option C: open code + owner approval
 //
-// Invited drivers / movers / dispatchers come here from the welcome screen
-// ("Got an invite from your team? Join here") or directly via a deep link
-// like movvy://join/CO-X7QJ4M.
+// Drivers / movers / dispatchers come here from the welcome screen ("Got an
+// invite from your team? Join here") or via a deep link like
+// movvy://join/CO-X7QJ4M.
 //
 // They provide:
 //   • the team / company invite code (auto-filled from deep link)
-//   • the email OR phone the owner registered them with
+//   • their own email OR phone (used to set up their account — it does NOT
+//     have to match anything the owner entered)
 //   • a chosen password + their full name
 //
-// We call partners-invite-accept which validates the (code, contact) pair
-// against partner_invites, creates the auth user, and links them to the
-// team / company in one transaction. After success, we drop them on the
-// login screen so they can sign in.
+// We call partners-invite-accept, which creates the auth user and inserts a
+// membership row in status='pending_approval'. The team operator / company
+// owner then approves (or rejects) the request from their crew screen. The
+// applicant can sign in immediately, but lands on the waiting-for-approval
+// screen until they're approved. No session is returned here (the edge fn
+// uses an admin client), so we send them to partner-signin next.
 // =============================================================================
 
 import React, { useState } from 'react';
@@ -77,13 +80,17 @@ export default function PartnerJoin() {
           ? { email: email.trim().toLowerCase() }
           : { phone: toE164(phone) }),
       });
-      // After account creation we DON'T auto-link to the team/company.
-      // The driver signs in next, lands on /(mover)/jobs (or company
-      // dashboard), and InviteAcceptHost pops the explicit Accept /
-      // Decline modal against the invite that's still pending.
+      // Option C: partners-invite-accept created (or found) the membership in
+      // pending_approval. It uses an admin client, so there's no session to
+      // hand back — the applicant signs in next, which routes them to the
+      // waiting screen (pending) or straight to the dashboard (already
+      // active). res.message carries the right server-authored copy.
+      const title = res.already_member
+        ? "You're already on the roster"
+        : 'Request sent';
       Alert.alert(
-        res.created_new ? 'Account created' : 'Linked to your account',
-        `${res.message} You'll get an invite popup once you're signed in.`,
+        title,
+        res.message,
         [{ text: 'Sign in', onPress: () => router.replace('/(auth)/partner-signin') }],
       );
     } catch (e: any) {
@@ -105,27 +112,28 @@ export default function PartnerJoin() {
           <View className="flex-1 px-6">
             <Text className="text-3xl font-bold text-ink-900">Join your crew</Text>
             <Text className="mt-2 text-base text-silver-500">
-              Enter the code from the text or email you received. We use it to
-              link you to your company or team.
+              Enter your team or company's invite code to request to join. The
+              owner reviews and approves new members before you start seeing
+              jobs.
             </Text>
 
             {/* Invite code */}
             <View className="mt-6">
               <Input
-                label="Team invite code"
+                label="Team / company code"
                 placeholder="TM-XXXXXX or CO-XXXXXX"
                 autoCapitalize="characters"
                 autoCorrect={false}
                 value={code}
                 onChangeText={(t) => setCode(t.toUpperCase())}
-                hint="From the text/email your team owner sent"
+                hint="Shared by your team owner or company"
                 leftIcon={<Ionicons name="key-outline" size={18} color="#71717A" />}
               />
             </View>
 
             {/* Contact toggle */}
             <Text className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-silver-500">
-              How were you added?
+              Your contact details
             </Text>
             <View className="flex-row rounded-2xl bg-silver-100 p-1">
               <Pressable
@@ -168,7 +176,7 @@ export default function PartnerJoin() {
                   keyboardType="email-address"
                   value={email}
                   onChangeText={setEmail}
-                  hint="Must match the email your team owner added"
+                  hint="We'll use this to set up your account"
                   leftIcon={<Ionicons name="mail-outline" size={18} color="#71717A" />}
                 />
               ) : (
@@ -176,7 +184,7 @@ export default function PartnerJoin() {
                   label="Phone"
                   value={phone}
                   onChangeText={setPhone}
-                  hint="Must match the phone your team owner added"
+                  hint="We'll use this to set up your account"
                 />
               )}
 
@@ -219,7 +227,7 @@ export default function PartnerJoin() {
 
             <View className="mt-6">
               <Button
-                label="Join my team"
+                label="Request to join"
                 size="lg"
                 fullWidth
                 loading={accept.isPending}
@@ -231,9 +239,9 @@ export default function PartnerJoin() {
             <View className="mt-6 rounded-2xl bg-silver-50 p-4 flex-row">
               <Ionicons name="shield-checkmark-outline" size={18} color="#71717A" />
               <Text className="ml-2 flex-1 text-xs text-silver-500 leading-5">
-                Your team's invite code only works if the email/phone you enter
-                here matches what the team owner added you with. Both must
-                match — no one can sneak in.
+                The code lets you request to join. The team owner reviews and
+                approves every new member before they can see jobs — so no one
+                gets on the roster without their say-so.
               </Text>
             </View>
 

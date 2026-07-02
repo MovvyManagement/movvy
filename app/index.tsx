@@ -5,6 +5,7 @@ import { Link, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '@/components/Button';
+import { MovvyMark } from '@/components/MovvyMark';
 import {
   COVERAGE_LABEL,
   COVERAGE_SHORT,
@@ -21,12 +22,7 @@ export default function Welcome() {
       />
       <SafeAreaView className="flex-1" edges={['top', 'bottom']}>
         <View className="flex-1 px-6 pt-6">
-          <View className="flex-row items-center">
-            <View className="h-10 w-10 rounded-2xl bg-brand-600 items-center justify-center">
-              <Ionicons name="cube" size={20} color="#fff" />
-            </View>
-            <Text className="ml-2 text-xl font-bold text-ink-900">Movvy</Text>
-          </View>
+          <MovvyMark size={40} showText />
 
           {/* Hero + value-props. Value props sit between subtitle and CTA so
               they're the last thing read before the user taps Get started —

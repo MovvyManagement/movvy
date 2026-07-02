@@ -63,6 +63,7 @@ handle(async (req) => {
       .from('company_members')
       .select('company_id, role')
       .eq('profile_id', user.id)
+      .eq('status', 'active')
       .is('removed_at', null)
       .maybeSingle();
     if (companyMembership?.role === 'driver') {
@@ -72,13 +73,16 @@ handle(async (req) => {
       );
     }
 
-    // Verify the user is actually a member of the team/company they're accepting on behalf of
+    // Verify the user is an ACTIVE member of the team/company they're accepting
+    // on behalf of. status='active' is critical: an Option-C self-join lands in
+    // 'pending_approval' — those (and 'rejected') members must never take jobs.
     if (team_id) {
       const { data: m } = await admin
         .from('partner_team_members')
         .select('team_id')
         .eq('team_id', team_id)
         .eq('profile_id', user.id)
+        .eq('status', 'active')
         .is('removed_at', null)
         .maybeSingle();
       if (!m) throw httpError(403, 'You are not a member of this team');
@@ -89,6 +93,7 @@ handle(async (req) => {
         .select('company_id, role')
         .eq('company_id', company_id)
         .eq('profile_id', user.id)
+        .eq('status', 'active')
         .is('removed_at', null)
         .maybeSingle();
       if (!m) throw httpError(403, 'You are not a member of this company');

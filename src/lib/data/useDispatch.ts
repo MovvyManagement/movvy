@@ -103,6 +103,7 @@ export function useMyMembership() {
           'company_id, role, companies!inner(display_name, primary_city_id, cities:primary_city_id(slug, name, region))',
         )
         .eq('profile_id', user!.id)
+        .eq('status', 'active')
         .is('removed_at', null)
         .limit(1)
         .maybeSingle();
@@ -132,6 +133,7 @@ export function useMyMembership() {
           'team_id, role, partner_teams!inner(display_name, primary_city_id, cities:primary_city_id(slug, name, region))',
         )
         .eq('profile_id', user!.id)
+        .eq('status', 'active')
         .is('removed_at', null)
         .limit(1)
         .maybeSingle();
@@ -436,6 +438,117 @@ export function useDispatcherDecline() {
     },
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['dispatch-queue', vars.company_id] });
+    },
+  });
+}
+
+// ─── Option C: pending-approval self-join flow ───────────────────────────────
+// Anyone with a valid team/company invite code can sign up and self-join —
+// they land in status='pending_approval'. The three hooks below drive both
+// sides of the approval handshake:
+//   • usePendingApprovalMembership — the applicant's "you're in the queue"
+//     waiting screen (polls until the owner approves/rejects).
+//   • usePendingJoinRequests — the owner's crew/drivers "Pending approvals"
+//     list.
+//   • useResolveJoinRequest — the owner's Approve / Reject button.
+
+export interface PendingApprovalMembership {
+  kind: 'team' | 'company';
+  subject_id: string;
+  org_name: string | null;
+  member_role: string;
+  status: 'pending_approval' | 'rejected';
+  rejected_reason: string | null;
+}
+
+/**
+ * The signed-in user's OWN pending/rejected membership, if any. Returns null
+ * when they have no pending membership (i.e. they're active or a pure
+ * customer). Polls every 15s so the waiting screen flips to the dashboard
+ * within seconds of the owner approving. Backed by my_pending_membership()
+ * (SECURITY DEFINER — reads the org name that tightened RLS now hides).
+ */
+export function usePendingApprovalMembership() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ['my-pending-membership', user?.id],
+    enabled: !!user?.id && supabaseConfigured,
+    refetchInterval: 15_000,
+    queryFn: async (): Promise<PendingApprovalMembership | null> => {
+      const { data, error } = await supabase.rpc('my_pending_membership');
+      if (error) throw error;
+      const row = (data ?? [])[0];
+      return (row as PendingApprovalMembership | undefined) ?? null;
+    },
+  });
+}
+
+export interface PendingJoinRequest {
+  profile_id: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  member_role: string;
+  requested_at: string;
+}
+
+/**
+ * The pending applicants waiting for the owner to approve them into their
+ * team/company. Gated server-side — only an active owner/dispatcher (company)
+ * or active operator (team) sees rows. Polls every 20s so a new self-join
+ * shows up without a manual refresh.
+ */
+export function usePendingJoinRequests(
+  kind: 'team' | 'company' | null | undefined,
+  subjectId: string | null | undefined,
+) {
+  return useQuery({
+    queryKey: ['pending-join-requests', kind, subjectId],
+    enabled: !!kind && !!subjectId && supabaseConfigured,
+    refetchInterval: 20_000,
+    queryFn: async (): Promise<PendingJoinRequest[]> => {
+      const { data, error } = await supabase.rpc('pending_join_requests', {
+        p_kind: kind!,
+        p_subject_id: subjectId!,
+      });
+      if (error) throw error;
+      return (data ?? []) as PendingJoinRequest[];
+    },
+  });
+}
+
+/**
+ * Approve or reject a pending join request. Invokes partners-approve-join,
+ * which flips the member row to active/rejected, notifies the applicant, and
+ * audit-logs the decision. Invalidates the owner's pending list + roster so
+ * the approved driver appears in the crew immediately.
+ */
+export function useResolveJoinRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      subject_type: 'team' | 'company';
+      subject_id: string;
+      applicant_profile_id: string;
+      decision: 'approve' | 'reject';
+      reason?: string;
+    }) => {
+      const { data, error } = await supabase.functions.invoke('partners-approve-join', {
+        body: args,
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as {
+        ok: true;
+        decision: 'approve' | 'reject';
+        applicant_name: string;
+        target_name: string;
+      };
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['pending-join-requests', vars.subject_type, vars.subject_id] });
+      qc.invalidateQueries({ queryKey: ['company-driver-roster', vars.subject_id] });
+      qc.invalidateQueries({ queryKey: ['partner-team-roster', vars.subject_id] });
     },
   });
 }

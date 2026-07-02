@@ -149,6 +149,8 @@ export function useMyDriverStats() {
         .from('partner_team_members')
         .select('team_id, partner_teams!inner(id, display_name, rating_avg, rating_count, onboarding_status)')
         .eq('profile_id', user!.id)
+        .eq('status', 'active')
+        .is('removed_at', null)
         .limit(1)
         .maybeSingle();
       if (mErr) throw mErr;

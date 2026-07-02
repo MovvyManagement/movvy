@@ -50,27 +50,32 @@ handle(async (req) => {
 
     const admin = adminClient();
 
-    // 1. Caller must be owner / dispatcher of the company
+    // 1. Caller must be an ACTIVE owner / dispatcher of the company
     const { data: dispatcher } = await admin
       .from('company_members')
       .select('role')
       .eq('company_id', company_id)
       .eq('profile_id', user.id)
+      .eq('status', 'active')
       .is('removed_at', null)
       .maybeSingle();
     if (!dispatcher || !['owner', 'dispatcher'].includes(dispatcher.role)) {
       throw httpError(403, 'Only owners and dispatchers can assign drivers');
     }
 
-    // 2. The target driver must be an active driver in the same company
+    // 2. The target driver must be an ACTIVE driver in the same company.
+    // status='active' is essential — a dispatcher must not be able to hand a
+    // live customer move to someone who only self-joined and is still
+    // pending_approval (or was rejected).
     const { data: driver } = await admin
       .from('company_members')
       .select('role')
       .eq('company_id', company_id)
       .eq('profile_id', driver_profile_id)
+      .eq('status', 'active')
       .is('removed_at', null)
       .maybeSingle();
-    if (!driver) throw httpError(400, 'Selected driver is not in your company');
+    if (!driver) throw httpError(400, 'Selected driver is not an active member of your company');
     if (driver.role !== 'driver') throw httpError(400, 'Selected member is not a driver');
 
     // 2b. The target driver must be fully verified — refuses assignment of

@@ -30,7 +30,8 @@ import { EmptyState } from '@/components/EmptyState';
 import { CardSkeleton } from '@/components/Skeleton';
 import { BulkReassignSheet } from '@/components/BulkReassignSheet';
 import { AddDriverSheet } from '@/components/AddDriverSheet';
-import { useMyMembership, useCompanyDriverRoster } from '@/lib/data';
+import { PendingApprovals } from '@/components/PendingApprovals';
+import { useMyMembership, useCompanyDriverRoster, usePendingJoinRequests } from '@/lib/data';
 import { supabaseConfigured } from '@/lib/supabase';
 import { NotificationBell } from '@/components/NotificationBell';
 
@@ -41,6 +42,13 @@ export default function CompanyDrivers() {
     membership?.kind === 'company' &&
     (membership.role === 'owner' || membership.role === 'dispatcher');
   const { data: roster, isLoading, refetch, isRefetching } = useCompanyDriverRoster(companyId);
+
+  // Self-joiners who used the company code and are waiting to be let in. Pulled
+  // at the screen level (not just inside <PendingApprovals>) so the "no drivers
+  // yet" empty state can step aside when there's a queue to review. React Query
+  // dedupes this against the identical call inside the component.
+  const { data: pendingRequests } = usePendingJoinRequests('company', companyId);
+  const pendingCount = pendingRequests?.length ?? 0;
 
   const total = roster?.length ?? 0;
   const online = roster?.filter((d) => d.is_online).length ?? 0;
@@ -93,7 +101,7 @@ export default function CompanyDrivers() {
           title="Backend not connected"
           body="Connect Supabase in .env.local to load your live driver roster."
         />
-      ) : !roster || roster.length === 0 ? (
+      ) : (!roster || roster.length === 0) && pendingCount === 0 ? (
         <EmptyState
           icon="people-outline"
           title="No drivers on your roster yet"
@@ -131,7 +139,7 @@ export default function CompanyDrivers() {
             </Card>
           </View>
 
-          {roster
+          {(roster ?? [])
             .slice()
             // Online first, then by active-jobs ascending, then by name
             .sort((a, b) => {
@@ -206,6 +214,11 @@ export default function CompanyDrivers() {
                 </View>
               );
             })}
+
+          {/* ─── Pending approvals ─────────────────────────────────────────── */}
+          {/* Self-joiners who used the company code and are waiting on an
+              owner/dispatcher. Renders nothing when the queue is empty. */}
+          <PendingApprovals kind="company" subjectId={companyId} />
         </ScrollView>
       )}
 

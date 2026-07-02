@@ -69,10 +69,23 @@ export interface AcceptInviteArgs {
 
 export interface AcceptInviteResult {
   ok: true;
-  created_new: boolean;
+  /** Option C: a membership row was created (or already exists) in
+   *  pending_approval — the owner must approve before the applicant can work. */
+  pending_approval?: boolean;
+  /** True when the caller is ALREADY an active member — nothing to do but
+   *  sign in. */
+  already_member?: boolean;
+  /** The edge function creates the account with an admin client and never
+   *  returns a session, so this is always false today — the applicant signs
+   *  in on the next screen. Kept for forward-compat. */
+  signed_in?: boolean;
+  /** True when a brand-new auth user was created (vs. linking an existing one). */
+  created_new?: boolean;
   role: PartnerInviteRole;
-  team_id?: string;
-  company_id?: string;
+  team_id?: string | null;
+  company_id?: string | null;
+  /** Display name of the team/company they requested to join. */
+  target_name?: string;
   message: string;
 }
 

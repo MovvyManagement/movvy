@@ -25,6 +25,7 @@ export default function AdminLayout() {
       <Tabs.Screen name="bookings" options={{ title: 'Bookings', tabBarIcon: ({ color, size }) => <Ionicons name="cube" color={color} size={size - 2} /> }} />
       <Tabs.Screen name="users" options={{ title: 'Users', tabBarIcon: ({ color, size }) => <Ionicons name="people" color={color} size={size - 2} /> }} />
       <Tabs.Screen name="disputes" options={{ title: 'Disputes', tabBarIcon: ({ color, size }) => <Ionicons name="alert-circle" color={color} size={size - 2} /> }} />
+      <Tabs.Screen name="support" options={{ title: 'Support', tabBarIcon: ({ color, size }) => <Ionicons name="headset" color={color} size={size - 2} /> }} />
       {/* Feature flags + paid-API budget control — admin-only kill switches. */}
       <Tabs.Screen name="flags" options={{ title: 'Flags', tabBarIcon: ({ color, size }) => <Ionicons name="flag" color={color} size={size - 2} /> }} />
       <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ color, size }) => <Ionicons name="bar-chart" color={color} size={size - 2} /> }} />
