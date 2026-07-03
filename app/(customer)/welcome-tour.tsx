@@ -49,7 +49,10 @@ const SLIDES: Slide[] = [
     body: 'Your driver flags 5 stages — left HQ, arrived, loaded, drop-off, done — and you see the live map update each time.',
     highlights: [
       'Driver pin moves smoothly on the map',
-      'Push notifications + ETA banner at every step',
+      // Push (APNs/FCM) is still deferred — promise only the in-app
+      // status + ETA updates that actually ship today. Restore the push
+      // wording once notifications land.
+      'Live status + ETA updates at every step',
       '"Driver arriving in 5 min" full-screen alert',
     ],
   },

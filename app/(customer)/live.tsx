@@ -17,6 +17,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, Pressable, Alert, Animated as RNAnimated, RefreshControl, Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -178,32 +179,12 @@ export default function LiveMove() {
   // issue" button both come here.
   const openSupportHub = () => router.push('/(customer)/support');
 
-  // Cancel-booking flow — Alert confirm → useCancelBooking → toast + tab back.
-  const cancelMutation = useCancelBooking();
-  const onCancelBooking = () => {
-    if (!booking) return;
-    Alert.alert(
-      'Cancel this move?',
-      'Your crew has held this slot. Cancellations inside 48 hours of your move incur a small fee that goes to the crew. Continue?',
-      [
-        { text: 'Keep my move', style: 'cancel' },
-        {
-          text: 'Cancel move',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await cancelMutation.mutateAsync({ booking_id: booking.id });
-              haptic.success();
-              toast.success('Move cancelled.');
-              router.replace('/(customer)/home');
-            } catch (e: any) {
-              toast.error(e?.message ?? "Couldn't cancel — try again or contact support.");
-            }
-          },
-        },
-      ],
-    );
-  };
+  // Cancel-booking flow — opens CancelMoveSheet (bottom of this file).
+  // The old Alert flow invoked bookings-cancel WITHOUT the required `reason`
+  // field, so the server rejected every attempt — the customer's Cancel
+  // button never actually worked. The sheet makes the reason a one-tap pick,
+  // which is what makes the request valid (and gives ops churn data).
+  const [showCancel, setShowCancel] = useState(false);
 
   // ── Phone proxy (Uber-style masked call) ───────────────────────────────────
   // Routes through proxy-session-create → the native dialer hits a Movvy
@@ -546,8 +527,7 @@ export default function LiveMove() {
               label="Cancel"
               variant="ghost"
               fullWidth
-              onPress={onCancelBooking}
-              loading={cancelMutation.isPending}
+              onPress={() => setShowCancel(true)}
             />
           </View>
         ) : null}
@@ -583,21 +563,33 @@ export default function LiveMove() {
         </View>
       </Modal>
 
-      {/* AUTO-REVIEW MODAL on completion */}
+      {/* AUTO-REVIEW MODAL on completion. crewName (the accepted company/
+          team's real display name), NOT moverName — moverName is mock-only
+          and always null on live bookings, which made every real customer
+          rate an anonymous "Movvy Crew". */}
       <ReviewModal
         visible={showReview}
         bookingId={booking.id}
         bookingTotalDollars={booking.totalDollars}
-        moverName={moverName ?? 'Movvy Crew'}
+        moverName={crewName ?? 'Movvy Crew'}
         onClose={() => setShowReview(false)}
       />
 
-      {/* Chat with crew — slide-up sheet (replaces the deleted /chat route) */}
+      {/* Chat with crew — slide-up sheet (replaces the deleted /chat route).
+          Same crewName-not-moverName rule as the review modal above. */}
       <ChatSheet
         visible={showChat}
         bookingId={booking.id}
-        peerName={moverName ?? 'Movvy Crew'}
+        peerName={crewName ?? 'Movvy Crew'}
         onClose={() => setShowChat(false)}
+      />
+
+      {/* Cancel flow — reason is REQUIRED by bookings-cancel, so the sheet
+          collects it with one tap before firing the mutation. */}
+      <CancelMoveSheet
+        visible={showCancel}
+        bookingId={booking.id}
+        onClose={() => setShowCancel(false)}
       />
 
     </SafeAreaView>
@@ -758,6 +750,136 @@ function ReviewModal({
               </Pressable>
             </View>
           </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// ─── Cancel-move sheet ──────────────────────────────────────────────────────
+// bookings-cancel requires `reason` (min 3 chars) — the old Alert flow sent
+// none, so every customer cancel 400'd. One-tap reason rows make the request
+// valid and feed the cancellation history ops reads in the admin.
+
+const CANCEL_REASONS = [
+  { key: 'plans_changed', label: 'My plans changed' },
+  { key: 'reschedule', label: 'I need a different date' },
+  { key: 'booked_by_mistake', label: 'Booked by mistake' },
+  { key: 'found_alternative', label: 'Found another option' },
+  { key: 'other', label: 'Other' },
+] as const;
+
+function CancelMoveSheet({
+  visible,
+  bookingId,
+  onClose,
+}: {
+  visible: boolean;
+  bookingId: string;
+  onClose: () => void;
+}) {
+  const cancelMutation = useCancelBooking();
+  const toast = useToast();
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const close = () => {
+    if (cancelMutation.isPending) return;
+    setSelected(null);
+    onClose();
+  };
+
+  const submit = async () => {
+    if (!selected || cancelMutation.isPending) return;
+    const label = CANCEL_REASONS.find((r) => r.key === selected)?.label ?? selected;
+    try {
+      await cancelMutation.mutateAsync({
+        booking_id: bookingId,
+        reason: `Customer · ${label}`,
+      });
+      haptic.success();
+      toast.success('Move cancelled.');
+      setSelected(null);
+      onClose();
+      router.replace('/(customer)/home');
+    } catch (e: any) {
+      haptic.error();
+      toast.error(e?.message ?? "Couldn't cancel — try again or contact support.");
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+      <Pressable
+        onPress={close}
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
+      >
+        <Pressable onPress={(e) => e.stopPropagation()}>
+          <SafeAreaView edges={['bottom']} className="rounded-t-3xl bg-white">
+            <View className="px-5 pt-5 pb-4">
+              <Text className="text-lg font-bold text-ink-900">Cancel this move?</Text>
+              <Text className="mt-1 text-sm text-silver-500 leading-5">
+                Your crew has held this slot. Cancelling within 48 hours of
+                your move incurs a fee that goes to the crew.
+              </Text>
+
+              <Text className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-silver-500">
+                Why are you cancelling?
+              </Text>
+              {CANCEL_REASONS.map((r) => {
+                const sel = selected === r.key;
+                return (
+                  <Pressable
+                    key={r.key}
+                    onPress={() => {
+                      haptic.light();
+                      setSelected(r.key);
+                    }}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: sel }}
+                    className={`mb-2 rounded-2xl border px-4 py-3.5 flex-row items-center ${
+                      sel ? 'border-ink-900 bg-silver-50' : 'border-silver-200 bg-white'
+                    }`}
+                  >
+                    <View
+                      className={`h-5 w-5 rounded-full border-2 items-center justify-center ${
+                        sel ? 'border-ink-900' : 'border-silver-300'
+                      }`}
+                    >
+                      {sel ? <View className="h-2.5 w-2.5 rounded-full bg-ink-900" /> : null}
+                    </View>
+                    <Text className="ml-3 flex-1 text-sm font-semibold text-ink-900">
+                      {r.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+
+              <Pressable
+                onPress={submit}
+                disabled={!selected || cancelMutation.isPending}
+                accessibilityRole="button"
+                accessibilityLabel="Confirm cancellation"
+                className={`mt-4 h-14 rounded-2xl items-center justify-center ${
+                  selected && !cancelMutation.isPending
+                    ? 'bg-danger active:opacity-90'
+                    : 'bg-silver-300'
+                }`}
+              >
+                {cancelMutation.isPending ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text className="text-base font-bold text-white">Cancel move</Text>
+                )}
+              </Pressable>
+              <Pressable
+                onPress={close}
+                disabled={cancelMutation.isPending}
+                className="mt-2 h-12 items-center justify-center"
+              >
+                <Text className="text-sm font-semibold text-silver-500">Keep my move</Text>
+              </Pressable>
+            </View>
+          </SafeAreaView>
         </Pressable>
       </Pressable>
     </Modal>

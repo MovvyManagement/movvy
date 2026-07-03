@@ -7,12 +7,11 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { Card } from '@/components/Card';
 import { Avatar } from '@/components/Avatar';
 import { logout, supabaseConfigured, useAuth } from '@/lib/supabase';
-import { useProfile, useDeleteAccount, usePaymentMethods, useSavedAddresses } from '@/lib/data';
-import { Alert } from 'react-native';
+import { useProfile, usePaymentMethods, useSavedAddresses } from '@/lib/data';
 import { MaxWidth } from '@/components/MaxWidth';
 import { EditNameSheet } from '@/components/EditNameSheet';
 import { EditPhoneSheet } from '@/components/EditPhoneSheet';
-import { PromoCodeSheet } from '@/components/PromoCodeSheet';
+import { DeleteAccountSheet } from '@/components/DeleteAccountSheet';
 import { NotificationBell } from '@/components/NotificationBell';
 import { useToast } from '@/components/Toast';
 import { fmtPhone } from '@/lib/format';
@@ -32,7 +31,6 @@ export default function Profile() {
   const { data: profile, isLoading } = useProfile();
   const { data: cards } = usePaymentMethods();
   const { data: addresses } = useSavedAddresses();
-  const deleteAcct = useDeleteAccount();
   const toast = useToast();
 
   // Slide-up sheets for the editable account rows. Kept here (not as nested
@@ -40,39 +38,10 @@ export default function Profile() {
   // doesn't push onto the nav stack.
   const [editNameOpen, setEditNameOpen] = React.useState(false);
   const [editPhoneOpen, setEditPhoneOpen] = React.useState(false);
-  const [promoOpen, setPromoOpen] = React.useState(false);
-
-  const requestDeletion = (email: string, phone: string) => {
-    Alert.alert(
-      'Delete your Movvy account?',
-      "Your account, saved addresses, and devices will be removed. Past bookings + receipts are kept for accounting.\n\nThis cannot be undone.",
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Continue',
-          style: 'destructive',
-          onPress: () => {
-            Alert.prompt(
-              'Confirm',
-              `Type your email${phone ? ' or phone' : ''} to confirm:`,
-              async (typed) => {
-                if (!typed) return;
-                try {
-                  await deleteAcct.mutateAsync({ confirm_email_or_phone: typed });
-                  Alert.alert('Account deleted', "You've been signed out. We're sorry to see you go.");
-                  await logout();
-                  router.replace('/');
-                } catch (e: any) {
-                  Alert.alert('Could not delete', e?.message ?? 'Try again.');
-                }
-              },
-              'plain-text',
-            );
-          },
-        },
-      ],
-    );
-  };
+  // Account deletion runs through DeleteAccountSheet — the old flow used
+  // Alert.prompt, which is iOS-only, so Android customers could never
+  // complete the type-to-confirm step (a Google Play policy requirement).
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
 
   // Fallback display values for the not-yet-wired demo case.
   const displayName = profile?.full_name ?? (user?.user_metadata as any)?.full_name ?? 'Welcome';
@@ -147,22 +116,14 @@ export default function Profile() {
       value: 'View PDFs',
       onPress: () => router.push('/(customer)/receipts'),
     },
-    {
-      // Renamed from "Promo codes" — the sheet behind it calls
-      // useApplyReferralCode, which is referral-only ("MOV1234" codes that
-      // sit on another customer's profile row). Server promo codes like
-      // MOVE50 are entered at checkout instead. The label now matches the
-      // behaviour, no more two-systems-same-label confusion.
-      icon: 'pricetag-outline',
-      label: 'Referral code',
-      value: "Enter a friend's code",
-      onPress: () => setPromoOpen(true),
-    },
-    {
-      icon: 'gift-outline',
-      label: 'Invite friends · $50 off',
-      onPress: () => router.push('/(customer)/referrals'),
-    },
+    // The "Referral code" + "Invite friends · $50 off" rows were pulled
+    // pre-launch: the referral pipeline TRACKED credits (referrals table,
+    // migration 0032 applies them on the friend's first booking) but nothing
+    // ever redeemed them against a booking — bookings-create has no credit
+    // logic, so the screen promised $50 that could never be spent. Restore
+    // the rows (screen was app/(customer)/referrals.tsx, sheet was
+    // components/PromoCodeSheet.tsx — both in git history) once redemption
+    // is wired into the booking/invoice math.
   ];
 
   // Single "Customer service" entry replaces the old Help & support +
@@ -372,7 +333,9 @@ export default function Profile() {
         </Pressable>
 
         <Pressable
-          onPress={() => requestDeletion(profile?.email ?? user?.email ?? '', profile?.phone ?? '')}
+          onPress={() => setDeleteOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Delete my account"
           className="mt-3 h-14 items-center justify-center rounded-2xl bg-white border border-silver-200 active:opacity-70"
         >
           <Text className="text-sm font-semibold text-silver-500">Delete my account</Text>
@@ -389,7 +352,7 @@ export default function Profile() {
           control, not a personal-info field. */}
       <EditNameSheet visible={editNameOpen} onClose={() => setEditNameOpen(false)} />
       <EditPhoneSheet visible={editPhoneOpen} onClose={() => setEditPhoneOpen(false)} />
-      <PromoCodeSheet visible={promoOpen} onClose={() => setPromoOpen(false)} />
+      <DeleteAccountSheet visible={deleteOpen} onClose={() => setDeleteOpen(false)} />
     </SafeAreaView>
   );
 }

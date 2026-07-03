@@ -54,7 +54,7 @@ handle(async (req) => {
     // Load the booking — admin client bypasses RLS so we can read for ownership check
     const { data: booking, error: loadErr } = await admin
       .from('bookings')
-      .select('id, short_code, customer_id, status, scheduled_for_window_starts_at, scheduled_for_date, price_total_cents, assigned_team_id, assigned_company_id')
+      .select('id, short_code, customer_id, status, scheduled_for_window_starts_at, scheduled_for_date, price_total_cents, assigned_team_id, assigned_company_id, assigned_driver_profile_id')
       .eq('id', booking_id)
       .single();
 
@@ -101,6 +101,56 @@ handle(async (req) => {
       ua: req.headers.get('user-agent') ?? undefined,
       payload: { reason, refund_percent: refundPct, refund_cents: refundCents, hours_until: hoursUntil },
     });
+
+    // Notify the assigned crew. A customer cancel previously just made the
+    // job vanish from the driver's Active screen with no explanation — a crew
+    // already driving to pickup got zero signal. Only fires when someone was
+    // actually assigned (a still-searching booking has no crew to tell).
+    // Fire-and-forget: an inbox hiccup never blocks the cancel response.
+    try {
+      const recipients = new Set<string>();
+      if (booking.assigned_driver_profile_id) {
+        recipients.add(booking.assigned_driver_profile_id);
+      }
+      if (booking.assigned_team_id) {
+        // Whole crew — operator + hourly movers riding along need to know.
+        const { data: members } = await admin
+          .from('partner_team_members')
+          .select('profile_id')
+          .eq('team_id', booking.assigned_team_id)
+          .eq('status', 'active')
+          .is('removed_at', null);
+        for (const m of members ?? []) recipients.add((m as any).profile_id);
+      }
+      if (booking.assigned_company_id) {
+        // Owner/dispatcher — so they can free or reassign the slot.
+        const { data: members } = await admin
+          .from('company_members')
+          .select('profile_id')
+          .eq('company_id', booking.assigned_company_id)
+          .in('role', ['owner', 'dispatcher'])
+          .eq('status', 'active')
+          .is('removed_at', null);
+        for (const m of members ?? []) recipients.add((m as any).profile_id);
+      }
+      recipients.delete(user.id); // never notify whoever pressed cancel
+
+      if (recipients.size > 0) {
+        const shortCode = (booking as any).short_code ?? booking.id.slice(0, 8).toUpperCase();
+        const byPhrase = isAdmin ? 'by Movvy' : 'by the customer';
+        const rows = Array.from(recipients).map((profile_id) => ({
+          profile_id,
+          channel: 'in_app' as const,
+          category: 'booking.cancelled',
+          title: 'Move cancelled',
+          body: `Booking #${shortCode} on ${fmtDateShort(booking.scheduled_for_date)} was cancelled ${byPhrase}. The slot is now free.`,
+          data: { booking_id: booking.id, short_code: shortCode, cancelled_by: isAdmin ? 'movvy' : 'customer' },
+        }));
+        await admin.from('notifications').insert(rows);
+      }
+    } catch (notifyErr) {
+      console.warn('[bookings-cancel] crew notify failed (non-fatal)', notifyErr);
+    }
 
     // Stripe refund is issued in a later phase — for now we just record the eligible amount.
     // TODO: enqueue refund job once Stripe Connect is wired in Phase 3.
