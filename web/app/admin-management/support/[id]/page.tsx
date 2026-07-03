@@ -12,9 +12,17 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { supabaseServer } from '@/lib/supabase/server';
+import { fmtCents, fmtStatus } from '@/lib/format';
 import { ChatPanel } from './ChatPanel';
 
 export const dynamic = 'force-dynamic';
+
+// In-flight statuses — a move the crew is actively working right now. Kept in
+// sync with the Moves page so the support context matches the ops view.
+const ACTIVE_STATUSES = [
+  'assigned', 'confirmed', 'on_the_way', 'arrived', 'loading', 'in_transit', 'unloading',
+];
+const UPCOMING_STATUSES = ['pending', 'searching', 'assigned', 'confirmed'];
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -42,6 +50,51 @@ export default async function SupportThreadPage({ params }: PageProps) {
     .limit(100);
 
   const customer = (thread as any).customer;
+
+  // Move context — so the agent knows what the customer is talking about
+  // without asking. Priority: an in-flight move first, else the next upcoming
+  // one. Plus a lifetime move count for quick "new vs regular" read.
+  const moveSelect =
+    'id, short_code, status, pickup_city, dropoff_city, scheduled_for_date, scheduled_for_window, price_total_cents, actual_total_cents, assigned_team_id, assigned_company_id';
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const [{ data: activeMove }, { data: upcomingMove }, { count: totalMoves }] = await Promise.all([
+    supabase
+      .from('bookings')
+      .select(moveSelect)
+      .eq('customer_id', thread.customer_profile_id)
+      .in('status', ACTIVE_STATUSES)
+      .order('scheduled_for_date', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('bookings')
+      .select(moveSelect)
+      .eq('customer_id', thread.customer_profile_id)
+      .in('status', UPCOMING_STATUSES)
+      .gte('scheduled_for_date', todayIso)
+      .order('scheduled_for_date', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('bookings')
+      .select('id', { count: 'exact', head: true })
+      .eq('customer_id', thread.customer_profile_id),
+  ]);
+
+  const move = (activeMove as any) ?? (upcomingMove as any) ?? null;
+  const moveIsActive = !!activeMove;
+
+  // Resolve the assigned crew's name for the move, if any.
+  let crewName: string | null = null;
+  if (move?.assigned_team_id) {
+    const { data } = await supabase
+      .from('partner_teams').select('display_name').eq('id', move.assigned_team_id).maybeSingle();
+    crewName = (data as any)?.display_name ?? null;
+  } else if (move?.assigned_company_id) {
+    const { data } = await supabase
+      .from('companies').select('display_name').eq('id', move.assigned_company_id).maybeSingle();
+    crewName = (data as any)?.display_name ?? null;
+  }
 
   return (
     <div className="flex h-screen">
@@ -76,7 +129,56 @@ export default async function SupportThreadPage({ params }: PageProps) {
             label="Thread opened"
             value={new Date(thread.created_at).toLocaleDateString('en-CA')}
           />
+          <Field label="Lifetime moves" value={String(totalMoves ?? 0)} />
         </dl>
+
+        {/* Move context — what the customer is most likely messaging about. */}
+        <div className="mt-5 pt-4 border-t border-zinc-100">
+          <div className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400 mb-2">
+            {moveIsActive ? 'Current move' : move ? 'Upcoming move' : 'Move'}
+          </div>
+          {move ? (
+            <Link
+              href="/admin-management/moves"
+              className="block rounded-xl border border-zinc-200 bg-zinc-50 p-3 hover:border-emerald-300 hover:bg-emerald-50/40 transition-colors"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-zinc-900">#{move.short_code}</span>
+                <span
+                  className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                    moveIsActive
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-amber-100 text-amber-700'
+                  }`}
+                >
+                  {fmtStatus(move.status)}
+                </span>
+              </div>
+              <div className="mt-1.5 text-xs text-zinc-700">
+                {move.pickup_city ?? '—'} → {move.dropoff_city ?? 'in-home'}
+              </div>
+              <div className="mt-0.5 text-[11px] text-zinc-500">
+                {move.scheduled_for_date
+                  ? new Date(move.scheduled_for_date + 'T00:00:00').toLocaleDateString('en-CA', {
+                      weekday: 'short', month: 'short', day: 'numeric',
+                    })
+                  : '—'}
+                {move.scheduled_for_window ? ` · ${move.scheduled_for_window}` : ''}
+              </div>
+              <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                <span className="text-zinc-500">{crewName ?? 'Crew unassigned'}</span>
+                <span className="font-bold text-zinc-900">
+                  {fmtCents(move.actual_total_cents ?? move.price_total_cents)}
+                  {move.actual_total_cents ? '' : ' est.'}
+                </span>
+              </div>
+            </Link>
+          ) : (
+            <div className="rounded-xl border border-dashed border-zinc-200 p-3 text-[11px] text-zinc-400">
+              No active or upcoming move. This is likely a general question.
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Chat panel */}
