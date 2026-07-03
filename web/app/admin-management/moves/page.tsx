@@ -12,6 +12,7 @@
 
 import Link from 'next/link';
 import { supabaseServer } from '@/lib/supabase/server';
+import { getAdminAccess } from '@/lib/adminAccess';
 import { fmtCents, fmtDate, fmtStatus, fmtRelative, fmtDistance, fmtDuration } from '@/lib/format';
 
 const ACTIVE_STATUSES = [
@@ -37,6 +38,10 @@ export default async function MovesPage({ searchParams }: PageProps) {
   const activeTab: Tab = (tab as Tab) || 'active';
 
   const supabase = await supabaseServer();
+
+  // Revenue figures on this ops page are management-only. Staff see the moves
+  // (routes, status, crew, timing) but no dollar amounts.
+  const isManagement = (await getAdminAccess(supabase)) === 'management';
 
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
@@ -119,8 +124,8 @@ export default async function MovesPage({ searchParams }: PageProps) {
         <TabLink tab="upcoming" active={activeTab === 'upcoming'} label="Upcoming" count={upcomingCount.count ?? 0} />
       </div>
 
-      {/* Revenue summary bar */}
-      {(bookings ?? []).length > 0 && (
+      {/* Revenue summary bar — management only */}
+      {isManagement && (bookings ?? []).length > 0 && (
         <div className="flex items-center gap-6 px-5 py-3 bg-white border border-zinc-200 rounded-2xl mb-4">
           <div>
             <div className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">GMV</div>
@@ -210,15 +215,19 @@ export default async function MovesPage({ searchParams }: PageProps) {
                     </div>
                   </div>
 
-                  {/* Right: financials */}
+                  {/* Right: financials — management only; staff see timing only */}
                   <div className="text-right shrink-0">
-                    <div className="text-lg font-bold text-zinc-900">{fmtCents(b.price_total_cents)}</div>
-                    <div className="text-sm font-semibold text-emerald-700">{fmtCents(b.movvy_margin_cents)} comm.</div>
-                    {b.actual_total_cents && b.actual_total_cents !== b.price_total_cents && (
-                      <div className="text-xs text-zinc-500 mt-1">
-                        Actual: {fmtCents(b.actual_total_cents)}
-                      </div>
-                    )}
+                    {isManagement ? (
+                      <>
+                        <div className="text-lg font-bold text-zinc-900">{fmtCents(b.price_total_cents)}</div>
+                        <div className="text-sm font-semibold text-emerald-700">{fmtCents(b.movvy_margin_cents)} comm.</div>
+                        {b.actual_total_cents && b.actual_total_cents !== b.price_total_cents && (
+                          <div className="text-xs text-zinc-500 mt-1">
+                            Actual: {fmtCents(b.actual_total_cents)}
+                          </div>
+                        )}
+                      </>
+                    ) : null}
                     <div className="text-xs text-zinc-400 mt-1">{fmtRelative(b.created_at)}</div>
                   </div>
                 </div>

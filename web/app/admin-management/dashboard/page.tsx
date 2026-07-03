@@ -19,6 +19,7 @@
 
 import Link from 'next/link';
 import { supabaseServer } from '@/lib/supabase/server';
+import { getAdminAccess } from '@/lib/adminAccess';
 import { fmtCents, fmtRelative, fmtStatus, fmtDate } from '@/lib/format';
 
 const ACTIVE_STATUSES = [
@@ -35,6 +36,9 @@ export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
   const supabase = await supabaseServer();
+
+  // Revenue figures are management-only. Staff still see live ops, just no money.
+  const isManagement = (await getAdminAccess(supabase)) === 'management';
 
   const now = new Date();
   const startOfToday = new Date(now);
@@ -281,29 +285,33 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* ── Revenue KPIs ──────────────────────────────────────────────────── */}
-      <SectionHeader title="Revenue" />
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <KpiCard label="GMV Today" value={fmtCents(revenueToday)} sub={`${totalBookingsToday} booking${totalBookingsToday !== 1 ? 's' : ''}`} accent />
-        <KpiCard
-          label="Commission Today"
-          value={fmtCents(commissionToday)}
-          sub={revenueToday > 0 ? `${Math.round((commissionToday / revenueToday) * 100)}% take rate` : 'No bookings yet'}
-        />
-        <KpiCard label="MTD Revenue" value={fmtCents(revenueMonth)} sub={`${fmtCents(commissionMonth)} commission MTD`} />
-        <KpiCard label="All-Time GMV" value={fmtCents(revenueAllTime)} sub={`${totalBookingsAllTime} total bookings`} />
-        <KpiCard
-          label="All-Time Commission"
-          value={fmtCents(commissionAllTime)}
-          sub={revenueAllTime > 0 ? `${Math.round((commissionAllTime / revenueAllTime) * 100)}% blended take rate` : '—'}
-        />
-        <KpiCard
-          label="Avg Booking Value"
-          value={fmtCents(avgBookingValue)}
-          sub={`${cancellationRate}% cancellation rate today`}
-          tone={cancellationRate > 20 ? 'warning' : 'default'}
-        />
-      </div>
+      {/* ── Revenue KPIs (management only) ─────────────────────────────────── */}
+      {isManagement ? (
+        <>
+          <SectionHeader title="Revenue" />
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <KpiCard label="GMV Today" value={fmtCents(revenueToday)} sub={`${totalBookingsToday} booking${totalBookingsToday !== 1 ? 's' : ''}`} accent />
+            <KpiCard
+              label="Commission Today"
+              value={fmtCents(commissionToday)}
+              sub={revenueToday > 0 ? `${Math.round((commissionToday / revenueToday) * 100)}% take rate` : 'No bookings yet'}
+            />
+            <KpiCard label="MTD Revenue" value={fmtCents(revenueMonth)} sub={`${fmtCents(commissionMonth)} commission MTD`} />
+            <KpiCard label="All-Time GMV" value={fmtCents(revenueAllTime)} sub={`${totalBookingsAllTime} total bookings`} />
+            <KpiCard
+              label="All-Time Commission"
+              value={fmtCents(commissionAllTime)}
+              sub={revenueAllTime > 0 ? `${Math.round((commissionAllTime / revenueAllTime) * 100)}% blended take rate` : '—'}
+            />
+            <KpiCard
+              label="Avg Booking Value"
+              value={fmtCents(avgBookingValue)}
+              sub={`${cancellationRate}% cancellation rate today`}
+              tone={cancellationRate > 20 ? 'warning' : 'default'}
+            />
+          </div>
+        </>
+      ) : null}
 
       {/* ── Live Operations ────────────────────────────────────────────── */}
       <SectionHeader title="Live Operations" />
@@ -342,28 +350,32 @@ export default async function DashboardPage() {
         />
       </div>
 
-      {/* ── 7-day Revenue Trend ─────────────────────────────────────────── */}
-      <SectionHeader title="7-Day Revenue Trend" />
-      <div className="bg-white border border-zinc-200 rounded-2xl p-5 mb-6">
-        <div className="flex items-end gap-2 h-28">
-          {dayRevenue.map((rev, i) => {
-            const pct = (rev / maxDayRevenue) * 100;
-            const isToday = i === 6;
-            return (
-              <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-0">
-                <div className="text-xs text-zinc-400 font-medium truncate w-full text-center">{fmtCents(rev)}</div>
-                <div
-                  className={`w-full rounded-t-lg ${isToday ? 'bg-emerald-500' : 'bg-emerald-200'}`}
-                  style={{ height: `${Math.max(pct, 3)}%`, minHeight: '4px' }}
-                />
-                <div className="text-xs text-zinc-500 text-center leading-tight whitespace-nowrap overflow-hidden text-ellipsis w-full">
-                  {dayLabels[i].split(',')[0]}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* ── 7-day Revenue Trend (management only) ───────────────────────── */}
+      {isManagement ? (
+        <>
+          <SectionHeader title="7-Day Revenue Trend" />
+          <div className="bg-white border border-zinc-200 rounded-2xl p-5 mb-6">
+            <div className="flex items-end gap-2 h-28">
+              {dayRevenue.map((rev, i) => {
+                const pct = (rev / maxDayRevenue) * 100;
+                const isToday = i === 6;
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                    <div className="text-xs text-zinc-400 font-medium truncate w-full text-center">{fmtCents(rev)}</div>
+                    <div
+                      className={`w-full rounded-t-lg ${isToday ? 'bg-emerald-500' : 'bg-emerald-200'}`}
+                      style={{ height: `${Math.max(pct, 3)}%`, minHeight: '4px' }}
+                    />
+                    <div className="text-xs text-zinc-500 text-center leading-tight whitespace-nowrap overflow-hidden text-ellipsis w-full">
+                      {dayLabels[i].split(',')[0]}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {/* ── Network Health ───────────────────────────────────────────────── */}
       <SectionHeader title="Network Health" />

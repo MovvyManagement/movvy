@@ -11,8 +11,8 @@
 
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { headers } from 'next/headers';
 import { supabaseServer } from '@/lib/supabase/server';
+import { getAdminAccess } from '@/lib/adminAccess';
 import { logout } from './login/actions';
 import { LoginGate } from './_components/LoginGate';
 import { AdminLiveCenter } from './_components/AdminLiveCenter';
@@ -37,9 +37,13 @@ export default async function AdminLayout({
     .eq('id', user.id)
     .single();
 
-  if (!profile || !['movvy_admin', 'movvy_support'].includes(profile.role)) {
+  // Access tier is resolved in the DB (movvy_admin_access) so blocked employees
+  // and non-admins are turned away consistently. null = no access → out.
+  const access = await getAdminAccess(supabase);
+  if (!access) {
     redirect('/');
   }
+  const isManagement = access === 'management';
 
   // Fetch live counts for sidebar badges
   const [pendingApprovals, openSupport, openDisputes] = await Promise.all([
@@ -66,8 +70,6 @@ export default async function AdminLayout({
       .in('status', ['open', 'in_review'])
       .then((r) => r.count ?? 0),
   ]);
-
-  const isAdmin = profile.role === 'movvy_admin';
 
   return (
     <div className="min-h-screen flex bg-zinc-50">
@@ -110,6 +112,14 @@ export default async function AdminLayout({
               badgeTone="info"
             />
           </NavSection>
+          {/* Management-only surfaces — revenue + employee access. Hidden
+              entirely from staff (defence in depth; the pages also re-check). */}
+          {isManagement ? (
+            <NavSection label="Management">
+              <NavLink href="/admin-management/revenue" label="Revenue" icon="revenue" />
+              <NavLink href="/admin-management/team" label="Team" icon="team" />
+            </NavSection>
+          ) : null}
         </nav>
 
         {/* User footer */}
@@ -117,14 +127,14 @@ export default async function AdminLayout({
           <div className="px-3 py-2 rounded-xl bg-zinc-50">
             <div className="flex items-center gap-2">
               <div className="h-7 w-7 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold shrink-0">
-                {(profile.full_name ?? profile.email ?? 'A')[0]?.toUpperCase()}
+                {(profile?.full_name ?? profile?.email ?? 'A')[0]?.toUpperCase()}
               </div>
               <div className="min-w-0">
                 <div className="text-xs font-semibold text-zinc-900 truncate">
-                  {profile.full_name ?? profile.email ?? 'Admin'}
+                  {profile?.full_name ?? profile?.email ?? 'Admin'}
                 </div>
                 <div className="text-xs text-zinc-500 truncate">
-                  {isAdmin ? 'Administrator' : 'Support Agent'}
+                  {isManagement ? 'Management' : 'Support Agent'}
                 </div>
               </div>
             </div>
@@ -180,7 +190,7 @@ function NavLink({
 }: {
   href: string;
   label: string;
-  icon: 'dashboard' | 'approvals' | 'support' | 'moves';
+  icon: 'dashboard' | 'approvals' | 'support' | 'moves' | 'revenue' | 'team';
   badge?: number;
   badgeTone?: 'warning' | 'info';
 }) {
@@ -206,8 +216,23 @@ function NavLink({
   );
 }
 
-function NavIcon({ kind }: { kind: 'dashboard' | 'approvals' | 'support' | 'moves' }) {
+function NavIcon({ kind }: { kind: 'dashboard' | 'approvals' | 'support' | 'moves' | 'revenue' | 'team' }) {
   const cls = 'h-4 w-4 text-zinc-400 group-hover:text-zinc-600 transition-colors shrink-0';
+  if (kind === 'revenue') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+      </svg>
+    );
+  }
+  if (kind === 'team') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    );
+  }
   if (kind === 'dashboard') {
     return (
       <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
