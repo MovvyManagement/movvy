@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +18,7 @@ import { COVERAGE_LABEL, COVERAGE_AMOUNT } from '@/lib/brand';
 import { track } from '@/lib/analytics';
 import { supabaseConfigured } from '@/lib/supabase';
 import { MaxWidth } from '@/components/MaxWidth';
+import { haptic } from '@/lib/haptics';
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
@@ -45,6 +46,26 @@ export default function ConfirmStep() {
   const [promoDiscountCents, setPromoDiscountCents] = useState<number | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
   const validatePromo = useValidatePromo();
+
+  // Booking-confirmed moment. Snapshotted at the instant the booking lands
+  // (before reset() clears the draft) so the success takeover renders from
+  // state, not the store. While non-null, a full-screen modal celebrates the
+  // booking and spells out what happens next — the old flow silently dumped
+  // the customer on the Moves list with no "did it work?" answer.
+  const [confirmed, setConfirmed] = useState<{
+    code: string | null;
+    date: string | null;
+    window: string;
+    totalCents: number;
+  } | null>(null);
+
+  // Every dismissal path (CTA, Android back) lands on the Moves tab — the
+  // fresh booking is at the top of Upcoming, so the modal hands off to the
+  // exact card the "arranging your crew" copy promised.
+  const goToMoves = () => {
+    setConfirmed(null);
+    router.replace('/(customer)/bookings');
+  };
 
   const applyPromo = async () => {
     const code = promoInput.trim().toUpperCase();
@@ -85,9 +106,15 @@ export default function ConfirmStep() {
 
   const submit = async () => {
     if (!supabaseConfigured) {
-      // Demo mode — Moves tab auto-renders the live tracker for active bookings
+      // Demo mode — same confirmed moment as the real flow, minus the
+      // server-issued booking code.
+      setConfirmed({
+        code: null,
+        date: draft.date ?? null,
+        window: draft.timeWindow ?? 'Anytime',
+        totalCents: price.totalCents,
+      });
       reset();
-      router.replace('/(customer)/bookings');
       return;
     }
     if (!draft.pickup || !draft.moveType || !draft.date) {
@@ -136,13 +163,21 @@ export default function ConfirmStep() {
         // Client-side estimate as a hint. Server RECOMPUTES authoritatively.
         client_estimate_total_cents: price.totalCents,
       });
-      reset();
       track('booking_created', {
         move_type: draft.moveType,
         total_cents: price.totalCents,
       });
-      // Moves tab auto-detects the active booking and renders live tracking + chat.
-      router.replace('/(customer)/bookings');
+      haptic.success();
+      // Snapshot BEFORE reset() clears the draft — the confirmed takeover
+      // renders from this state, not the store. Navigation to the Moves tab
+      // now happens when the customer dismisses the modal (goToMoves).
+      setConfirmed({
+        code: created?.short_code ?? null,
+        date: draft.date ?? null,
+        window: draft.timeWindow ?? 'Anytime',
+        totalCents: price.totalCents,
+      });
+      reset();
     } catch (e: any) {
       Alert.alert('Could not book', e?.message ?? 'Try again.');
     }
@@ -239,36 +274,7 @@ export default function ConfirmStep() {
               </>
             ) : null}
 
-            {draft.moveType === 'single_items' ? (
-              <>
-                <Row
-                  k="Items"
-                  v={`${draft.details?.items?.reduce((a, i) => a + i.count, 0) ?? 0} total`}
-                />
-                {(draft.details?.stairsPickup ?? 0) + (draft.details?.stairsDropoff ?? 0) > 0 ? (
-                  <Row
-                    k="Stairs"
-                    v={`${draft.details?.stairsPickup ?? 0} pickup · ${draft.details?.stairsDropoff ?? 0} dropoff`}
-                  />
-                ) : null}
-              </>
-            ) : null}
-
-            {draft.moveType === 'labor_only' ? (
-              <Row
-                k="Crew"
-                v={`${draft.details?.helpers ?? 0} helpers · ${draft.details?.estimatedHours ?? 0} hr`}
-              />
-            ) : null}
           </View>
-
-          {draft.moveType === 'single_items' && draft.details?.items?.length ? (
-            <View className="mt-3 flex-row flex-wrap gap-1.5">
-              {draft.details.items.map((i) => (
-                <Badge key={i.id} label={`${i.count}× ${i.label}`} tone="neutral" />
-              ))}
-            </View>
-          ) : null}
 
           <View className="mt-3 flex-row flex-wrap gap-2">
             {draft.details?.packingNeeded ? <Badge label="Packing" tone="brand" /> : null}
@@ -481,6 +487,69 @@ export default function ConfirmStep() {
           No card required. Cancel free up to 48 hours before your move.
         </Text>
       </View>
+
+      {/* ─── Booking-confirmed takeover ──────────────────────────────────
+          The success moment at peak anxiety: big checkmark, the booking
+          code, and the three things that happen next. No tap-outside
+          dismiss — the single CTA (and Android back) both hand off to the
+          Moves tab, where the fresh booking sits at the top of Upcoming. */}
+      <Modal
+        visible={!!confirmed}
+        transparent
+        animationType="fade"
+        onRequestClose={goToMoves}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <View className="rounded-3xl bg-white p-6">
+            <View className="h-20 w-20 rounded-full bg-brand-600 items-center justify-center self-center">
+              <Ionicons name="checkmark" size={40} color="#fff" />
+            </View>
+            <Text className="mt-4 text-2xl font-bold text-ink-900 text-center">
+              You're booked!
+            </Text>
+            <Text className="mt-1 text-sm text-silver-500 text-center">
+              {confirmed?.code ? `Move #${confirmed.code}` : 'Booking confirmed'}
+              {confirmed?.date ? ` · ${fmtDateShort(confirmed.date)}` : ''}
+            </Text>
+            {confirmed?.window ? (
+              <Text className="text-sm text-silver-500 text-center">{confirmed.window}</Text>
+            ) : null}
+
+            <View className="mt-6 gap-3">
+              <NextStep
+                icon="people-outline"
+                text="We're arranging your crew now — they'll appear on your move card the moment they confirm."
+              />
+              <NextStep
+                icon="chatbubble-ellipses-outline"
+                text="Chat opens 24 hours before pickup so you can confirm parking and access."
+              />
+              <NextStep
+                icon="cash-outline"
+                text={`Nothing is charged today — your ${fmtCurrency(
+                  (confirmed?.totalCents ?? 0) / 100,
+                )} estimate is billed on actual hours after the move.`}
+              />
+            </View>
+
+            <Pressable
+              onPress={goToMoves}
+              className="mt-6 h-14 rounded-2xl bg-brand-600 items-center justify-center active:opacity-90"
+              accessibilityRole="button"
+              accessibilityLabel="Track your move in My Moves"
+            >
+              <Text className="text-base font-bold text-white">Track it in My Moves</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -490,6 +559,18 @@ function Row({ k, v }: { k: string; v: string }) {
     <View className="flex-row justify-between">
       <Text className="text-sm text-silver-500">{k}</Text>
       <Text className="text-sm font-semibold text-ink-900 capitalize">{v}</Text>
+    </View>
+  );
+}
+
+// One "what happens next" row inside the booking-confirmed takeover.
+function NextStep({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
+  return (
+    <View className="flex-row items-start">
+      <View className="h-8 w-8 rounded-full bg-brand-50 items-center justify-center mt-0.5">
+        <Ionicons name={icon} size={16} color="#047857" />
+      </View>
+      <Text className="ml-3 flex-1 text-sm text-ink-700 leading-5">{text}</Text>
     </View>
   );
 }

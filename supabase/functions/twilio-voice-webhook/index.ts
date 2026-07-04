@@ -85,10 +85,16 @@ Deno.serve(async (req) => {
     return reject('bad body');
   }
 
-  // Verify the signature — in prod always required. We skip only when no
-  // auth token is set (very early local dev) so the webhook is still
-  // exercisable without leaking the verification path.
-  if (Deno.env.get('TWILIO_AUTH_TOKEN')) {
+  // Verify the signature. FAIL CLOSED: a missing TWILIO_AUTH_TOKEN in
+  // production would previously skip verification silently, turning this
+  // RLS-bypassing webhook into an unauthenticated endpoint. Local dev must
+  // now opt out explicitly with TWILIO_ALLOW_UNSIGNED=1 (never set in prod).
+  const allowUnsigned = Deno.env.get('TWILIO_ALLOW_UNSIGNED') === '1';
+  if (!allowUnsigned) {
+    if (!Deno.env.get('TWILIO_AUTH_TOKEN')) {
+      console.error('[twilio-voice-webhook] TWILIO_AUTH_TOKEN unset — refusing unsigned request');
+      return reject('unauthorized');
+    }
     const ok = await verifyTwilioSignature(req, body);
     if (!ok) {
       console.warn('[twilio-voice-webhook] signature mismatch');
@@ -100,6 +106,13 @@ Deno.serve(async (req) => {
   const to = body.get('To'); // our proxy number (E.164)
   const callSid = body.get('CallSid');
   if (!from || !to) return reject('missing From/To');
+
+  // Both numbers are interpolated into a PostgREST .or() filter below on the
+  // admin (RLS-bypassing) client, so validate the E.164 shape first — a
+  // stray comma/paren in `From` could otherwise reshape the filter. Twilio
+  // always sends E.164; anything else is not a real Twilio call.
+  const E164 = /^\+[1-9]\d{6,14}$/;
+  if (!E164.test(from) || !E164.test(to)) return reject('bad From/To');
 
   try {
     const admin = adminClient();

@@ -68,12 +68,19 @@ export async function login(input: unknown): Promise<AuthResult> {
 //   1) sign in normally (email/phone + password)
 //   2) look up the user's partner_team_members / company_members rows
 //   3) verify the invite_code matches a team/company they currently belong to
-//   4) if mismatch: sign out IMMEDIATELY + return error
+//   4) branch on membership status (Option C self-join flow):
+//        • active           → straight through to the dashboard
+//        • pending_approval → signed in, but flagged so the caller routes to
+//                             the waiting-for-approval screen
+//        • rejected         → sign out IMMEDIATELY + friendly error
+//        • off-roster       → sign out (unless a legacy pending invite exists)
 //
 // Customer login (above) does not require a code — customers don't have one.
 // =============================================================================
 
-export async function loginPartner(input: unknown): Promise<AuthResult<{ kind: 'team' | 'company'; id: string }>> {
+export async function loginPartner(
+  input: unknown,
+): Promise<AuthResult<{ kind: 'team' | 'company'; id: string; status: 'active' | 'pending_approval' }>> {
   const parsed = LoginInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };
 
@@ -120,25 +127,45 @@ export async function loginPartner(input: unknown): Promise<AuthResult<{ kind: '
     }
     const { data: member } = await supabase
       .from('partner_team_members')
-      .select('team_id')
+      .select('status')
       .eq('team_id', team.id)
       .eq('profile_id', user.id)
       .is('removed_at', null)
       .maybeSingle();
-    if (!member) {
-      // No membership yet — check for a pending invite. If one exists,
-      // sign them in anyway so the InviteAcceptHost popup can prompt
-      // them to Accept/Decline. The accept flow inserts the membership row.
-      const hasPendingInvite = await hasPendingInviteFor(user.id, team.id, null);
-      if (!hasPendingInvite) {
+    if (member) {
+      // Rejected rows keep removed_at=null (only rejected_at is set), so they
+      // surface here — deny + sign out. Pending → let them in but flag it so
+      // the caller routes to the waiting screen. Active → straight through.
+      if (member.status === 'rejected') {
         await supabase.auth.signOut();
         return {
           ok: false,
-          error: "You're not on this team's roster. Check your code or ask your team owner.",
+          error:
+            'Your request to join this team was declined. Reach out to the team owner if you think this is a mistake.',
         };
       }
+      if (member.status !== 'active' && member.status !== 'pending_approval') {
+        // 'removed' or anything unexpected — treat as off-roster.
+        await supabase.auth.signOut();
+        return { ok: false, error: "You're no longer on this team's roster." };
+      }
+      return {
+        ok: true,
+        data: { kind: 'team', id: team.id, status: member.status as 'active' | 'pending_approval' },
+      };
     }
-    return { ok: true, data: { kind: 'team', id: team.id } };
+    // No membership row — check for a legacy pending invite. If one exists,
+    // sign them in so the InviteAcceptHost popup can prompt Accept/Decline;
+    // accepting inserts the membership row (active).
+    const hasPendingInvite = await hasPendingInviteFor(user.id, team.id, null);
+    if (!hasPendingInvite) {
+      await supabase.auth.signOut();
+      return {
+        ok: false,
+        error: "You're not on this team's roster. Check your code or ask your team owner.",
+      };
+    }
+    return { ok: true, data: { kind: 'team', id: team.id, status: 'active' } };
   }
 
   // CO- prefix
@@ -153,24 +180,40 @@ export async function loginPartner(input: unknown): Promise<AuthResult<{ kind: '
   }
   const { data: cm } = await supabase
     .from('company_members')
-    .select('company_id')
+    .select('status')
     .eq('company_id', company.id)
     .eq('profile_id', user.id)
     .is('removed_at', null)
     .maybeSingle();
-  if (!cm) {
-    // No membership row yet — see if there's a pending invite waiting.
-    // If yes, sign them in so InviteAcceptHost can prompt them.
-    const hasPendingInvite = await hasPendingInviteFor(user.id, null, company.id);
-    if (!hasPendingInvite) {
+  if (cm) {
+    if (cm.status === 'rejected') {
       await supabase.auth.signOut();
       return {
         ok: false,
-        error: "You're not on this company's roster. Check your code or ask your dispatcher.",
+        error:
+          'Your request to join this company was declined. Reach out to the owner if you think this is a mistake.',
       };
     }
+    if (cm.status !== 'active' && cm.status !== 'pending_approval') {
+      await supabase.auth.signOut();
+      return { ok: false, error: "You're no longer on this company's roster." };
+    }
+    return {
+      ok: true,
+      data: { kind: 'company', id: company.id, status: cm.status as 'active' | 'pending_approval' },
+    };
   }
-  return { ok: true, data: { kind: 'company', id: company.id } };
+  // No membership row yet — see if there's a legacy pending invite waiting.
+  // If yes, sign them in so InviteAcceptHost can prompt them.
+  const hasPendingInvite = await hasPendingInviteFor(user.id, null, company.id);
+  if (!hasPendingInvite) {
+    await supabase.auth.signOut();
+    return {
+      ok: false,
+      error: "You're not on this company's roster. Check your code or ask your dispatcher.",
+    };
+  }
+  return { ok: true, data: { kind: 'company', id: company.id, status: 'active' } };
 }
 
 /**

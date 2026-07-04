@@ -25,17 +25,27 @@ export function Input({ label, hint, error, leftIcon, rightIcon, accessibilityLa
             ? 'border-danger'
             : 'border-silver-200 dark:border-night-300'
         }`}
-        style={{ minHeight: 52 }}
+        style={{ minHeight: 56 }}
       >
         {leftIcon ? <View className="mr-3">{leftIcon}</View> : null}
         <TextInput
           placeholderTextColor={placeholderColor}
           accessibilityLabel={accessibilityLabel ?? label}
           className="flex-1 text-base text-ink-900 dark:text-mist-50"
-          // Left-aligned text, vertically centered via paddingVertical +
-          // the container's items-center. Standard text-field affordance —
-          // readers expect to start at the leading edge.
-          style={{ paddingVertical: 14 }}
+          // Cross-platform vertical centering — strip React Native's default
+          // TextInput padding (iOS especially) so the input collapses to its
+          // text line height. The container's `items-center` then centers
+          // the text geometrically inside the 56px row, alongside the icon.
+          //   • padding: 0     — strips RN's iOS default
+          //   • textAlignVertical: 'center' — Android-only, ignored on iOS
+          //   • includeFontPadding: false   — strips Android's extra glyph padding
+          style={{
+            padding: 0,
+            paddingVertical: 0,
+            margin: 0,
+            textAlignVertical: 'center',
+            includeFontPadding: false,
+          }}
           {...rest}
         />
         {rightIcon ? <View className="ml-3">{rightIcon}</View> : null}

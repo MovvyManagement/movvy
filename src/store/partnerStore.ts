@@ -40,9 +40,17 @@ interface PartnerState {
    *  Used to register the team's primary_city_id so its job feed is
    *  scoped to the right market instead of always Calgary. */
   teamCitySlug: string;
+  /** HQ address — the solo team's base of operations. Travel time on
+   *  every booking is calculated FROM this point. Captured at sign-up
+   *  on the Your team step, mirroring how the company-onboarding flow
+   *  captures `company.hqAddress`. */
+  teamHqAddress: string;
+  teamHqLat?: number;
+  teamHqLng?: number;
   setTeamDriver: (m: Partial<TeamMember>) => void;
   setTeamMover: (m: Partial<TeamMember>) => void;
   setTeamCitySlug: (slug: string) => void;
+  setTeamHq: (patch: { address: string; lat?: number; lng?: number }) => void;
 
   // Company onboarding state
   company: CompanyDraft;
@@ -73,9 +81,14 @@ export const usePartnerStore = create<PartnerState>((set) => ({
   teamDriver: blankMember,
   teamMover: blankMember,
   teamCitySlug: 'calgary',
+  teamHqAddress: '',
+  teamHqLat: undefined,
+  teamHqLng: undefined,
   setTeamDriver: (m) => set((s) => ({ teamDriver: { ...s.teamDriver, ...m } })),
   setTeamMover: (m) => set((s) => ({ teamMover: { ...s.teamMover, ...m } })),
   setTeamCitySlug: (teamCitySlug) => set({ teamCitySlug }),
+  setTeamHq: ({ address, lat, lng }) =>
+    set({ teamHqAddress: address, teamHqLat: lat, teamHqLng: lng }),
 
   company: blankCompany,
   setCompany: (patch) => set((s) => ({ company: { ...s.company, ...patch } })),
@@ -112,6 +125,9 @@ export const usePartnerStore = create<PartnerState>((set) => ({
       teamDriver: blankMember,
       teamMover: blankMember,
       teamCitySlug: 'calgary',
+      teamHqAddress: '',
+      teamHqLat: undefined,
+      teamHqLng: undefined,
       company: blankCompany,
     }),
 }));

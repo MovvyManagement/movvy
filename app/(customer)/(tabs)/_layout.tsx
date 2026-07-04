@@ -1,6 +1,7 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { MovvyMark } from '@/components/MovvyMark';
 import { useActiveBooking } from '@/lib/data';
 import { useThemedColors } from '@/lib/theme';
 
@@ -58,7 +59,9 @@ export default function CustomerTabs() {
         name="bookings"
         options={{
           title: 'Moves',
-          tabBarIcon: ({ color, size }) => <Ionicons name="cube" color={color} size={size - 2} />,
+          // Full-color brand mark in the tab bar (truck + pin SVG). Active /
+          // inactive state still reads via the label color underneath.
+          tabBarIcon: ({ size }) => <MovvyMark size={size - 2} />,
           tabBarBadge: movesBadge,
           tabBarBadgeStyle: { backgroundColor: '#16A34A', minWidth: 12, height: 12, fontSize: 10 },
         }}

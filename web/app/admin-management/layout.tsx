@@ -11,11 +11,12 @@
 
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { headers } from 'next/headers';
 import { supabaseServer } from '@/lib/supabase/server';
+import { getAdminAccess } from '@/lib/adminAccess';
 import { logout } from './login/actions';
 import { LoginGate } from './_components/LoginGate';
 import { AdminLiveCenter } from './_components/AdminLiveCenter';
+import { MobileTopBar, type MobileLink } from './_components/MobileTopBar';
 
 export default async function AdminLayout({
   children,
@@ -37,9 +38,13 @@ export default async function AdminLayout({
     .eq('id', user.id)
     .single();
 
-  if (!profile || !['movvy_admin', 'movvy_support'].includes(profile.role)) {
+  // Access tier is resolved in the DB (movvy_admin_access) so blocked employees
+  // and non-admins are turned away consistently. null = no access → out.
+  const access = await getAdminAccess(supabase);
+  if (!access) {
     redirect('/');
   }
+  const isManagement = access === 'management';
 
   // Fetch live counts for sidebar badges
   const [pendingApprovals, openSupport, openDisputes] = await Promise.all([
@@ -67,12 +72,32 @@ export default async function AdminLayout({
       .then((r) => r.count ?? 0),
   ]);
 
-  const isAdmin = profile.role === 'movvy_admin';
+  // Flat link list for the mobile drawer (same gating as the sidebar).
+  const mobileLinks: MobileLink[] = [
+    { href: '/admin-management/dashboard', label: 'Dashboard' },
+    { href: '/admin-management/moves', label: 'Moves' },
+    { href: '/admin-management/approvals', label: 'Approvals', badge: pendingApprovals || undefined },
+    { href: '/admin-management/users', label: 'Users' },
+    { href: '/admin-management/support', label: 'Support', badge: openSupport || undefined },
+    { href: '/admin-management/disputes', label: 'Disputes', badge: openDisputes || undefined },
+    { href: '/admin-management/security', label: 'Security' },
+    ...(isManagement
+      ? [
+          { href: '/admin-management/revenue', label: 'Revenue' },
+          { href: '/admin-management/team', label: 'Team' },
+          { href: '/admin-management/settings', label: 'Settings' },
+        ]
+      : []),
+  ];
+  const userLabel = profile?.full_name ?? profile?.email ?? 'Admin';
 
   return (
-    <div className="min-h-screen flex bg-zinc-50">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-zinc-200 flex flex-col sticky top-0 h-screen">
+    <div className="min-h-screen md:flex bg-zinc-50">
+      {/* Mobile top bar (hidden on md+) */}
+      <MobileTopBar links={mobileLinks} userLabel={userLabel} />
+
+      {/* Sidebar — desktop only */}
+      <aside className="hidden md:flex w-64 bg-white border-r border-zinc-200 flex-col sticky top-0 h-screen">
         {/* Logo */}
         <div className="px-5 py-4 border-b border-zinc-100">
           <Link href="/admin-management/dashboard" className="flex items-center gap-2.5">
@@ -100,31 +125,51 @@ export default async function AdminLayout({
               badge={pendingApprovals > 0 ? pendingApprovals : undefined}
               badgeTone="warning"
             />
+            <NavLink href="/admin-management/users" label="Users" icon="users" />
           </NavSection>
           <NavSection label="Customer">
             <NavLink
               href="/admin-management/support"
               label="Support"
               icon="support"
-              badge={(openSupport + openDisputes) > 0 ? (openSupport + openDisputes) : undefined}
+              badge={openSupport > 0 ? openSupport : undefined}
               badgeTone="info"
             />
+            <NavLink
+              href="/admin-management/disputes"
+              label="Disputes"
+              icon="disputes"
+              badge={openDisputes > 0 ? openDisputes : undefined}
+              badgeTone="warning"
+            />
           </NavSection>
+          {/* Management-only surfaces — revenue + employee access. Hidden
+              entirely from staff (defence in depth; the pages also re-check). */}
+          {isManagement ? (
+            <NavSection label="Management">
+              <NavLink href="/admin-management/revenue" label="Revenue" icon="revenue" />
+              <NavLink href="/admin-management/team" label="Team" icon="team" />
+              <NavLink href="/admin-management/settings" label="Settings" icon="settings" />
+            </NavSection>
+          ) : null}
         </nav>
 
         {/* User footer */}
         <div className="px-3 py-3 border-t border-zinc-100 space-y-1">
+          <Link href="/admin-management/security" className="block px-3 py-2 rounded-xl text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+            Security · 2FA
+          </Link>
           <div className="px-3 py-2 rounded-xl bg-zinc-50">
             <div className="flex items-center gap-2">
               <div className="h-7 w-7 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold shrink-0">
-                {(profile.full_name ?? profile.email ?? 'A')[0]?.toUpperCase()}
+                {(profile?.full_name ?? profile?.email ?? 'A')[0]?.toUpperCase()}
               </div>
               <div className="min-w-0">
                 <div className="text-xs font-semibold text-zinc-900 truncate">
-                  {profile.full_name ?? profile.email ?? 'Admin'}
+                  {profile?.full_name ?? profile?.email ?? 'Admin'}
                 </div>
                 <div className="text-xs text-zinc-500 truncate">
-                  {isAdmin ? 'Administrator' : 'Support Agent'}
+                  {isManagement ? 'Management' : 'Support Agent'}
                 </div>
               </div>
             </div>
@@ -180,7 +225,7 @@ function NavLink({
 }: {
   href: string;
   label: string;
-  icon: 'dashboard' | 'approvals' | 'support' | 'moves';
+  icon: 'dashboard' | 'approvals' | 'support' | 'moves' | 'revenue' | 'team' | 'users' | 'disputes' | 'settings';
   badge?: number;
   badgeTone?: 'warning' | 'info';
 }) {
@@ -206,8 +251,44 @@ function NavLink({
   );
 }
 
-function NavIcon({ kind }: { kind: 'dashboard' | 'approvals' | 'support' | 'moves' }) {
+function NavIcon({ kind }: { kind: 'dashboard' | 'approvals' | 'support' | 'moves' | 'revenue' | 'team' | 'users' | 'disputes' | 'settings' }) {
   const cls = 'h-4 w-4 text-zinc-400 group-hover:text-zinc-600 transition-colors shrink-0';
+  if (kind === 'users') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+      </svg>
+    );
+  }
+  if (kind === 'disputes') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+      </svg>
+    );
+  }
+  if (kind === 'settings') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </svg>
+    );
+  }
+  if (kind === 'revenue') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+      </svg>
+    );
+  }
+  if (kind === 'team') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    );
+  }
   if (kind === 'dashboard') {
     return (
       <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -63,12 +63,12 @@ handle(async (req) => {
     }
     if (subject_type === 'team') {
       const { data } = await admin.from('partner_team_members')
-        .select('team_id').eq('team_id', subject_id).eq('profile_id', user.id).is('removed_at', null).maybeSingle();
+        .select('team_id').eq('team_id', subject_id).eq('profile_id', user.id).eq('status', 'active').is('removed_at', null).maybeSingle();
       if (!data) throw httpError(403, 'Not a member of this team');
     }
     if (subject_type === 'company') {
       const { data } = await admin.from('company_members')
-        .select('company_id, role').eq('company_id', subject_id).eq('profile_id', user.id).is('removed_at', null).maybeSingle();
+        .select('company_id, role').eq('company_id', subject_id).eq('profile_id', user.id).eq('status', 'active').is('removed_at', null).maybeSingle();
       if (!data || !['owner','dispatcher'].includes(data.role)) throw httpError(403, 'Not a company admin');
     }
     if (subject_type === 'booking') {

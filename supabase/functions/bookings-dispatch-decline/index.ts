@@ -55,12 +55,13 @@ handle(async (req) => {
 
     const admin = adminClient();
 
-    // Caller must be owner or dispatcher
+    // Caller must be an ACTIVE owner or dispatcher (excludes pending/rejected)
     const { data: dispatcher } = await admin
       .from('company_members')
       .select('role')
       .eq('company_id', company_id)
       .eq('profile_id', user.id)
+      .eq('status', 'active')
       .is('removed_at', null)
       .maybeSingle();
     if (!dispatcher || !['owner', 'dispatcher'].includes(dispatcher.role)) {

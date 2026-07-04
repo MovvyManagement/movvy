@@ -40,6 +40,7 @@ import { Input } from '@/components/Input';
 import { PhoneInput, toE164, isPhoneComplete } from '@/components/PhoneInput';
 import { EmptyState } from '@/components/EmptyState';
 import { CardSkeleton } from '@/components/Skeleton';
+import { PendingApprovals } from '@/components/PendingApprovals';
 import {
   useMyMembership,
   usePartnerTeamRoster,
@@ -246,6 +247,11 @@ export default function Crew() {
               );
             })
           )}
+
+          {/* ─── Pending approvals ─────────────────────────────────────────── */}
+          {/* Self-joiners who used the team code and are waiting on the
+              operator to let them in. Renders nothing when the queue is empty. */}
+          <PendingApprovals kind="team" subjectId={teamId} />
 
           {/* ─── Pending invites ───────────────────────────────────────────── */}
           {pending.length > 0 ? (

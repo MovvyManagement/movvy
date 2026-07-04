@@ -79,6 +79,13 @@ export default function PartnerSignIn() {
         setError(res.error ?? 'Could not sign in.');
         return;
       }
+      // Signed in but the owner hasn't approved them yet → waiting room.
+      // The pending-approval screen polls and forwards to the dashboard the
+      // moment they're approved.
+      if (res.data?.status === 'pending_approval') {
+        router.replace('/(auth)/pending-approval');
+        return;
+      }
       // Route into the right partner surface — each lands on its Dashboard.
       if (res.data?.kind === 'company') {
         router.replace('/(company)/dashboard');

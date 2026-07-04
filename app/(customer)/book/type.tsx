@@ -57,26 +57,24 @@ export default function MoveTypeStep() {
     <SafeAreaView className="flex-1 bg-white" edges={['top', 'bottom']}>
       <ScreenHeader />
       <StepIndicator step={1} total={3} label="Move type" />
-      {/* flexGrow:1 + justifyContent center lets the two option cards sit
-          in the vertical middle of the screen so the page doesn't feel
-          empty between the header and the Continue CTA. Generous gap
-          gives the cards real breathing room. */}
+      {/* Heading sits in the upper third — closer to the StepIndicator so
+          the customer's eye lands on the prompt fast. Generous gap between
+          the two option cards (gap-8) gives each preset real breathing room
+          and makes the choice feel less cramped. */}
       <ScrollView
         contentContainerStyle={{
           paddingHorizontal: 20,
           paddingBottom: 20,
-          flexGrow: 1,
-          justifyContent: 'center',
         }}
       >
-        <View>
+        <View className="mt-8">
           <Text className="text-2xl font-bold text-ink-900 text-center">What kind of move?</Text>
           <Text className="mt-1 text-sm text-silver-500 text-center">
             Pick the option that fits — we'll ask the right questions next.
           </Text>
         </View>
 
-        <View className="mt-10 gap-6">
+        <View className="mt-8 gap-8">
           {options.map((o) => {
             const isSel = selected === o.key;
             return (

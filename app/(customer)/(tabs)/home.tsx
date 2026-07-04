@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Card } from '@/components/Card';
+import { MovvyMark } from '@/components/MovvyMark';
 import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { AddressAutocomplete } from '@/components/AddressAutocomplete';
@@ -320,9 +321,7 @@ export default function CustomerHome() {
               <View key={b.id} className="mb-3">
                 <Card onPress={() => router.push('/(customer)/bookings')}>
                   <View className="flex-row items-center">
-                    <View className="h-11 w-11 rounded-2xl bg-silver-100 items-center justify-center">
-                      <Ionicons name="cube" size={18} color="#0A0A0A" />
-                    </View>
+                    <MovvyMark size={44} />
                     <View className="ml-3 flex-1">
                       <Text className="text-sm font-bold text-ink-900" numberOfLines={1}>
                         {b.pickup_line1} → {b.dropoff_line1 ?? 'in-home'}

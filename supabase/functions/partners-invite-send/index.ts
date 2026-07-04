@@ -87,6 +87,7 @@ handle(async (req) => {
         .select('id')
         .eq('team_id', team_id)
         .eq('profile_id', user.id)
+        .eq('status', 'active')
         .is('removed_at', null)
         .maybeSingle();
       if (!membership) throw httpError(403, 'You are not a member of this team');
@@ -106,6 +107,7 @@ handle(async (req) => {
         .select('id, role')
         .eq('company_id', company_id)
         .eq('profile_id', user.id)
+        .eq('status', 'active')
         .is('removed_at', null)
         .maybeSingle();
       if (!membership) throw httpError(403, 'You are not a member of this company');

@@ -65,6 +65,28 @@ if (!URL || !SERVICE_KEY) {
   process.exit(1);
 }
 
+// ─── Production guard ────────────────────────────────────────────────────────
+// This script creates demo accounts with a PUBLISHED shared password
+// (see scripts/DEMO_CREDENTIALS.md) and auto-confirms their emails. Running it
+// against production would seed known-credential logins into the live system.
+// Refuse to touch the known prod project unless someone very deliberately sets
+// SEED_ALLOW_PROD=1.
+const PROD_PROJECT_REF = 'aabenjobueqawtyebirt';
+const looksLikeProd = URL.includes(PROD_PROJECT_REF);
+if (looksLikeProd && process.env.SEED_ALLOW_PROD !== '1') {
+  console.error(`
+✖  Refusing to seed demo accounts into PRODUCTION.
+
+   Target URL points at the production project (${PROD_PROJECT_REF}).
+   This script creates accounts with the shared demo password from
+   scripts/DEMO_CREDENTIALS.md — never run it against live data.
+
+   Point SUPABASE_URL at a local/staging project instead. If you truly
+   mean to run it here, re-run with SEED_ALLOW_PROD=1 (you almost never do).
+`);
+  process.exit(1);
+}
+
 const admin = createClient(URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });

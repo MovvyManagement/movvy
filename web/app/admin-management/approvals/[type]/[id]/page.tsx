@@ -34,9 +34,15 @@ interface PageProps {
   params: Promise<{ type: string; id: string }>;
 }
 
+// Route params are attacker-controllable and `id` gets interpolated into a
+// PostgREST .or() filter below, so reject anything that isn't a plain UUID
+// before it reaches a query. A malformed id is a 404, not a filter to smuggle.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export default async function ApplicantDetailPage({ params }: PageProps) {
   const { type, id } = await params;
   if (type !== 'team' && type !== 'company') notFound();
+  if (!UUID_RE.test(id)) notFound();
 
   const supabase = await supabaseServer();
 

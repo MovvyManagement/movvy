@@ -451,6 +451,7 @@ serve(async (req) => {
           .select('profile_id, partner_teams!inner(primary_city_id, onboarding_status)')
           .eq('partner_teams.primary_city_id', city.id)
           .eq('partner_teams.onboarding_status', 'verified')
+          .eq('status', 'active')
           .is('removed_at', null),
         admin
           .from('company_members')
@@ -458,6 +459,7 @@ serve(async (req) => {
           .eq('companies.primary_city_id', city.id)
           .eq('companies.onboarding_status', 'verified')
           .in('role', ['owner', 'dispatcher'])
+          .eq('status', 'active')
           .is('removed_at', null),
       ]);
       const recipients = new Set<string>();

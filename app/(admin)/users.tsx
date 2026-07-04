@@ -9,6 +9,7 @@ import { Avatar } from '@/components/Avatar';
 import { Badge } from '@/components/Badge';
 import { Chip } from '@/components/Chip';
 import { EmptyState } from '@/components/EmptyState';
+import { PromptSheet } from '@/components/PromptSheet';
 import { supabase } from '@/lib/supabase';
 import { useAdminPendingVerifications, useVerifyPartner, useSuspendUser } from '@/lib/data';
 
@@ -62,45 +63,33 @@ export default function AdminUsers() {
   const verify = useVerifyPartner();
   const suspend = useSuspendUser();
 
-  const decide = (subjectType: 'team' | 'company', subjectId: string, decision: 'approve' | 'reject') => {
-    Alert.prompt(
-      `${decision === 'approve' ? 'Approve' : 'Reject'} ${subjectType}`,
-      decision === 'reject' ? 'Reason (shown to applicant):' : 'Optional notes:',
-      async (notes) => {
-        try {
-          await verify.mutateAsync({
-            subject_type: subjectType,
-            subject_id: subjectId,
-            decision,
-            notes: notes?.trim() || undefined,
-          });
-          Alert.alert('Done', `${subjectType} ${decision}d.`);
-        } catch (e: any) {
-          Alert.alert('Failed', e?.message ?? 'Try again.');
-        }
-      },
-      'plain-text',
-    );
+  // Cross-platform prompts (were Alert.prompt — iOS-only, so dead on Android).
+  const [decideTarget, setDecideTarget] = useState<
+    { subjectType: 'team' | 'company'; subjectId: string; decision: 'approve' | 'reject' } | null
+  >(null);
+  const [suspendTarget, setSuspendTarget] = useState<
+    { profileId: string; currentlySuspended: boolean } | null
+  >(null);
+
+  const submitDecide = async (values: Record<string, string>) => {
+    if (!decideTarget) return;
+    await verify.mutateAsync({
+      subject_type: decideTarget.subjectType,
+      subject_id: decideTarget.subjectId,
+      decision: decideTarget.decision,
+      notes: values.notes?.trim() || undefined,
+    });
+    Alert.alert('Done', `${decideTarget.subjectType} ${decideTarget.decision}d.`);
   };
 
-  const toggleSuspend = (profileId: string, currentlySuspended: boolean) => {
-    Alert.prompt(
-      currentlySuspended ? 'Reinstate user' : 'Suspend user',
-      'Reason (audit trail):',
-      async (reason) => {
-        try {
-          await suspend.mutateAsync({
-            profile_id: profileId,
-            action: currentlySuspended ? 'reinstate' : 'suspend',
-            reason: reason?.trim() || undefined,
-          });
-          Alert.alert('Done', currentlySuspended ? 'User reinstated.' : 'User suspended.');
-        } catch (e: any) {
-          Alert.alert('Failed', e?.message ?? 'Try again.');
-        }
-      },
-      'plain-text',
-    );
+  const submitSuspend = async (values: Record<string, string>) => {
+    if (!suspendTarget) return;
+    await suspend.mutateAsync({
+      profile_id: suspendTarget.profileId,
+      action: suspendTarget.currentlySuspended ? 'reinstate' : 'suspend',
+      reason: values.reason?.trim() || undefined,
+    });
+    Alert.alert('Done', suspendTarget.currentlySuspended ? 'User reinstated.' : 'User suspended.');
   };
 
   return (
@@ -141,13 +130,13 @@ export default function AdminUsers() {
                       </View>
                       <View className="mt-3 flex-row gap-2">
                         <Pressable
-                          onPress={() => decide('team', t.id, 'reject')}
+                          onPress={() => setDecideTarget({ subjectType: 'team', subjectId: t.id, decision: 'reject' })}
                           className="flex-1 h-10 rounded-2xl bg-silver-100 items-center justify-center"
                         >
                           <Text className="text-xs font-bold text-ink-900">Reject</Text>
                         </Pressable>
                         <Pressable
-                          onPress={() => decide('team', t.id, 'approve')}
+                          onPress={() => setDecideTarget({ subjectType: 'team', subjectId: t.id, decision: 'approve' })}
                           className="flex-1 h-10 rounded-2xl bg-brand-600 items-center justify-center"
                         >
                           <Text className="text-xs font-bold text-white">Approve</Text>
@@ -170,13 +159,13 @@ export default function AdminUsers() {
                       </View>
                       <View className="mt-3 flex-row gap-2">
                         <Pressable
-                          onPress={() => decide('company', c.id, 'reject')}
+                          onPress={() => setDecideTarget({ subjectType: 'company', subjectId: c.id, decision: 'reject' })}
                           className="flex-1 h-10 rounded-2xl bg-silver-100 items-center justify-center"
                         >
                           <Text className="text-xs font-bold text-ink-900">Reject</Text>
                         </Pressable>
                         <Pressable
-                          onPress={() => decide('company', c.id, 'approve')}
+                          onPress={() => setDecideTarget({ subjectType: 'company', subjectId: c.id, decision: 'approve' })}
                           className="flex-1 h-10 rounded-2xl bg-brand-600 items-center justify-center"
                         >
                           <Text className="text-xs font-bold text-white">Approve</Text>
@@ -209,7 +198,7 @@ export default function AdminUsers() {
                       <Badge label="Suspended" tone="danger" />
                     ) : (
                       <Pressable
-                        onPress={() => toggleSuspend(c.id, c.is_suspended)}
+                        onPress={() => setSuspendTarget({ profileId: c.id, currentlySuspended: c.is_suspended })}
                         className="h-9 rounded-full bg-silver-100 px-3 items-center justify-center"
                       >
                         <Text className="text-xs font-bold text-ink-700">Suspend</Text>
@@ -238,7 +227,7 @@ export default function AdminUsers() {
                       <Badge label="Suspended" tone="danger" />
                     ) : (
                       <Pressable
-                        onPress={() => toggleSuspend(d.id, d.is_suspended)}
+                        onPress={() => setSuspendTarget({ profileId: d.id, currentlySuspended: d.is_suspended })}
                         className="h-9 rounded-full bg-silver-100 px-3 items-center justify-center"
                       >
                         <Text className="text-xs font-bold text-ink-700">Suspend</Text>
@@ -275,6 +264,36 @@ export default function AdminUsers() {
             ))
           ))}
       </ScrollView>
+
+      <PromptSheet
+        visible={!!decideTarget}
+        title={`${decideTarget?.decision === 'approve' ? 'Approve' : 'Reject'} ${decideTarget?.subjectType ?? ''}`}
+        message={decideTarget?.decision === 'reject' ? 'The reason is shown to the applicant.' : 'Optional notes for the audit log.'}
+        fields={[
+          {
+            key: 'notes',
+            label: decideTarget?.decision === 'reject' ? 'Reason' : 'Notes (optional)',
+            placeholder: decideTarget?.decision === 'reject' ? "Why they weren't approved" : 'Optional',
+            multiline: true,
+            required: decideTarget?.decision === 'reject',
+          },
+        ]}
+        confirmLabel={decideTarget?.decision === 'approve' ? 'Approve' : 'Reject'}
+        tone={decideTarget?.decision === 'reject' ? 'danger' : 'default'}
+        onSubmit={submitDecide}
+        onClose={() => setDecideTarget(null)}
+      />
+
+      <PromptSheet
+        visible={!!suspendTarget}
+        title={suspendTarget?.currentlySuspended ? 'Reinstate user' : 'Suspend user'}
+        message="Recorded in the audit trail."
+        fields={[{ key: 'reason', label: 'Reason', placeholder: 'Why', multiline: true }]}
+        confirmLabel={suspendTarget?.currentlySuspended ? 'Reinstate' : 'Suspend'}
+        tone={suspendTarget?.currentlySuspended ? 'default' : 'danger'}
+        onSubmit={submitSuspend}
+        onClose={() => setSuspendTarget(null)}
+      />
     </SafeAreaView>
   );
 }
