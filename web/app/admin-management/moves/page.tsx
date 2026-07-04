@@ -28,14 +28,18 @@ const ACTIVE_STATUSES = [
 type Tab = 'active' | 'today' | 'upcoming';
 
 interface PageProps {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; page?: string; q?: string }>;
 }
 
 export const dynamic = 'force-dynamic';
 
+const PAGE_SIZE = 25;
+
 export default async function MovesPage({ searchParams }: PageProps) {
-  const { tab } = await searchParams;
+  const { tab, page: pageParam, q } = await searchParams;
   const activeTab: Tab = (tab as Tab) || 'active';
+  const page = Math.max(1, parseInt(pageParam ?? '1', 10) || 1);
+  const search = (q ?? '').trim();
 
   const supabase = await supabaseServer();
 
@@ -51,8 +55,13 @@ export default async function MovesPage({ searchParams }: PageProps) {
   const baseSelect =
     'id, short_code, status, pickup_city, pickup_line1, dropoff_city, dropoff_line1, scheduled_for_date, scheduled_for_window, price_total_cents, movvy_margin_cents, created_at, distance_km, duration_min, customer_id, assigned_team_id, assigned_company_id, actual_total_cents, actual_driver_payout_cents, actual_commission_cents, actual_hours';
 
-  let query = supabase.from('bookings').select(baseSelect);
-  if (activeTab === 'active') {
+  const from = (page - 1) * PAGE_SIZE;
+  let query = supabase.from('bookings').select(baseSelect, { count: 'exact' });
+  if (search) {
+    // Short-code lookup across ALL statuses — the console's booking search.
+    const safe = search.replace(/[,()*%]/g, ' ').toUpperCase();
+    query = query.ilike('short_code', `%${safe}%`).order('created_at', { ascending: false });
+  } else if (activeTab === 'active') {
     query = query.in('status', ACTIVE_STATUSES).order('scheduled_for_date');
   } else if (activeTab === 'today') {
     query = query.eq('scheduled_for_date', todayIso).order('scheduled_for_window');
@@ -62,9 +71,10 @@ export default async function MovesPage({ searchParams }: PageProps) {
       .lte('scheduled_for_date', sevenDays)
       .order('scheduled_for_date');
   }
-  query = query.limit(100);
+  query = query.range(from, from + PAGE_SIZE - 1);
 
-  const { data: bookings } = await query;
+  const { data: bookings, count: resultCount } = await query;
+  const totalPages = Math.max(1, Math.ceil((resultCount ?? 0) / PAGE_SIZE));
 
   // Tab counts
   const [activeCount, todayCount, upcomingCount] = await Promise.all([
@@ -110,19 +120,29 @@ export default async function MovesPage({ searchParams }: PageProps) {
 
   return (
     <div className="px-6 py-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900">Moves</h1>
-        <p className="text-sm text-zinc-500 mt-0.5">
-          {(bookings ?? []).length} moves · updates live
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-900">Moves</h1>
+          <p className="text-sm text-zinc-500 mt-0.5">
+            {search ? `${resultCount ?? 0} match “${search}”` : `${resultCount ?? 0} moves · updates live`}
+          </p>
+        </div>
+        {/* Booking search by short code */}
+        <form className="flex gap-2">
+          <input name="q" defaultValue={search} placeholder="Search #code…" className="rounded-lg border border-zinc-300 py-1.5 px-3 text-sm outline-none focus:border-emerald-500 w-40" />
+          <button className="rounded-lg bg-zinc-900 text-white text-sm font-semibold px-3 hover:bg-zinc-800">Find</button>
+          {search ? <Link href="/admin-management/moves" className="text-sm text-zinc-500 self-center px-1">Clear</Link> : null}
+        </form>
       </div>
 
-      {/* Tab bar */}
-      <div className="flex items-center gap-1 bg-zinc-100 rounded-2xl p-1 w-fit mb-4">
-        <TabLink tab="active" active={activeTab === 'active'} label="Active" count={activeCount.count ?? 0} />
-        <TabLink tab="today" active={activeTab === 'today'} label="Today" count={todayCount.count ?? 0} />
-        <TabLink tab="upcoming" active={activeTab === 'upcoming'} label="Upcoming" count={upcomingCount.count ?? 0} />
-      </div>
+      {/* Tab bar (hidden during a search — search spans all statuses) */}
+      {!search ? (
+        <div className="flex items-center gap-1 bg-zinc-100 rounded-2xl p-1 w-fit mb-4">
+          <TabLink tab="active" active={activeTab === 'active'} label="Active" count={activeCount.count ?? 0} />
+          <TabLink tab="today" active={activeTab === 'today'} label="Today" count={todayCount.count ?? 0} />
+          <TabLink tab="upcoming" active={activeTab === 'upcoming'} label="Upcoming" count={upcomingCount.count ?? 0} />
+        </div>
+      ) : null}
 
       {/* Revenue summary bar — management only */}
       {isManagement && (bookings ?? []).length > 0 && (
@@ -171,9 +191,10 @@ export default async function MovesPage({ searchParams }: PageProps) {
               companyMap.get(b.assigned_company_id)?.display_name;
 
             return (
-              <div
+              <Link
                 key={b.id}
-                className="bg-white border border-zinc-200 rounded-2xl p-5 hover:border-zinc-300 hover:shadow-sm transition-all"
+                href={`/admin-management/moves/${b.id}`}
+                className="block bg-white border border-zinc-200 rounded-2xl p-5 hover:border-zinc-300 hover:shadow-sm transition-all"
               >
                 <div className="flex items-start justify-between gap-4">
                   {/* Left: booking info */}
@@ -231,12 +252,35 @@ export default async function MovesPage({ searchParams }: PageProps) {
                     <div className="text-xs text-zinc-400 mt-1">{fmtRelative(b.created_at)}</div>
                   </div>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
       )}
+
+      {/* Pagination */}
+      {totalPages > 1 ? (
+        <div className="flex items-center justify-center gap-3 mt-6">
+          <PageLink tab={activeTab} q={search} page={page - 1} disabled={page <= 1} label="← Prev" />
+          <span className="text-sm text-zinc-500">Page {page} of {totalPages}</span>
+          <PageLink tab={activeTab} q={search} page={page + 1} disabled={page >= totalPages} label="Next →" />
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function PageLink({ tab, q, page, disabled, label }: { tab: string; q: string; page: number; disabled: boolean; label: string }) {
+  if (disabled) {
+    return <span className="text-sm font-semibold text-zinc-300 px-3 py-1.5">{label}</span>;
+  }
+  const params = new URLSearchParams();
+  if (q) params.set('q', q); else params.set('tab', tab);
+  params.set('page', String(page));
+  return (
+    <Link href={`/admin-management/moves?${params.toString()}`} className="text-sm font-semibold text-zinc-700 hover:text-zinc-900 border border-zinc-200 rounded-lg px-3 py-1.5">
+      {label}
+    </Link>
   );
 }
 
