@@ -31,7 +31,10 @@ const PIN_KEY = 'revenue_pin';
 const PIN_RE = /^\d{6}$/;
 
 const Body = z.object({
-  action: z.enum(['pin_status', 'verify_pin', 'set_pin', 'invite_member', 'set_member', 'remove_member']),
+  action: z.enum([
+    'pin_status', 'verify_pin', 'set_pin', 'invite_member', 'set_member', 'remove_member',
+    'list_flags', 'set_flag', 'list_promos',
+  ]),
   pin: z.string().optional(),
   new_pin: z.string().optional(),
   current_pin: z.string().optional(),
@@ -40,6 +43,8 @@ const Body = z.object({
   access_level: z.enum(['management', 'staff']).optional(),
   id: z.string().uuid().optional(),
   blocked: z.boolean().optional(),
+  key: z.string().max(80).optional(),
+  enabled: z.boolean().optional(),
 });
 
 // ─── PIN hashing — salted SHA-256 (second factor; verify is rate-limited) ─────
@@ -196,6 +201,34 @@ handle(async (req) => {
         entityType: 'admin_member', entityId: input.id, ip: clientIp(req), payload: { email: member.email },
       });
       return jsonResponse({ ok: true }, { status: 200 }, cors);
+    }
+
+    // ─── Feature flags ───────────────────────────────────────────────────────
+    if (input.action === 'list_flags') {
+      const { data } = await admin.from('feature_flags').select('key, enabled, description, updated_at').order('key');
+      return jsonResponse({ ok: true, flags: data ?? [] }, { status: 200 }, cors);
+    }
+    if (input.action === 'set_flag') {
+      if (!input.key || typeof input.enabled !== 'boolean') throw httpError(400, 'key + enabled required');
+      const { error } = await admin.from('feature_flags')
+        .update({ enabled: input.enabled, updated_by: user.id, updated_at: new Date().toISOString() })
+        .eq('key', input.key);
+      if (error) throw httpError(400, error.message);
+      await audit({
+        actorId: user.id, actorRole: user.role, action: 'admin.flag_set',
+        entityType: 'feature_flag', entityId: input.key, ip: clientIp(req), payload: { enabled: input.enabled },
+      });
+      return jsonResponse({ ok: true }, { status: 200 }, cors);
+    }
+
+    // ─── Promo codes (list; creation reuses admin-create-promo) ──────────────
+    if (input.action === 'list_promos') {
+      const { data } = await admin
+        .from('promo_codes')
+        .select('id, code, kind, value, is_active, city_id, expires_at, created_at')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      return jsonResponse({ ok: true, promos: data ?? [] }, { status: 200 }, cors);
     }
 
     throw httpError(400, 'Unknown action');
