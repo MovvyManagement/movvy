@@ -6,6 +6,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import { EmptyState } from '@/components/EmptyState';
+import { PromptSheet } from '@/components/PromptSheet';
 import { useAdminDisputes, useResolveDispute } from '@/lib/data';
 import { fmtDateShort, fmtTime } from '@/lib/format';
 
@@ -14,36 +15,20 @@ export default function AdminDisputes() {
   const { data, isLoading } = useAdminDisputes(scope === 'open');
   const resolve = useResolveDispute();
 
-  const onResolve = (disputeId: string) => {
-    Alert.prompt(
-      'Resolve dispute',
-      'Resolution notes (visible in audit log):',
-      async (notes) => {
-        if (!notes || notes.trim().length < 5) return;
-        Alert.prompt(
-          'Refund amount (CAD dollars, 0 for none)',
-          '',
-          async (dollarsStr) => {
-            const dollars = Number(dollarsStr ?? '0');
-            const refundCents = Math.max(0, Math.round(dollars * 100));
-            try {
-              await resolve.mutateAsync({
-                dispute_id: disputeId,
-                resolution: refundCents > 0 ? 'resolved_customer' : 'closed',
-                refund_cents: refundCents,
-                notes: notes.trim(),
-              });
-              Alert.alert('Resolved', `Dispute closed${refundCents > 0 ? ` · refund $${dollars}` : ''}.`);
-            } catch (e: any) {
-              Alert.alert('Could not resolve', e?.message ?? 'Try again.');
-            }
-          },
-          'plain-text',
-          '0',
-        );
-      },
-      'plain-text',
-    );
+  // Cross-platform resolve flow (was two chained Alert.prompts — iOS-only).
+  const [resolveId, setResolveId] = useState<string | null>(null);
+
+  const submitResolve = async (values: Record<string, string>) => {
+    if (!resolveId) return;
+    const dollars = Number(values.refund ?? '0');
+    const refundCents = Number.isFinite(dollars) ? Math.max(0, Math.round(dollars * 100)) : 0;
+    await resolve.mutateAsync({
+      dispute_id: resolveId,
+      resolution: refundCents > 0 ? 'resolved_customer' : 'closed',
+      refund_cents: refundCents,
+      notes: (values.notes ?? '').trim(),
+    });
+    Alert.alert('Resolved', `Dispute closed${refundCents > 0 ? ` · refund $${dollars}` : ''}.`);
   };
 
   return (
@@ -98,7 +83,7 @@ export default function AdminDisputes() {
                   {['open', 'in_review'].includes(d.status) ? (
                     <View className="mt-4 flex-row gap-2">
                       <Pressable
-                        onPress={() => onResolve(d.id)}
+                        onPress={() => setResolveId(d.id)}
                         className="flex-1 h-11 rounded-2xl bg-brand-600 items-center justify-center flex-row"
                       >
                         <Ionicons name="checkmark" size={16} color="#fff" />
@@ -114,6 +99,19 @@ export default function AdminDisputes() {
           )}
         </ScrollView>
       )}
+
+      <PromptSheet
+        visible={!!resolveId}
+        title="Resolve dispute"
+        message="Add resolution notes and an optional refund. Both are recorded in the audit log."
+        fields={[
+          { key: 'notes', label: 'Resolution notes', placeholder: 'What was decided and why', multiline: true, required: true, minLength: 5 },
+          { key: 'refund', label: 'Refund (CAD, 0 for none)', placeholder: '0', keyboardType: 'decimal-pad', defaultValue: '0' },
+        ]}
+        confirmLabel="Resolve dispute"
+        onSubmit={submitResolve}
+        onClose={() => setResolveId(null)}
+      />
     </SafeAreaView>
   );
 }
