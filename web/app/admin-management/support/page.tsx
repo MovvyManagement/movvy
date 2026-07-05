@@ -24,7 +24,7 @@ export default async function SupportInboxPage() {
   const { data: threads } = await supabase
     .from('chat_threads')
     .select(
-      'id, customer_profile_id, last_message_at, created_at, customer:profiles!chat_threads_customer_profile_id_fkey(full_name, email, phone)',
+      'id, customer_profile_id, last_message_at, created_at, needs_human, customer:profiles!chat_threads_customer_profile_id_fkey(full_name, email, phone)',
     )
     .eq('kind', 'support')
     .order('last_message_at', { ascending: false, nullsFirst: false })
@@ -123,6 +123,11 @@ export default async function SupportInboxPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
                     <span className="text-sm font-bold text-zinc-900 truncate">{customerName}</span>
+                    {t.needs_human && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 text-xs font-bold whitespace-nowrap">
+                        Needs you
+                      </span>
+                    )}
                     {isSlaBreached && (
                       <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-bold whitespace-nowrap">
                         SLA Breached
