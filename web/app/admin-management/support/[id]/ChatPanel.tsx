@@ -19,6 +19,7 @@ interface Message {
   id: string;
   body: string;
   is_admin: boolean;
+  is_ai?: boolean;
   sender_profile_id: string | null;
   created_at: string;
 }
@@ -165,24 +166,23 @@ export function ChatPanel({
 
 function MessageBubble({ message }: { message: Message }) {
   const isAdmin = message.is_admin;
+  const isAi = !!message.is_ai;
   return (
     <div className={`flex ${isAdmin ? 'justify-end' : 'justify-start'}`}>
       <div className="max-w-md">
         <div
           className={`px-4 py-2.5 rounded-2xl text-sm whitespace-pre-wrap break-words ${
-            isAdmin
+            isAi
+              ? 'bg-violet-600 text-white rounded-br-sm'
+              : isAdmin
               ? 'bg-emerald-600 text-white rounded-br-sm'
               : 'bg-white border border-zinc-200 text-zinc-900 rounded-bl-sm'
           }`}
         >
           {message.body}
         </div>
-        <div
-          className={`text-xs text-zinc-400 mt-1 ${
-            isAdmin ? 'text-right' : ''
-          }`}
-        >
-          {isAdmin ? 'Support' : 'Customer'} ·{' '}
+        <div className={`text-xs text-zinc-400 mt-1 ${isAdmin ? 'text-right' : ''}`}>
+          {isAi ? 'AI assistant' : isAdmin ? 'Support' : 'Customer'} ·{' '}
           {new Date(message.created_at).toLocaleTimeString('en-CA', {
             hour: 'numeric',
             minute: '2-digit',
