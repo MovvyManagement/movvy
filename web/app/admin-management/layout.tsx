@@ -84,6 +84,7 @@ export default async function AdminLayout({
     ...(isManagement
       ? [
           { href: '/admin-management/revenue', label: 'Revenue' },
+          { href: '/admin-management/payments', label: 'Payments' },
           { href: '/admin-management/team', label: 'Team' },
           { href: '/admin-management/settings', label: 'Settings' },
         ]
@@ -148,6 +149,7 @@ export default async function AdminLayout({
           {isManagement ? (
             <NavSection label="Management">
               <NavLink href="/admin-management/revenue" label="Revenue" icon="revenue" />
+              <NavLink href="/admin-management/payments" label="Payments" icon="revenue" />
               <NavLink href="/admin-management/team" label="Team" icon="team" />
               <NavLink href="/admin-management/settings" label="Settings" icon="settings" />
             </NavSection>

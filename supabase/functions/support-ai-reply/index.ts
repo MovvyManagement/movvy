@@ -3,16 +3,32 @@
 // -----------------------------------------------------------------------------
 // First-line AI support agent for Movvy support chats. Triggered (fire-and-
 // forget) by chat-send after a customer or partner posts to a kind='support'
-// thread. It understands BOTH Movvy interfaces (the customer app and the
-// partner app) and the full app workflow, answers simple questions itself, and
-// hands off to a human for anything sensitive.
+// thread. Expert on BOTH Movvy interfaces (customer app + partner app), the
+// full booking lifecycle, and real policies (cancellation tiers, claims,
+// payouts) — sourced from the actual code paths, not approximations.
 //
-// Model: claude-haiku-4-5 (cheap + fast, ideal for support). Raw Messages API
-// over fetch — no SDK to bundle in Deno. No streaming (short replies).
+// Model: claude-haiku-4-5 by default (cheap + fast; override with the
+// SUPPORT_AI_MODEL secret — no redeploy needed). Raw Messages API over fetch —
+// no SDK to bundle in Deno. No streaming (short replies).
+//
+// Engineering notes:
+// • System prompt is split into [stable knowledge block + per-user context
+//   block] so the stable prefix carries a cache_control marker. Haiku 4.5's
+//   minimum cacheable prefix is 4096 tokens, so caching engages only if the
+//   knowledge block grows past that — the marker is harmless (silent no-op)
+//   below the threshold and free savings above it.
+// • Retries: up to 2 on 429/5xx/network with backoff honoring retry-after.
+//   20s per-attempt timeout. Any final failure = silent skip (humans handle).
+// • Double-reply guard: if an AI or admin message already landed after the
+//   last user message (racing triggers, manual admin reply), skip.
+// • Deterministic escalation net (English) for money/damage/safety/legal/
+//   "human please" — fires without spending a model call. Non-English
+//   messages rely on the model's escalate tool, which covers all languages.
+// • The escalate tool uses strict mode so `reason` is always one of the
+//   categories the admin UI expects.
 //
 // Safety: the assistant NEVER takes actions (no cancels/refunds/reschedules)
-// and escalates on money, complaints, damage, safety, or an explicit ask for a
-// human — via the escalate_to_human tool AND a deterministic keyword net.
+// and never invents policies, prices, or booking details.
 //
 // Auth: internal only — caller must present the service-role key as bearer.
 // Degrades gracefully: with no ANTHROPIC_API_KEY set, it no-ops so humans keep
@@ -23,20 +39,40 @@ import { z } from 'https://esm.sh/zod@3.23.8';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 import { corsHeaders } from '../_shared/cors.ts';
 
-const MODEL = 'claude-haiku-4-5';
-const MAX_HISTORY = 12;
+const MODEL = Deno.env.get('SUPPORT_AI_MODEL') ?? 'claude-haiku-4-5';
+const MAX_HISTORY = 20;
+const MAX_TOKENS = 600;
+const ATTEMPT_TIMEOUT_MS = 20_000;
 
 const Body = z.object({ thread_id: z.string().uuid() });
 
-// Topics the assistant must never try to resolve — hand straight to a human.
-const ESCALATE_RE = new RegExp(
+// ─── Deterministic escalation nets ──────────────────────────────────────────
+// HARD: topics a support bot must never try to resolve, phrased any way.
+const HARD_ESCALATE_RE = new RegExp(
   [
-    'refund', 'money back', 'charge me', 'overcharg', 'my bill', 'billing',
-    'complain', 'complaint', 'damage', 'broke', 'broken', 'scratch', 'stole', 'theft', 'stolen',
-    'injur', 'hurt', 'accident', 'emergency', '\\bsos\\b',
-    'lawyer', 'legal', '\\bsue\\b', 'lawsuit',
-    'cancel', 'reschedule', 'reassign', 'delete my account', 'suspend',
-    'human', 'agent', 'representative', 'real person', 'someone real', 'manager', 'supervisor',
+    // money
+    'refund', 'money back', 'overcharg', '\\bcharged\\b', 'my bill', 'billing', 'wrong (amount|price|charge)', 'dispute',
+    // damage / loss / complaint
+    'damage', '\\bbroke\\b', 'broken', 'scratch', '\\bdent\\b', 'stole', 'stolen', 'theft', 'missing item', 'lost item', 'complain',
+    // safety
+    'injur', '\\bhurt\\b', 'accident', 'unsafe', 'emergency', '\\bsos\\b', 'danger', 'threat', 'harass',
+    // legal / account
+    'lawyer', 'legal action', '\\bsue\\b', 'lawsuit', 'police', 'delete my account', 'suspend',
+    // explicit ask for a person
+    '\\bhuman\\b', 'real person', 'representative', 'manager', 'supervisor', 'speak (to|with) (someone|a person)', 'talk (to|with) (someone|a person)',
+  ].join('|'),
+  'i',
+);
+// ACTION-INTENT: the user is asking SUPPORT to perform a booking action for
+// them (the bot can't act). Deliberately narrow — "what's your cancellation
+// policy?" or "how do I cancel?" are FAQs the bot answers (self-serve cancel
+// exists in the app); "please cancel my move" is not.
+const ACTION_INTENT_RE = new RegExp(
+  [
+    '(can|could|would|will) you\\b[^.?!]{0,60}\\b(cancel|reschedul|rebook|reassign|change my|refund)',
+    'please (cancel|reschedul|rebook|reassign|refund)',
+    '\\b(cancel|reschedul\\w*|rebook|reassign|refund)\\b[^.?!]{0,40}\\bfor me\\b',
+    '\\bneed (you|movvy) to (cancel|reschedul|rebook|reassign|refund)',
   ].join('|'),
   'i',
 );
@@ -44,56 +80,108 @@ const ESCALATE_RE = new RegExp(
 const ESCALATE_TOOL = {
   name: 'escalate_to_human',
   description:
-    'Hand this conversation to a human Movvy support agent. Call this whenever the request involves money (refunds, billing, charges), a complaint about a crew, damage or an insurance claim, a safety issue or emergency, taking an action on a booking (cancel/reschedule/reassign), account deletion or suspension, legal matters, OR when the user explicitly asks to speak to a person — or any time you are not confident you can help correctly.',
+    'Hand this conversation to a human Movvy support agent. Call this whenever the request involves money (refunds, billing disputes, charges), a complaint about a crew or customer, damage/loss/theft or an insurance claim, a safety issue or emergency, performing an ACTION on a booking or account (cancel, reschedule, reassign, refund, delete account, suspend) — you cannot perform actions — legal matters, OR when the user explicitly asks for a person, OR any time you are not confident you can help correctly.',
+  strict: true,
   input_schema: {
     type: 'object',
     properties: {
-      reason: { type: 'string', description: 'Short category, e.g. "refund request", "damage claim", "asked for a human".' },
-      summary: { type: 'string', description: 'One sentence an agent can read to get context fast.' },
+      reason: {
+        type: 'string',
+        enum: [
+          'refund_or_billing', 'damage_or_claim', 'complaint', 'safety',
+          'booking_action', 'account_action', 'legal', 'asked_for_human', 'other',
+        ],
+        description: 'Category shown to the human agent.',
+      },
+      summary: {
+        type: 'string',
+        description: 'One sentence a human agent can read to get context fast.',
+      },
     },
-    required: ['reason'],
+    required: ['reason', 'summary'],
+    additionalProperties: false,
   },
 };
 
-function knowledge(audience: 'customer' | 'partner', contextLine: string): string {
-  return `You are Movvy's support assistant — the friendly first line of Movvy's in-app help chat. Movvy is a moving marketplace operating in Alberta, Canada (Calgary, Edmonton, Red Deer and beyond). You are chatting inside the app with a ${audience === 'partner' ? 'MOVER/PARTNER (a driver, hourly mover, or moving company on the supply side)' : 'CUSTOMER (someone booking a move)'}.
+// ─── Stable knowledge block (cache-friendly: NO per-user data in here) ──────
+// Facts below are sourced from the live code: booking status machine
+// (migration 0006), cancellation tiers (bookings-cancel), receipts
+// (src/lib/receipt.ts), screens (app/(customer)|(mover)|(company)), the
+// public Terms of Service, and the partner onboarding flow.
+const KNOWLEDGE = `You are Movvy's support assistant — the friendly first line of Movvy's in-app help chat. Movvy is a moving marketplace operating ONLY in Alberta, Canada (Calgary, Edmonton, Red Deer and province-wide; both pickup and drop-off must be in Alberta). Movvy is a booking platform, not the moving company: independent verified crews and companies perform the moves.
 
-There are TWO separate Movvy apps/interfaces — understand both:
-1. CUSTOMER app — people who book moves.
-2. PARTNER app — the drivers / hourly movers / moving companies who fulfil the moves. Companies have owners + dispatchers + drivers; independent operators run a small "team" (an operator + hourly movers).
+THE TWO MOVVY INTERFACES (know both; you are told which one this person uses):
 
-HOW THE WHOLE THING WORKS (end to end):
-• Customer signs up with email + phone (SMS one-time code verifies the phone).
-• They book in ~60 seconds: pick a start address, a destination, a date, and a home-size preset (e.g. 2-bedroom apartment) — or a commercial move. Residential presets INCLUDE packing, furniture disassembly/assembly, the truck, fuel, and dollies.
-• Pricing is HOURLY and shown as an up-front ESTIMATE. There is NO deposit and NO card required to book — you "book now, pay after the move". The crew starts a timer when they arrive (Begin Move) and stops it when done (Finish Move); the final invoice is the ACTUAL time on site, so it can be less if they finish early or more if it runs over. GST (5%) applies. Every move includes up to $5,000 in damage coverage.
-• Cancellation: free up to 48 hours before the move; inside 48 hours a small fee applies that goes to the crew.
-• Once booked, the move goes out to nearby verified partners; a crew accepts it. The customer then gets LIVE TRACKING: a map with the driver's pin + ETA and five stages — on the way → arrived → loading → in transit → unloading → completed. They can chat with the crew in-app or call them through a masked Movvy line (real phone numbers stay private).
-• When the move completes, the customer rates the crew and can add an optional tip (the tip goes to the crew). A PDF receipt is available in the app (Profile → Receipts / Move history) — Movvy does not email receipts.
-• PARTNER side: a mover joins with a team/company invite code (format TM-XXXXXX for a team, CO-XXXXXX for a company) or requests to join and the owner approves them. They complete onboarding (ID, licence, documents, background check) and once Movvy verifies them they appear on the roster. Verified partners see available jobs within their service area, accept a job, (companies) assign a driver, run the move with the Begin/Finish timer, and get paid weekly. Movvy keeps 20%, the partner keeps 80%; tips are 100% the crew's.
-• SAFETY: during an in-progress move there is an SOS button that instantly alerts Movvy admin, dispatch, and the customer's emergency contact. Treat anything safety-related as urgent.
+1) CUSTOMER APP — people booking moves. Tabs: Home, Moves, Profile.
+• Booking (about 60 seconds, from Home): choose move type — a residential home-size preset (studio, 1-bedroom, 2-bedroom, etc.; presets include the truck, fuel, dollies, packing help, and furniture disassembly/reassembly) or a commercial move → enter pickup + drop-off addresses (Alberta only) and date + arrival window → see the hourly price estimate (rate per hour, recommended crew size, GST included) → confirm. NO card and NO deposit are required to book — you book now and pay after the move.
+• Matching: the booking goes out to nearby verified crews; when one accepts, the customer sees the crew's name and rating, and the move status becomes assigned/confirmed.
+• Move day (Moves tab → the move opens the live tracker): live map with the crew's pin and ETA. Statuses progress: on the way → arrived → loading → in transit → unloading → completed. The customer can chat with the crew in-app or call them — calls are connected through a masked Movvy number so nobody's real phone number is shared. A headset icon / "Report an Issue" opens support (this chat). During an in-progress move there is an SOS button that instantly alerts Movvy and the customer's emergency contact — treat anything SOS/safety as urgent.
+• Timing & final price: the crew taps "Begin Move" on arrival which starts the billable timer, and "Finish Move" when done. The final bill = actual timed hours at the quoted hourly rate + any disclosed travel/materials + 5% GST. The estimate is non-binding: finishing early costs less, running over costs more. Payment is collected after the move completes.
+• Cancelling / changing: the customer can cancel themselves from the move's screen (Moves tab → select the move → Cancel, with a reason). Cancellation fee schedule based on notice before the scheduled start: more than 48 hours = no charge; 24–48 hours = 20% of the estimate; 2–24 hours = 50%; under 2 hours = the full estimate. The fee compensates the crew that held the slot. Rescheduling availability-permitting — ask support (escalate) if they can't do it in-app.
+• Tips & ratings: after completion the customer rates the crew (ratings keep crews above 4.5 stars) and can add an optional tip — 100% of the tip goes to the crew.
+• Receipts: PDF receipts live IN THE APP — Profile → Receipts, or on any completed move's card in the Moves tab. Movvy does not email receipts.
+• Damage & claims: every move includes up to $5,000 in damage coverage and crews carry commercial liability insurance. To claim: open it through this support chat within 7 DAYS of the move with photos/details (always escalate actual claims to a human). Cash, jewellery, important documents, and undeclared high-value items may be excluded — high-value items should be declared before the move.
+• Account: signup requires email + phone + password with an SMS verification code. Saved addresses, payment methods, and notification settings are under Profile. Account deletion is self-serve: Profile → Delete account (if they want YOU to delete it, escalate).
 
-CONTEXT FOR THIS PERSON:
-${contextLine}
+2) PARTNER APP — the supply side: independent movers/drivers with a small team, or companies with multiple drivers and dispatchers. Tabs: Dashboard, Jobs, Active, Earnings, Profile; plus screens for Availability/service area, Crew (team owners), Drivers/Dispatch/Trucks/Invoices (companies), Referrals, and Safety.
+• Joining: an independent operator creates a team; a helper/mover joins an existing team with an invite code in the format TM-XXXXXX; a company driver joins with CO-XXXXXX. Someone can also request to join, and the owner approves them from their Crew (teams) or Drivers (companies) screen — pending requests appear right at the top.
+• Onboarding & verification: partners submit ID, driver's licence, vehicle info, insurance documents, and consent to a background check. Movvy reviews and verifies; jobs only unlock after verification. If a partner asks "why can't I see jobs" — the usual reasons are: not yet verified, no availability/service area set, or their team/company owner hasn't approved them yet.
+• Working: verified partners see available jobs within their service area on the Jobs tab and accept the ones they want. In companies, a dispatcher/owner assigns an accepted job to a driver from the Dispatch screen. On move day the crew runs the move from the Active tab: Begin Move starts the billable timer (the customer sees live GPS + status automatically), status updates step through loading/in transit/unloading, Finish Move stops the timer and finalizes the price.
+• Getting paid: the partner keeps 80% of the move price and Movvy keeps a 20% platform fee. Tips are 100% the crew's. Payouts run WEEKLY. Earnings history is on the Earnings tab; companies also get invoices.
+• Standards: professional conduct, keep ratings at 4.5+, carry required insurance/licences, never move prohibited items (weapons, hazardous materials, illegal goods).
 
 WHAT YOU CAN DO:
-• Explain how booking, pricing/estimates vs final bill, tracking, cancellation policy, tips, receipts, coverage, and the partner join/payout process work.
-• Reassure and point them to the right place in the app (e.g. "you can watch your driver's ETA on the Moves tab", "your receipt is under Profile → Receipts").
-• Answer general how-to questions clearly and briefly.
+• Answer how-Movvy-works questions for either audience: booking, pricing/estimate vs final bill, the exact cancellation fee tiers, tracking stages, masked calling, tips, in-app PDF receipts, the $5,000 coverage and 7-day claim window (facts only — the claim itself goes to a human), partner joining/codes/verification, the 80/20 split and weekly payouts.
+• Point people to the exact place in the app using the locations above (e.g. "Profile → Receipts", "Moves tab → your move → Cancel", "Jobs tab", "your Crew screen").
+• Use the LIVE CONTEXT you're given about this person's move or partner status to give specific, grounded answers.
 
-WHAT YOU MUST NOT DO — escalate to a human instead (use the escalate_to_human tool):
-• Anything about money: refunds, billing disputes, being over/under-charged.
-• Complaints about a crew or customer, damage, theft, or insurance claims.
-• Safety issues, injuries, emergencies, or SOS.
-• Taking an ACTION on a booking — you cannot cancel, reschedule, reassign, refund, or change anyone's move or account. If they need that, escalate.
-• Account deletion or suspension, or legal matters.
-• Any time the person asks to talk to a human/agent/manager, or you're not sure you can answer correctly.
-You have NO ability to look up private data beyond the context above and cannot perform actions — never claim you did something you can't.
+WHAT YOU MUST NOT DO — use the escalate_to_human tool instead:
+• Anything about money: refunds, billing disputes, over/under-charges.
+• Complaints, damage, loss, theft, insurance claims (you may state the policy facts, but the claim itself always goes to a human).
+• Safety issues, injuries, emergencies, SOS.
+• PERFORMING any action — you cannot cancel, reschedule, reassign, refund, verify, approve, or change any booking or account. Users can self-cancel in the app; if they want Movvy to do something for them, escalate.
+• Account deletion/suspension requests directed at Movvy, or legal matters.
+• Whenever someone asks for a human/agent/manager, or you're not confident you're right.
+You have NO tools to look anything up beyond the LIVE CONTEXT given, and no ability to act. NEVER invent prices, dates, policies, or booking details, and never claim you did or will do something you can't.
 
-STYLE: warm, calm, and concise (2–4 sentences, Canadian English, no emoji spam). If you're escalating, still send one short reassuring sentence to the person and call the tool. Never invent prices, policies, or specific booking details you weren't given.`;
+STYLE: warm, calm, concise — 2 to 4 short sentences. Canadian English by default; if the person writes in another language, reply in their language. No emoji spam. When escalating, send one short reassuring sentence AND call the tool. If asked something outside Movvy entirely, gently steer back to Movvy support topics.`;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function json(body: unknown, status: number, cors: Record<string, string>) {
+  return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 }
 
-async function json(body: unknown, status: number, cors: Record<string, string>) {
-  return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Calls the Messages API with retries on 429/5xx/network. Returns parsed JSON
+// or null (caller treats null as "skip silently — humans handle").
+async function callAnthropic(apiKey: string, payload: unknown): Promise<any | null> {
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
+      });
+      if (res.ok) return await res.json();
+      const retryable = res.status === 429 || res.status >= 500;
+      const text = await res.text();
+      console.error(`[support-ai-reply] anthropic ${res.status} (attempt ${attempt})`, text.slice(0, 300));
+      if (!retryable || attempt === 2) return null;
+      const retryAfter = Number(res.headers.get('retry-after')) || 0;
+      await sleep(Math.max(retryAfter * 1000, 1000 * 2 ** attempt));
+    } catch (e) {
+      console.error(`[support-ai-reply] network error (attempt ${attempt})`, e);
+      if (attempt === 2) return null;
+      await sleep(1000 * 2 ** attempt);
+    }
+  }
+  return null;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -119,14 +207,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // ─── Load the thread + gate ────────────────────────────────────────────────
   const { data: thread } = await admin
     .from('chat_threads')
-    .select('id, kind, ai_enabled, needs_human, customer_profile_id, booking_id')
+    .select('id, kind, ai_enabled, needs_human, customer_profile_id')
     .eq('id', thread_id)
     .maybeSingle();
   if (!thread || thread.kind !== 'support' || !thread.ai_enabled || thread.needs_human) {
     return json({ ok: true, skipped: 'not an active AI support thread' }, 200, cors);
   }
 
-  // ─── Recent history ────────────────────────────────────────────────────────
+  // ─── Recent history + double-reply guard ──────────────────────────────────
   const { data: rows } = await admin
     .from('chat_messages')
     .select('body, is_admin, is_ai, created_at')
@@ -134,31 +222,131 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .order('created_at', { ascending: false })
     .limit(MAX_HISTORY);
   const history = (rows ?? []).reverse();
-  const lastHuman = [...history].reverse().find((m) => !m.is_admin && !m.is_ai);
-  if (!lastHuman) return json({ ok: true, skipped: 'nothing to answer' }, 200, cors);
+  const lastHumanIdx = history.findLastIndex((m) => !m.is_admin && !m.is_ai);
+  if (lastHumanIdx === -1) return json({ ok: true, skipped: 'nothing to answer' }, 200, cors);
+  // If an AI or admin reply already landed after the user's latest message
+  // (racing triggers, or an admin jumped in), don't pile on.
+  if (history.slice(lastHumanIdx + 1).some((m) => m.is_admin || m.is_ai)) {
+    return json({ ok: true, skipped: 'already answered' }, 200, cors);
+  }
+  const lastHuman = history[lastHumanIdx];
 
-  // ─── Audience + light context ──────────────────────────────────────────────
+  // ─── Audience + live context ───────────────────────────────────────────────
   const { data: opener } = await admin
     .from('profiles').select('full_name, role').eq('id', thread.customer_profile_id).maybeSingle();
-  const role = (opener as any)?.role ?? 'customer';
+  const role: string = (opener as any)?.role ?? 'customer';
   const audience: 'customer' | 'partner' =
-    ['driver', 'mover', 'company_owner'].includes(role) ? 'partner' : 'customer';
+    ['driver', 'mover', 'company_owner', 'company_dispatcher'].includes(role) ? 'partner' : 'customer';
+  const firstName = ((opener as any)?.full_name ?? '').split(' ')[0] || 'there';
 
-  let contextLine = `They are a ${audience}. Name: ${(opener as any)?.full_name ?? 'unknown'}.`;
-  if (audience === 'customer') {
-    const { data: mv } = await admin
-      .from('bookings')
-      .select('short_code, status, pickup_city, dropoff_city, scheduled_for_date')
-      .eq('customer_id', thread.customer_profile_id)
-      .not('status', 'in', '(completed,cancelled,failed)')
-      .order('scheduled_for_date', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    if (mv) {
-      contextLine += ` They have a move #${(mv as any).short_code} (${(mv as any).status}) from ${(mv as any).pickup_city} to ${(mv as any).dropoff_city ?? 'in-home'} on ${(mv as any).scheduled_for_date}.`;
+  const ctx: string[] = [
+    `Audience: ${audience === 'partner' ? `PARTNER (role: ${role})` : 'CUSTOMER'}.`,
+    `Name: ${(opener as any)?.full_name ?? 'unknown'} (address them as ${firstName}).`,
+    `Today's date: ${new Date().toISOString().slice(0, 10)} (America/Edmonton region).`,
+  ];
+
+  const moveSelect =
+    'short_code, status, pickup_city, dropoff_city, scheduled_for_date, scheduled_for_window, assigned_team_id, assigned_company_id';
+
+  try {
+    if (audience === 'customer') {
+      const [{ data: mv }, { count: lifetime }] = await Promise.all([
+        admin
+          .from('bookings')
+          .select(moveSelect)
+          .eq('customer_id', thread.customer_profile_id)
+          .not('status', 'in', '(completed,cancelled,failed)')
+          .order('scheduled_for_date', { ascending: true })
+          .limit(1)
+          .maybeSingle(),
+        admin
+          .from('bookings')
+          .select('id', { count: 'exact', head: true })
+          .eq('customer_id', thread.customer_profile_id),
+      ]);
+      ctx.push(`Lifetime moves booked: ${lifetime ?? 0}.`);
+      if (mv) {
+        let crewName: string | null = null;
+        if ((mv as any).assigned_team_id) {
+          const { data } = await admin.from('partner_teams').select('display_name')
+            .eq('id', (mv as any).assigned_team_id).maybeSingle();
+          crewName = (data as any)?.display_name ?? null;
+        } else if ((mv as any).assigned_company_id) {
+          const { data } = await admin.from('companies').select('display_name')
+            .eq('id', (mv as any).assigned_company_id).maybeSingle();
+          crewName = (data as any)?.display_name ?? null;
+        }
+        ctx.push(
+          `Their current/upcoming move: #${(mv as any).short_code}, status "${(mv as any).status}", ` +
+          `${(mv as any).pickup_city ?? '—'} to ${(mv as any).dropoff_city ?? 'in-home'}, ` +
+          `scheduled ${(mv as any).scheduled_for_date ?? 'TBD'}${(mv as any).scheduled_for_window ? ` (${(mv as any).scheduled_for_window})` : ''}, ` +
+          `crew: ${crewName ?? 'not assigned yet'}.`,
+        );
+      } else {
+        const { data: done } = await admin
+          .from('bookings')
+          .select('short_code, status, scheduled_for_date')
+          .eq('customer_id', thread.customer_profile_id)
+          .in('status', ['completed', 'cancelled'])
+          .order('scheduled_for_date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        ctx.push(done
+          ? `No active or upcoming move. Most recent move: #${(done as any).short_code} (${(done as any).status}, ${(done as any).scheduled_for_date}).`
+          : 'No active, upcoming, or past moves — likely a general or pre-booking question.');
+      }
     } else {
-      contextLine += ' They have no active or upcoming move right now.';
+      // Partner context: which team/company they belong to, plus their org's
+      // current in-flight job if any. Wrapped defensively — missing context
+      // just means a slightly more generic (still correct) answer.
+      let orgLine = 'Organization: not on a team or company roster yet (may be mid-onboarding).';
+      let teamId: string | null = null;
+      let companyId: string | null = null;
+      const { data: tm } = await admin
+        .from('partner_team_members')
+        .select('team_id, role, accepted_at, team:partner_teams(display_name)')
+        .eq('profile_id', thread.customer_profile_id)
+        .is('removed_at', null)
+        .limit(1)
+        .maybeSingle();
+      if (tm) {
+        teamId = (tm as any).team_id;
+        orgLine = `Organization: team "${(tm as any).team?.display_name ?? 'unnamed'}" (their role: ${(tm as any).role}${(tm as any).accepted_at ? '' : ', invite not yet accepted'}).`;
+      } else {
+        const { data: cm } = await admin
+          .from('company_members')
+          .select('company_id, role, accepted_at, company:companies(display_name)')
+          .eq('profile_id', thread.customer_profile_id)
+          .is('removed_at', null)
+          .limit(1)
+          .maybeSingle();
+        if (cm) {
+          companyId = (cm as any).company_id;
+          orgLine = `Organization: company "${(cm as any).company?.display_name ?? 'unnamed'}" (their role: ${(cm as any).role}${(cm as any).accepted_at ? '' : ', invite not yet accepted'}).`;
+        }
+      }
+      ctx.push(orgLine);
+      if (teamId || companyId) {
+        const col = teamId ? 'assigned_team_id' : 'assigned_company_id';
+        const { data: job } = await admin
+          .from('bookings')
+          .select('short_code, status, pickup_city, dropoff_city, scheduled_for_date, scheduled_for_window')
+          .eq(col, teamId ?? companyId)
+          .not('status', 'in', '(completed,cancelled,failed)')
+          .order('scheduled_for_date', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (job) {
+          ctx.push(
+            `Their org's next/current job: #${(job as any).short_code}, status "${(job as any).status}", ` +
+            `${(job as any).pickup_city ?? '—'} to ${(job as any).dropoff_city ?? 'in-home'}, ` +
+            `scheduled ${(job as any).scheduled_for_date ?? 'TBD'}${(job as any).scheduled_for_window ? ` (${(job as any).scheduled_for_window})` : ''}.`,
+          );
+        }
+      }
     }
+  } catch (e) {
+    console.error('[support-ai-reply] context enrichment failed (non-fatal)', e);
   }
 
   const insertAi = async (body: string) => {
@@ -174,8 +362,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     await insertAi(note);
   };
 
-  // ─── Deterministic safety net — escalate sensitive topics without the model ─
-  if (ESCALATE_RE.test(lastHuman.body)) {
+  // ─── Deterministic safety net — escalate without spending a model call ─────
+  if (HARD_ESCALATE_RE.test(lastHuman.body) || ACTION_INTENT_RE.test(lastHuman.body)) {
     await escalate(
       'keyword',
       "Thanks for the details — I'm connecting you with a Movvy team member who can help with this. They'll reply right here shortly.",
@@ -190,34 +378,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ ok: true, skipped: 'no api key' }, 200, cors);
   }
 
-  // ─── Ask Haiku ─────────────────────────────────────────────────────────────
+  // ─── Build the conversation ─────────────────────────────────────────────────
   const messages = history
     .map((m) => ({ role: m.is_admin || m.is_ai ? 'assistant' : 'user', content: m.body }));
   // The Messages API must start with a user turn.
   while (messages.length && messages[0].role !== 'user') messages.shift();
   if (!messages.length) return json({ ok: true, skipped: 'no user turn' }, 200, cors);
 
+  const data = await callAnthropic(apiKey, {
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    // Stable knowledge first (cache marker), volatile per-user context after —
+    // so the cacheable prefix is byte-identical across every thread.
+    system: [
+      { type: 'text', text: KNOWLEDGE, cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: `LIVE CONTEXT FOR THIS CONVERSATION:\n${ctx.join('\n')}` },
+    ],
+    tools: [ESCALATE_TOOL],
+    messages,
+  });
+  if (!data) return json({ ok: true, skipped: 'model unavailable' }, 200, cors);
+
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 500,
-        system: knowledge(audience, contextLine),
-        tools: [ESCALATE_TOOL],
-        messages,
-      }),
-    });
-    if (!res.ok) {
-      console.error('[support-ai-reply] anthropic error', res.status, await res.text());
-      return json({ ok: true, skipped: 'model error' }, 200, cors);
-    }
-    const data = await res.json();
     const blocks: any[] = data.content ?? [];
     const toolUse = blocks.find((b) => b.type === 'tool_use' && b.name === 'escalate_to_human');
     const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
@@ -228,8 +410,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     if (toolUse) {
       const reason = toolUse.input?.reason ?? 'assistant escalation';
+      const summary = toolUse.input?.summary ? ` — ${toolUse.input.summary}` : '';
       await escalate(
-        reason,
+        `${reason}${summary}`,
         text || "I'm connecting you with a Movvy team member who can help — they'll reply here shortly.",
       );
       return json({ ok: true, escalated: reason }, 200, cors);

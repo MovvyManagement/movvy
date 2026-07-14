@@ -46,7 +46,9 @@ handle(async (req) => {
   } catch {
     return new Response('Bad JSON', { status: 400 });
   }
-  if (expected && body.secret !== expected) {
+  // FAIL CLOSED: if TEST_EMAIL_SECRET isn't configured, nobody gets in — an
+  // unset env var must never turn a shared-secret gate into an open door.
+  if (!expected || body.secret !== expected) {
     return new Response('Forbidden', { status: 403 });
   }
   const to = body.to;

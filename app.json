@@ -74,7 +74,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Movvy uses your location to center the map on where you are so you can book a move from there faster."
         }
-      ]
+      ],
+      "@stripe/stripe-react-native"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -15,6 +15,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/lib/supabase';
+import { StripeProvider } from '@stripe/stripe-react-native';
+
+// Publishable key is safe to ship in the client (it's public by design). If
+// unset, StripeProvider renders harmlessly and the pay button no-ops.
+const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '';
 import { queryClient, useAutoRegisterPushToken } from '@/lib/data';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ToastProvider } from '@/components/Toast';
@@ -79,6 +84,12 @@ export default function RootLayout() {
           <SafeAreaProvider>
             <ToastProvider>
               <AuthProvider>
+                <StripeProvider
+                  publishableKey={STRIPE_PUBLISHABLE_KEY}
+                  urlScheme="movvy"
+                  merchantIdentifier="merchant.com.movvy.app"
+                >
+                <>
                 <PushTokenWatcher />
                 <AnalyticsBootstrap />
                 <StatusBar style={palette.statusBar} />
@@ -108,6 +119,8 @@ export default function RootLayout() {
                 {!splashDone ? (
                   <AppSplash onFinish={() => setSplashDone(true)} />
                 ) : null}
+                </>
+                </StripeProvider>
               </AuthProvider>
             </ToastProvider>
           </SafeAreaProvider>

@@ -124,3 +124,8 @@ verify_jwt = true
 verify_jwt = true
 [functions.support-sos]
 verify_jwt = true
+[functions.stripe-create-payment-intent]
+verify_jwt = true
+# Stripe calls this with no Supabase JWT — the Stripe-Signature check IS the auth.
+[functions.stripe-webhook]
+verify_jwt = false

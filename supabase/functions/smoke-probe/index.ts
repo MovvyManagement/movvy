@@ -8,7 +8,9 @@ handle(async (req) => {
   const expected = Deno.env.get('SMOKE_TEST_SECRET');
   let body: any = {};
   try { body = await req.json(); } catch { /* ignore */ }
-  if (expected && body.secret !== expected) {
+  // FAIL CLOSED: this probe returns recipient email addresses. If the
+  // secret env var is missing, reject everyone.
+  if (!expected || body.secret !== expected) {
     return new Response('Forbidden', { status: 403 });
   }
 

@@ -29,7 +29,9 @@ handle(async (req) => {
   const expected = Deno.env.get('SMOKE_TEST_SECRET') ?? Deno.env.get('TEST_EMAIL_SECRET');
   let body: any = {};
   try { body = await req.json(); } catch { /* ignore */ }
-  if (expected && body.secret !== expected) {
+  // FAIL CLOSED: this function creates users + bookings with the service
+  // role. If the secret env var is missing, reject everyone.
+  if (!expected || body.secret !== expected) {
     return new Response('Forbidden', { status: 403 });
   }
 

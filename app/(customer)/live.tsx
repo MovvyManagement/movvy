@@ -47,6 +47,7 @@ import { fmtDateShort, firstNameOf } from '@/lib/format';
 import { mockBookings } from '@/data/mockBookings';
 import { mockFallbacksEnabled } from '@/lib/mocks';
 import { haptic } from '@/lib/haptics';
+import { PayMoveButton } from '@/components/PayMoveButton';
 import type { BookingStatus } from '@/types';
 
 const STEP_KEYS: BookingStatus[] = ['on_the_way','arrived','loading','in_transit','unloading','completed'];
@@ -639,9 +640,7 @@ function ReviewModal({
         communication: ratings.communication,
         tags,
       });
-      if (tip && tip > 0) {
-        await submitTip.mutateAsync({ booking_id: bookingId, amount_cents: tip * 100 });
-      }
+      // Note: the tip is charged + recorded with the payment above, not here.
       haptic.success();
       onClose();
     } catch (e: any) {
@@ -658,6 +657,55 @@ function ReviewModal({
         <Pressable onPress={(e) => e.stopPropagation()} className="rounded-t-3xl bg-white" style={{ maxHeight: '92%' }}>
           <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
             <View className="self-center h-1 w-12 rounded-full bg-silver-200 mb-4" />
+
+            {/* Pay for the move — pick a tip (optional), then pay the move +
+                tip in one charge. The Stripe sheet shows the authoritative,
+                server-computed amount. */}
+            <View className="mb-5">
+              <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500 mb-2">
+                Add a tip · 100% to your crew
+              </Text>
+              <View className="flex-row gap-2">
+                {[15, 18, 20, 25].map((pct) => {
+                  const amt = Math.max(1, Math.round((bookingTotalDollars * pct) / 100));
+                  const sel = tip === amt;
+                  return (
+                    <Pressable
+                      key={pct}
+                      onPress={() => setTip(sel ? null : amt)}
+                      className={`flex-1 rounded-2xl border px-2 py-3 items-center ${
+                        sel ? 'bg-brand-600 border-brand-600' : 'bg-white border-silver-300'
+                      }`}
+                    >
+                      <Text className={`text-base font-bold ${sel ? 'text-white' : 'text-ink-900'}`}>{pct}%</Text>
+                      <Text className={`text-[11px] mt-0.5 ${sel ? 'text-white/80' : 'text-silver-500'}`}>${amt}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Pressable onPress={() => setTip(null)} className="mt-2 self-center">
+                <Text className="text-xs font-semibold text-silver-500">No tip</Text>
+              </Pressable>
+
+              <View className="mt-4">
+                <PayMoveButton
+                  bookingId={bookingId}
+                  amountDollars={bookingTotalDollars + (tip ?? 0)}
+                  tipCents={(tip ?? 0) * 100}
+                  onPaid={() => {
+                    // Record the tip for the crew's earnings view once the charge
+                    // succeeds. The money itself was already collected by Stripe.
+                    if (tip && tip > 0) {
+                      submitTip.mutateAsync({ booking_id: bookingId, amount_cents: tip * 100 }).catch(() => {});
+                    }
+                  }}
+                />
+              </View>
+              <Text className="text-[11px] text-silver-400 mt-2 text-center">
+                Move ${bookingTotalDollars.toFixed(2)}{tip ? ` + $${tip} tip` : ''} · secure payment via Stripe
+              </Text>
+            </View>
+            <View className="h-px bg-silver-100 mb-5" />
 
             <View className="items-center">
               <Avatar name={moverName} size={64} />
@@ -706,35 +754,6 @@ function ReviewModal({
                 );
               })}
             </View>
-
-            <Text className="mt-6 text-xs font-semibold uppercase tracking-wider text-silver-500 mb-2">
-              Add a tip · 90% to your crew
-            </Text>
-            <View className="flex-row gap-2">
-              {[15, 18, 20, 25].map((pct) => {
-                const amt = Math.max(1, Math.round((bookingTotalDollars * pct) / 100));
-                const sel = tip === amt;
-                return (
-                  <Pressable
-                    key={pct}
-                    onPress={() => setTip(sel ? null : amt)}
-                    className={`flex-1 rounded-2xl border px-2 py-3 items-center ${
-                      sel ? 'bg-brand-600 border-brand-600' : 'bg-white border-silver-300'
-                    }`}
-                  >
-                    <Text className={`text-base font-bold ${sel ? 'text-white' : 'text-ink-900'}`}>
-                      {pct}%
-                    </Text>
-                    <Text className={`text-[11px] mt-0.5 ${sel ? 'text-white/80' : 'text-silver-500'}`}>
-                      ${amt}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <Pressable onPress={() => setTip(null)} className="mt-3 self-center">
-              <Text className="text-xs font-semibold text-silver-500">No tip</Text>
-            </Pressable>
 
             <View className="mt-6 gap-2">
               <Button
