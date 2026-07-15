@@ -21,6 +21,9 @@
 // =============================================================================
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
+import { sendBrandedEmail } from '../_shared/email.ts';
+import { bookingConfirmed } from '../_shared/emails/index.ts';
+import { fmtAddress, fmtDateTime, fmtMoney, fmtTimeWindow, startHourFromWindow } from '../_shared/format.ts';
 
 const SIG_TOLERANCE_S = 300; // 5 minutes
 
@@ -103,6 +106,90 @@ Deno.serve(async (req: Request): Promise<Response> => {
               deposit_paid_at: new Date().toISOString(),
               stripe_deposit_payment_intent_id: obj.id,
             }).eq('id', bookingId);
+
+            // DISPATCH: the deposit is what makes a booking real. Atomically
+            // flip draft → searching (the .eq('status','draft') guard makes
+            // Stripe's at-least-once redeliveries a no-op), then — only if WE
+            // did the flip — announce the job to crews and send the customer
+            // their booking-confirmed email. Both moved here from
+            // bookings-create so nobody hears about an unpaid booking.
+            const { data: dispatched } = await admin.from('bookings')
+              .update({ status: 'searching' })
+              .eq('id', bookingId)
+              .eq('status', 'draft')
+              .select('id, short_code, city_id, move_type, pickup_line1, pickup_city, dropoff_line1, dropoff_city, scheduled_for_date, scheduled_for_window, price_total_cents, pricing_breakdown, customer_id')
+              .maybeSingle();
+
+            if (dispatched) {
+              const bk = dispatched as any;
+              // Crew broadcast — best-effort, never blocks the 200 to Stripe.
+              try {
+                const driverDollars = Math.round(
+                  Number(bk.pricing_breakdown?.driverTotalCents ?? bk.price_total_cents * 0.8) / 100,
+                );
+                const [teamRes, companyRes] = await Promise.all([
+                  admin
+                    .from('partner_team_members')
+                    .select('profile_id, partner_teams!inner(primary_city_id, onboarding_status)')
+                    .eq('partner_teams.primary_city_id', bk.city_id)
+                    .eq('partner_teams.onboarding_status', 'verified')
+                    .eq('status', 'active')
+                    .is('removed_at', null),
+                  admin
+                    .from('company_members')
+                    .select('profile_id, role, companies!inner(primary_city_id, onboarding_status)')
+                    .eq('companies.primary_city_id', bk.city_id)
+                    .eq('companies.onboarding_status', 'verified')
+                    .in('role', ['owner', 'dispatcher'])
+                    .eq('status', 'active')
+                    .is('removed_at', null),
+                ]);
+                const recipients = new Set<string>();
+                for (const r of teamRes.data ?? []) recipients.add((r as any).profile_id);
+                for (const r of companyRes.data ?? []) recipients.add((r as any).profile_id);
+                if (recipients.size > 0) {
+                  await admin.from('notifications').insert(
+                    Array.from(recipients).map((profile_id) => ({
+                      profile_id,
+                      channel: 'in_app' as const,
+                      category: 'job.available',
+                      title: 'New job available',
+                      body: `${bk.pickup_city} → ${bk.dropoff_city ?? 'in-home'} · est. $${driverDollars} payout`,
+                      data: { booking_id: bk.id, short_code: bk.short_code, move_type: bk.move_type },
+                    })),
+                  );
+                }
+              } catch (e) {
+                console.warn('[stripe-webhook] partner broadcast failed (non-fatal)', e);
+              }
+
+              // Booking-confirmed email — now honest: deposit is in hand.
+              try {
+                const { data: profile } = await admin
+                  .from('profiles').select('email, full_name').eq('id', bk.customer_id).maybeSingle();
+                if (profile?.email) {
+                  const startHour = startHourFromWindow(bk.scheduled_for_window);
+                  sendBrandedEmail({
+                    to: profile.email,
+                    template: bookingConfirmed({
+                      fullName: profile.full_name,
+                      shortCode: bk.short_code,
+                      pickupAddress: fmtAddress(bk.pickup_line1, bk.pickup_city),
+                      dropoffAddress: bk.dropoff_line1
+                        ? fmtAddress(bk.dropoff_line1, bk.dropoff_city)
+                        : 'In-home / labor only',
+                      scheduledStart: fmtDateTime(bk.scheduled_for_date, startHour),
+                      scheduledWindow: fmtTimeWindow(bk.scheduled_for_window),
+                      crewSize: Number(bk.pricing_breakdown?.recommendedCrew ?? 2),
+                      estimatedTotalDollars: fmtMoney(bk.price_total_cents),
+                      bookingUrl: `https://movvy.ca/app/bookings/${bk.id}`,
+                    }),
+                  }).catch((e) => console.warn('[stripe-webhook] confirm email failed', e));
+                }
+              } catch (e) {
+                console.warn('[stripe-webhook] confirm email setup failed (non-fatal)', e);
+              }
+            }
           } else {
             const depositApplied = Number(obj.metadata?.deposit_applied_cents ?? 0) || 0;
             await admin.from('bookings').update({

@@ -315,10 +315,11 @@ serve(async (req) => {
         move_type: input.details.moveType,
         distance_km: route?.distance_km ?? null,
         duration_min: route?.duration_min ?? null,
-        // TODO Phase 3: insert as 'draft', flip to 'pending' on deposit capture,
-        // then to 'searching' on payment success. Until Stripe is wired we
-        // insert directly as 'searching' so partners can see the job.
-        status: 'searching',
+        // DEPOSIT GATE (2026-07-14): bookings are held as 'draft' — invisible
+        // to crews — until the 20% deposit is confirmed by the Stripe webhook,
+        // which flips draft → 'searching' and runs the partner broadcast +
+        // booking-confirmed email (both moved there from this function).
+        status: 'draft',
         pickup_line1: input.pickup.line1,
         pickup_line2: input.pickup.line2 ?? null,
         pickup_city: input.pickup.city,
@@ -441,76 +442,11 @@ serve(async (req) => {
       payload: { city_slug: city.slug, move_type: input.details.moveType, promo_id: promoId, discount_cents: discountCents },
     });
 
-    // 9) Broadcast to eligible partners. Best-effort — don't fail the booking
-    //    if the notifications insert hiccups (partners can still pull from /jobs).
-    try {
-      const driverDollars = Math.round((pricing.driverTotalCents ?? 0) / 100);
-      const [teamRes, companyRes] = await Promise.all([
-        admin
-          .from('partner_team_members')
-          .select('profile_id, partner_teams!inner(primary_city_id, onboarding_status)')
-          .eq('partner_teams.primary_city_id', city.id)
-          .eq('partner_teams.onboarding_status', 'verified')
-          .eq('status', 'active')
-          .is('removed_at', null),
-        admin
-          .from('company_members')
-          .select('profile_id, role, companies!inner(primary_city_id, onboarding_status)')
-          .eq('companies.primary_city_id', city.id)
-          .eq('companies.onboarding_status', 'verified')
-          .in('role', ['owner', 'dispatcher'])
-          .eq('status', 'active')
-          .is('removed_at', null),
-      ]);
-      const recipients = new Set<string>();
-      for (const r of teamRes.data ?? []) recipients.add((r as any).profile_id);
-      for (const r of companyRes.data ?? []) recipients.add((r as any).profile_id);
-
-      if (recipients.size > 0) {
-        const rows = Array.from(recipients).map((profile_id) => ({
-          profile_id,
-          channel: 'in_app' as const,
-          category: 'job.available',
-          title: 'New job available',
-          body: `${input.pickup.city} → ${input.dropoff?.city ?? 'in-home'} · est. $${driverDollars} payout`,
-          data: { booking_id: booking.id, short_code: booking.short_code, move_type: input.details.moveType },
-        }));
-        await admin.from('notifications').insert(rows);
-      }
-    } catch (broadcastErr) {
-      console.warn('[bookings-create] partner broadcast failed (non-fatal)', broadcastErr);
-    }
-
-    // 10) Branded booking-confirmed email. Fire-and-forget — never blocks
-    //     the response. Resend hiccups don't kill the booking flow.
-    try {
-      const { data: profile } = await admin
-        .from('profiles')
-        .select('email, full_name')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (profile?.email) {
-        const startHour = startHourFromWindow(input.schedule.window);
-        sendBrandedEmail({
-          to: profile.email,
-          template: bookingConfirmed({
-            fullName: profile.full_name,
-            shortCode: booking.short_code,
-            pickupAddress: fmtAddress(input.pickup.line1, input.pickup.city),
-            dropoffAddress: input.dropoff
-              ? fmtAddress(input.dropoff.line1, input.dropoff.city)
-              : 'In-home / labor only',
-            scheduledStart: fmtDateTime(input.schedule.date, startHour),
-            scheduledWindow: fmtTimeWindow(input.schedule.window),
-            crewSize: pricing.recommendedCrew ?? 2,
-            estimatedTotalDollars: fmtMoney(totalCentsFinal),
-            bookingUrl: `https://movvy.ca/app/bookings/${booking.id}`,
-          }),
-        }).catch((e) => console.warn('[bookings-create] email send failed', e));
-      }
-    } catch (emailErr) {
-      console.warn('[bookings-create] email setup failed (non-fatal)', emailErr);
-    }
+    // 9+10) Partner broadcast + booking-confirmed email now fire from
+    // stripe-webhook when the deposit lands and the booking flips
+    // draft → searching. Announcing an undispatched (unpaid) booking to
+    // crews — or telling the customer "you're booked" before the deposit —
+    // would be lying to both sides.
 
     return jsonResponse(
       { ok: true, booking },

@@ -524,7 +524,7 @@ export default function ConfirmStep() {
               <Ionicons name="checkmark" size={40} color="#fff" />
             </View>
             <Text className="mt-4 text-2xl font-bold text-ink-900 text-center">
-              You're booked!
+              {depositPaid || !confirmed?.id ? "You're booked!" : 'One last step'}
             </Text>
             <Text className="mt-1 text-sm text-silver-500 text-center">
               {confirmed?.code ? `Move #${confirmed.code}` : 'Booking confirmed'}
@@ -543,7 +543,7 @@ export default function ConfirmStep() {
               />
               <NextStep
                 icon="people-outline"
-                text="We're arranging your crew now — they'll appear on your move card the moment they confirm."
+                text="The crew search starts the moment your deposit is in — your crew appears on your move card when they confirm."
               />
               <NextStep
                 icon="cash-outline"
@@ -579,9 +579,15 @@ export default function ConfirmStep() {
                   depositPaid || !confirmed?.id ? 'text-white' : 'text-ink-700'
                 }`}
               >
-                {depositPaid || !confirmed?.id ? 'Track it in My Moves' : 'Pay deposit later · go to My Moves'}
+                {depositPaid || !confirmed?.id ? 'Track it in My Moves' : 'Not now — my move stays on hold'}
               </Text>
             </Pressable>
+            {!depositPaid && confirmed?.id ? (
+              <Text className="mt-2 text-[11px] text-silver-500 text-center leading-4">
+                Your booking is saved but NOT sent to crews until the deposit is
+                paid. You can pay any time from My Moves.
+              </Text>
+            ) : null}
           </View>
         </View>
       </Modal>
