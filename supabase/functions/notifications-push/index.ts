@@ -55,16 +55,24 @@ handle(async (req) => {
   if (req.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, { status: 405 }, cors);
 
   try {
-    // Auth required — only authenticated callers can push. The notifications
-    // table trigger runs with the service role, which has its own bypass.
-    const user = await requireAuth(req);
+    // Two kinds of caller:
+    //   • the DB trigger `notifications_push_fanout` on notifications INSERT —
+    //     presents the internal shared secret and skips user auth + rate limit.
+    //   • a signed-in admin/support doing a one-off push — requireAuth.
+    const internalSecret = req.headers.get('x-internal-secret');
+    const expectedInternal = Deno.env.get('DB_WEBHOOK_SECRET');
+    const isInternal = !!internalSecret && !!expectedInternal && internalSecret === expectedInternal;
 
-    await checkRateLimit({
-      bucketKey: `user:${user.id}:notifications_push`,
-      endpoint: 'notifications-push',
-      limit: 200,
-      windowSeconds: 60,
-    });
+    let user: { id: string; role: string } | null = null;
+    if (!isInternal) {
+      user = await requireAuth(req);
+      await checkRateLimit({
+        bucketKey: `user:${user.id}:notifications_push`,
+        endpoint: 'notifications-push',
+        limit: 200,
+        windowSeconds: 60,
+      });
+    }
 
     const parsed = Body.safeParse(await req.json().catch(() => ({})));
     if (!parsed.success) throw httpError(400, parsed.error.issues[0]?.message ?? 'Invalid input');
@@ -94,22 +102,20 @@ handle(async (req) => {
       channelId: 'default',
     }));
 
+    // Expo Push API — batch up to 100 per request. The access token is OPTIONAL
+    // (only needed if the Expo project turned on enhanced push security), so we
+    // deliver for real even without it, adding the header only when it's set.
     const accessToken = Deno.env.get('EXPO_ACCESS_TOKEN');
-    if (!accessToken) {
-      // Dev mode — log only. Useful when iterating on the trigger.
-      console.log('[notifications-push/stub]', { profile_id, title, body, devices: messages.length });
-      return jsonResponse({ ok: true, sent: messages.length, mode: 'stub' }, { status: 200 }, cors);
-    }
+    const pushHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'Accept-Encoding': 'gzip, deflate',
+    };
+    if (accessToken) pushHeaders.Authorization = `Bearer ${accessToken}`;
 
-    // Expo Push API — batch up to 100 per request
     const res = await fetch('https://exp.host/--/api/v2/push/send', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        'Accept-Encoding': 'gzip, deflate',
-      },
+      headers: pushHeaders,
       body: JSON.stringify(messages),
     });
     const json = await res.json();
@@ -118,16 +124,18 @@ handle(async (req) => {
       throw httpError(502, 'Push provider rejected the batch');
     }
 
-    await audit({
-      actorId: user.id,
-      actorRole: user.role,
-      action: 'notification.pushed',
-      entityType: 'profile',
-      entityId: profile_id,
-      ip: clientIp(req),
-      ua: req.headers.get('user-agent') ?? undefined,
-      payload: { sent: messages.length, category },
-    });
+    if (user) {
+      await audit({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'notification.pushed',
+        entityType: 'profile',
+        entityId: profile_id,
+        ip: clientIp(req),
+        ua: req.headers.get('user-agent') ?? undefined,
+        payload: { sent: messages.length, category },
+      });
+    }
 
     return jsonResponse({ ok: true, sent: messages.length }, { status: 200 }, cors);
   } catch (e) {

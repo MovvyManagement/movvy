@@ -53,7 +53,17 @@ export function useAutoRegisterPushToken() {
           : (await Notifications.requestPermissionsAsync()).status;
         if (final !== 'granted') return;
 
-        const tokenResult = await Notifications.getExpoPushTokenAsync();
+        // getExpoPushTokenAsync needs the EAS projectId in a standalone/dev
+        // build. Pass it explicitly so a missing id fails loudly here instead
+        // of returning a token that can't receive pushes. (Set it by running
+        // `eas init`, which writes expo.extra.eas.projectId into app.json.)
+        const Constants = (await import('expo-constants')).default;
+        const projectId =
+          (Constants?.expoConfig as any)?.extra?.eas?.projectId ??
+          (Constants as any)?.easConfig?.projectId;
+        const tokenResult = await Notifications.getExpoPushTokenAsync(
+          projectId ? { projectId } : undefined,
+        );
         if (cancelled) return;
         await register.mutateAsync({
           expo_push_token: tokenResult.data,

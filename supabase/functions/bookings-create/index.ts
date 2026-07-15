@@ -28,8 +28,9 @@ import {
 } from '../_shared/security.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { computeServerPricing } from '../_shared/pricing.ts';
-import { sendBrandedEmail } from '../_shared/email.ts';
-import { bookingConfirmed } from '../_shared/emails/index.ts';
+// NOTE: the booking-confirmed email + partner broadcast moved to stripe-webhook
+// (they fire only once the 20% deposit is paid), so this function no longer
+// sends email or notifies crews on creation.
 import {
   fmtAddress,
   fmtDateTime,

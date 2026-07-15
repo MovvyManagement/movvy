@@ -128,14 +128,14 @@ handle(async (req) => {
       category: 'sos',
     };
 
-    // Insert one in_app + one push row per recipient. The DB-webhook drains
-    // push rows via notifications-push so the lock screen lights up within
-    // seconds.
+    // One in_app row per recipient — the notifications_push_fanout trigger
+    // sends the push, so the lock screen lights up within seconds. (Previously
+    // a second 'push' row was inserted too; with the trigger live that would
+    // double-fire, so it's collapsed to one row.)
     if (recipientIds.size > 0) {
       const rows: any[] = [];
       for (const pid of recipientIds) {
         rows.push({ profile_id: pid, channel: 'in_app', category: 'support.sos', title, body, data: payload });
-        rows.push({ profile_id: pid, channel: 'push',  category: 'support.sos', title, body, data: payload });
       }
       const { error: nErr } = await admin.from('notifications').insert(rows);
       if (nErr) console.warn('[support-sos] notifications insert failed', nErr);

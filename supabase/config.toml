@@ -129,3 +129,13 @@ verify_jwt = true
 # Stripe calls this with no Supabase JWT — the Stripe-Signature check IS the auth.
 [functions.stripe-webhook]
 verify_jwt = false
+# These are invoked by DB triggers / pg_cron with a shared-secret header (not a
+# user JWT), so the gateway must let them through; each verifies its own secret.
+[functions.notifications-push]
+verify_jwt = false
+[functions.customer-welcome-on-signup]
+verify_jwt = false
+[functions.partner-welcome-on-signup]
+verify_jwt = false
+[functions.cron-weekly-payouts]
+verify_jwt = false
