@@ -37,13 +37,32 @@ export function ResetPasswordForm() {
     (async () => {
       try {
         const url = new URL(window.location.href);
+        const tokenHash = url.searchParams.get('token_hash');
+        const otpType = url.searchParams.get('type');
         const code = url.searchParams.get('code');
 
-        if (code) {
+        if (tokenHash) {
+          // token_hash flow (the email template links here with
+          // ?token_hash={{ .TokenHash }}&type=recovery). Unlike PKCE, this
+          // verifies server-side with no local code-verifier, so the link
+          // works from ANY browser or device — webmail included.
+          const { error: otpErr } = await supabase.auth.verifyOtp({
+            type: (otpType as 'recovery') ?? 'recovery',
+            token_hash: tokenHash,
+          });
+          if (otpErr) throw otpErr;
+        } else if (code) {
+          // Legacy PKCE flow ({{ .ConfirmationURL }} template). Only works in
+          // the same browser that requested the reset.
           const { error: exchErr } = await supabase.auth.exchangeCodeForSession(
             code,
           );
-          if (exchErr) throw exchErr;
+          if (exchErr) {
+            throw new Error(
+              'This link must be opened in the same browser you requested the reset from. ' +
+              'Request a new link below and open it here, or copy the link from your email into this browser.',
+            );
+          }
         }
 
         // Whether the code path or the fragment path was used, getUser
