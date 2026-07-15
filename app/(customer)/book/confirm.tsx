@@ -16,10 +16,10 @@ import { useValidatePromo } from '@/lib/data/useAdmin';
 import { Input } from '@/components/Input';
 import { COVERAGE_LABEL, COVERAGE_AMOUNT } from '@/lib/brand';
 import { track } from '@/lib/analytics';
-import { supabaseConfigured } from '@/lib/supabase';
+import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { MaxWidth } from '@/components/MaxWidth';
 import { haptic } from '@/lib/haptics';
-import { PayMoveButton } from '@/components/PayMoveButton';
+import { usePayForMove } from '@/lib/data/usePayForMove';
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
@@ -56,13 +56,19 @@ export default function ConfirmStep() {
   // booking and spells out what happens next — the old flow silently dumped
   // the customer on the Moves list with no "did it work?" answer.
   const [confirmed, setConfirmed] = useState<{
-    id: string | null;          // booking id — needed to charge the deposit
     code: string | null;
     date: string | null;
     window: string;
     totalCents: number;
   } | null>(null);
-  const [depositPaid, setDepositPaid] = useState(false);
+
+  // DEPOSIT-TO-CONFIRM: the "book" button IS the deposit payment. We create
+  // the booking (held server-side, invisible to crews), immediately present
+  // the Stripe Payment Sheet for the 20% deposit, and only on success show
+  // the booked takeover — the webhook flips the booking live to crews. If the
+  // sheet is dismissed or fails, the held booking is cancelled so nothing
+  // half-booked ever exists from the customer's point of view.
+  const { pay, isPaying } = usePayForMove();
 
   // Every dismissal path (CTA, Android back) lands on the Moves tab — the
   // fresh booking is at the top of Upcoming, so the modal hands off to the
@@ -114,7 +120,6 @@ export default function ConfirmStep() {
       // Demo mode — same confirmed moment as the real flow, minus the
       // server-issued booking code.
       setConfirmed({
-        id: null,
         code: null,
         date: draft.date ?? null,
         window: draft.timeWindow ?? 'Anytime',
@@ -173,18 +178,42 @@ export default function ConfirmStep() {
         move_type: draft.moveType,
         total_cents: price.totalCents,
       });
-      haptic.success();
-      // Snapshot BEFORE reset() clears the draft — the confirmed takeover
-      // renders from this state, not the store. Navigation to the Moves tab
-      // now happens when the customer dismisses the modal (goToMoves).
-      setConfirmed({
-        id: created?.id ?? null,
-        code: created?.short_code ?? null,
-        date: draft.date ?? null,
-        window: draft.timeWindow ?? 'Anytime',
-        totalCents: price.totalCents,
-      });
-      reset();
+
+      // The deposit sheet IS the confirmation step. Booking stays invisible
+      // to crews until this succeeds (webhook flips it live).
+      const result = await pay(created.id, 0, 'deposit');
+
+      if (result.status === 'paid' || result.status === 'settled') {
+        haptic.success();
+        // Snapshot BEFORE reset() clears the draft — the confirmed takeover
+        // renders from this state, not the store. Navigation to the Moves tab
+        // happens when the customer dismisses the modal (goToMoves).
+        setConfirmed({
+          code: created?.short_code ?? null,
+          date: draft.date ?? null,
+          window: draft.timeWindow ?? 'Anytime',
+          totalCents: price.totalCents,
+        });
+        reset();
+        return;
+      }
+
+      // Deposit didn't complete → from the customer's point of view nothing
+      // was booked. Cancel the held draft server-side (fire-and-forget; it
+      // was never visible to crews) and leave the form intact for a retry.
+      supabase.functions
+        .invoke('bookings-cancel', {
+          body: { booking_id: created.id, reason: 'Deposit payment not completed at checkout' },
+        })
+        .catch(() => {});
+
+      if (result.status === 'error') {
+        Alert.alert(
+          "Deposit didn't go through",
+          `${result.message}\n\nNothing was booked and no charge was made. Tap the button to try again.`,
+        );
+      }
+      // 'canceled' → they closed the sheet on purpose; stay silent, form intact.
     } catch (e: any) {
       Alert.alert('Could not book', e?.message ?? 'Try again.');
     }
@@ -488,15 +517,20 @@ export default function ConfirmStep() {
 
         <View className="mt-3">
           <Button
-            label={`Book now · ${fmtCurrency(Math.round(price.totalCents * DEPOSIT_RATE) / 100)} deposit`}
+            label={
+              isPaying
+                ? 'Processing…'
+                : `Pay ${fmtCurrency(Math.round(price.totalCents * DEPOSIT_RATE) / 100)} deposit`
+            }
             size="lg"
             fullWidth
-            loading={createBooking.isPending}
+            loading={createBooking.isPending || isPaying}
             onPress={submit}
           />
         </View>
         <Text className="text-center text-[11px] text-silver-500 mt-2 leading-4 px-4">
-          Deposit fully refundable until 48 hours before your move.
+          Paying the deposit confirms your booking · fully refundable until 48
+          hours before your move.
         </Text>
       </View>
 
@@ -524,7 +558,7 @@ export default function ConfirmStep() {
               <Ionicons name="checkmark" size={40} color="#fff" />
             </View>
             <Text className="mt-4 text-2xl font-bold text-ink-900 text-center">
-              {depositPaid || !confirmed?.id ? "You're booked!" : 'One last step'}
+              You're booked!
             </Text>
             <Text className="mt-1 text-sm text-silver-500 text-center">
               {confirmed?.code ? `Move #${confirmed.code}` : 'Booking confirmed'}
@@ -536,58 +570,31 @@ export default function ConfirmStep() {
 
             <View className="mt-6 gap-3">
               <NextStep
-                icon="card-outline"
-                text={`Pay your ${fmtCurrency(
+                icon="checkmark-circle-outline"
+                text={`Your ${fmtCurrency(
                   Math.round((confirmed?.totalCents ?? 0) * DEPOSIT_RATE) / 100,
-                )} deposit below to lock in your crew — it counts toward your final bill.`}
+                )} deposit is in — it counts toward your final bill.`}
               />
               <NextStep
                 icon="people-outline"
-                text="The crew search starts the moment your deposit is in — your crew appears on your move card when they confirm."
+                text="We're arranging your crew now — they'll appear on your move card the moment they confirm."
               />
               <NextStep
                 icon="cash-outline"
                 text={`The remaining balance of your ${fmtCurrency(
                   (confirmed?.totalCents ?? 0) / 100,
-                )} estimate is billed on actual hours after the move. Deposit refundable until 48h before.`}
+                )} estimate is billed on actual hours after the move.`}
               />
             </View>
 
-            {/* Deposit payment — the modal's primary action. Real bookings
-                have an id; demo mode (no backend) skips straight to Moves. */}
-            {confirmed?.id ? (
-              <View className="mt-6">
-                <PayMoveButton
-                  bookingId={confirmed.id}
-                  amountDollars={Math.round((confirmed.totalCents ?? 0) * DEPOSIT_RATE) / 100}
-                  kind="deposit"
-                  onPaid={() => setDepositPaid(true)}
-                />
-              </View>
-            ) : null}
-
             <Pressable
               onPress={goToMoves}
-              className={`mt-3 h-14 rounded-2xl items-center justify-center active:opacity-90 ${
-                depositPaid || !confirmed?.id ? 'bg-brand-600' : 'bg-white border border-silver-300'
-              }`}
+              className="mt-6 h-14 rounded-2xl bg-brand-600 items-center justify-center active:opacity-90"
               accessibilityRole="button"
               accessibilityLabel="Track your move in My Moves"
             >
-              <Text
-                className={`text-base font-bold ${
-                  depositPaid || !confirmed?.id ? 'text-white' : 'text-ink-700'
-                }`}
-              >
-                {depositPaid || !confirmed?.id ? 'Track it in My Moves' : 'Not now — my move stays on hold'}
-              </Text>
+              <Text className="text-base font-bold text-white">Track it in My Moves</Text>
             </Pressable>
-            {!depositPaid && confirmed?.id ? (
-              <Text className="mt-2 text-[11px] text-silver-500 text-center leading-4">
-                Your booking is saved but NOT sent to crews until the deposit is
-                paid. You can pay any time from My Moves.
-              </Text>
-            ) : null}
           </View>
         </View>
       </Modal>

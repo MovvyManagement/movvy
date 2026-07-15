@@ -17,7 +17,6 @@ import { supabaseConfigured } from '@/lib/supabase';
 import type { BookingStatus } from '@/types';
 import LiveMove from '../live';
 import { TipSheet, isInTipWindow } from '@/components/TipSheet';
-import { PayMoveButton } from '@/components/PayMoveButton';
 import { ChatSheet } from '@/components/ChatSheet';
 import { useToast } from '@/components/Toast';
 import { CardSkeleton } from '@/components/Skeleton';
@@ -49,8 +48,10 @@ function isActive(s: BookingStatus) {
   return ['on_the_way', 'arrived', 'loading', 'in_transit', 'unloading'].includes(s);
 }
 function isUpcoming(s: BookingStatus) {
-  // 'draft' = booked but deposit not yet paid — held, not dispatched to crews.
-  return ['draft', 'pending', 'searching', 'assigned', 'confirmed'].includes(s);
+  // 'draft' is deliberately excluded: a draft only exists for the seconds
+  // between "Pay deposit" and the sheet resolving (then it's either flipped
+  // live by the webhook or cancelled) — it never renders as a move.
+  return ['pending', 'searching', 'assigned', 'confirmed'].includes(s);
 }
 
 // =============================================================================
@@ -150,10 +151,6 @@ function BookingHistory() {
         // the 24h tip-window UI is still applicable.
         tipCents: (b as any).tip_cents ?? 0,
         completedAt: (b as any).completed_at as string | null,
-        // Deposit gate — a 'draft' booking with an unpaid deposit is held
-        // until the customer pays; the card shows the pay CTA below.
-        depositPaid: (b as any).deposit_status === 'paid',
-        depositDollars: Math.round(b.price_total_cents * 0.2) / 100,
       }));
     }
     // Dev-only fallback. In production this returns [] so the empty-state
@@ -172,8 +169,6 @@ function BookingHistory() {
       totalDollars: b.total,
       tipCents: 0,
       completedAt: null as string | null,
-      depositPaid: true,
-      depositDollars: 0,
     }));
   }, [live]);
 
@@ -273,28 +268,6 @@ function BookingHistory() {
                     </View>
                     <Text className="text-sm font-bold text-ink-900">{fmtCurrency(b.totalDollars)}</Text>
                   </View>
-
-                  {/* Deposit required — a 'draft' booking is held (crews can't
-                      see it) until the 20% deposit is paid. Paying flips it to
-                      'searching' server-side via the Stripe webhook. */}
-                  {b.status === 'draft' && !b.depositPaid ? (
-                    <View className="mt-3 rounded-2xl bg-amber-50 border border-amber-100 p-3">
-                      <View className="flex-row items-center mb-2">
-                        <Ionicons name="alert-circle" size={16} color="#92400E" />
-                        <Text className="ml-2 flex-1 text-xs font-bold text-amber-800">
-                          Deposit required — we can't search for your crew yet
-                        </Text>
-                      </View>
-                      <PayMoveButton
-                        bookingId={b.id}
-                        amountDollars={b.depositDollars}
-                        kind="deposit"
-                      />
-                      <Text className="text-[11px] text-amber-700 mt-2 text-center">
-                        Refundable until 48 hours before your move.
-                      </Text>
-                    </View>
-                  ) : null}
 
                   {/* Modify booking — only shown while there's still >24h
                       until the move. Edge fn enforces the same cutoff
