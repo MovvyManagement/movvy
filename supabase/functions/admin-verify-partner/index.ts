@@ -116,6 +116,22 @@ handle(async (req) => {
           subject_type,
           subject_id,
         );
+
+        // In-app notification — shows in the partner's notification bell the
+        // instant they're approved/declined, even if they miss the email.
+        if (ownerProfile?.id) {
+          await admin.from('notifications').insert({
+            profile_id: ownerProfile.id,
+            channel: 'in_app',
+            category: decision === 'approve' ? 'partner.approved' : 'partner.declined',
+            title: decision === 'approve' ? "You're approved! 🎉" : 'Application update',
+            body: decision === 'approve'
+              ? 'Welcome to the Movvy crew. Sign in with the email/phone and password you used to apply, then set your availability and payout details to start getting jobs.'
+              : (notes ?? 'Your application did not meet our current onboarding criteria.'),
+            data: { subject_type, subject_id },
+          }).catch?.((e: unknown) => console.warn('[admin-verify-partner] notify failed', e));
+        }
+
         if (ownerProfile?.email) {
           const template =
             decision === 'approve'
@@ -134,7 +150,7 @@ handle(async (req) => {
           }).catch((e) => console.warn('[admin-verify-partner] email send failed', e));
         }
       } catch (emailErr) {
-        console.warn('[admin-verify-partner] email setup failed (non-fatal)', emailErr);
+        console.warn('[admin-verify-partner] notify/email setup failed (non-fatal)', emailErr);
       }
     }
 
@@ -155,24 +171,24 @@ async function fetchPartnerOwnerProfile(
   admin: ReturnType<typeof adminClient>,
   subjectType: 'team' | 'company',
   subjectId: string,
-): Promise<{ email: string | null; full_name: string | null } | null> {
+): Promise<{ id: string | null; email: string | null; full_name: string | null } | null> {
   if (subjectType === 'team') {
     const { data } = await admin
       .from('partner_team_members')
-      .select('profiles!partner_team_members_profile_id_fkey(email, full_name)')
+      .select('profiles!partner_team_members_profile_id_fkey(id, email, full_name)')
       .eq('team_id', subjectId)
       .eq('status', 'active')
       .is('removed_at', null)
       .limit(1)
       .maybeSingle();
     return ((data as any)?.profiles ?? null) as
-      | { email: string | null; full_name: string | null }
+      | { id: string | null; email: string | null; full_name: string | null }
       | null;
   }
   // company
   const { data } = await admin
     .from('company_members')
-    .select('role, profiles!company_members_profile_id_fkey(email, full_name)')
+    .select('role, profiles!company_members_profile_id_fkey(id, email, full_name)')
     .eq('company_id', subjectId)
     .eq('role', 'owner')
     .eq('status', 'active')
@@ -180,6 +196,6 @@ async function fetchPartnerOwnerProfile(
     .limit(1)
     .maybeSingle();
   return ((data as any)?.profiles ?? null) as
-    | { email: string | null; full_name: string | null }
+    | { id: string | null; email: string | null; full_name: string | null }
     | null;
 }

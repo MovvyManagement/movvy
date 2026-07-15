@@ -27,6 +27,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { useAdminBookings, useReassignBooking, useCancelBooking } from '@/lib/data';
 import { fmtCurrency, fmtDateShort } from '@/lib/format';
 import { useToast } from '@/components/Toast';
+import { PromptSheet } from '@/components/PromptSheet';
 
 type TabKey = 'All' | 'Pending' | 'Active' | 'Completed' | 'Cancelled';
 const tabs: TabKey[] = ['All', 'Pending', 'Active', 'Completed', 'Cancelled'];
@@ -61,6 +62,9 @@ export default function AdminBookings() {
   const reassign = useReassignBooking();
   const cancel = useCancelBooking();
   const toast = useToast();
+  // Reassign target — drives the cross-platform PromptSheet (Alert.prompt was
+  // iOS-only, so reassign was dead on Android).
+  const [reassignTarget, setReassignTarget] = useState<any | null>(null);
 
   const filtered = useMemo(() => {
     const rows = bookings ?? [];
@@ -78,55 +82,32 @@ export default function AdminBookings() {
     });
   }, [bookings, tab, search]);
 
-  const onReassign = (b: any) => {
-    // Prompt for a partner identifier. Admin pastes a team UUID, company UUID,
-    // or driver profile UUID — the edge function figures out which one based
-    // on which table the UUID exists in. Native Alert prompts vary by OS so
-    // we use a multi-step Alert chain to keep it cross-platform.
-    Alert.prompt?.(
-      'Reassign booking',
-      `Paste the partner team UUID, company UUID, or driver profile UUID to take #${b.short_code}.`,
-      async (input?: string) => {
-        const id = (input ?? '').trim();
-        if (!id) return;
+  // Open the cross-platform reassign sheet (works identically on iOS + Android).
+  const onReassign = (b: any) => setReassignTarget(b);
+
+  // Runs when the admin submits the reassign sheet. Try as driver → team →
+  // company; the edge fn validates each in turn so we don't have to introspect
+  // the DB client-side.
+  const submitReassign = async (values: Record<string, string>) => {
+    const b = reassignTarget;
+    if (!b) return;
+    const id = (values.partner_id ?? '').trim();
+    if (!id) throw new Error('Paste a team, company, or driver UUID.');
+    try {
+      await reassign.mutateAsync({ booking_id: b.id, driver_profile_id: id, reason: 'admin manual reassign' });
+      toast.success(`Reassigned #${b.short_code}.`);
+    } catch {
+      try {
+        await reassign.mutateAsync({ booking_id: b.id, team_id: id, reason: 'admin manual reassign' });
+        toast.success(`Reassigned #${b.short_code} to team.`);
+      } catch {
         try {
-          // Try as driver first, then team, then company. The edge fn
-          // validates each in turn — sending all three lets it pick the right
-          // one without us having to introspect the DB client-side.
-          await reassign.mutateAsync({
-            booking_id: b.id,
-            driver_profile_id: id,
-            reason: 'admin manual reassign',
-          });
-          toast.success(`Reassigned #${b.short_code}.`);
-        } catch (e: any) {
-          // Retry as team_id if driver_id failed (different error path on the server)
-          try {
-            await reassign.mutateAsync({
-              booking_id: b.id,
-              team_id: id,
-              reason: 'admin manual reassign',
-            });
-            toast.success(`Reassigned #${b.short_code} to team.`);
-          } catch (e2: any) {
-            try {
-              await reassign.mutateAsync({
-                booking_id: b.id,
-                company_id: id,
-                reason: 'admin manual reassign',
-              });
-              toast.success(`Reassigned #${b.short_code} to company.`);
-            } catch (e3: any) {
-              toast.error(e3?.message ?? 'Reassignment failed — UUID not found.');
-            }
-          }
+          await reassign.mutateAsync({ booking_id: b.id, company_id: id, reason: 'admin manual reassign' });
+          toast.success(`Reassigned #${b.short_code} to company.`);
+        } catch (e3: any) {
+          throw new Error(e3?.message ?? 'Reassignment failed — UUID not found.');
         }
-      },
-      'plain-text',
-    );
-    // Android fallback: Alert.prompt doesn't exist on Android, surface a toast.
-    if (!Alert.prompt) {
-      toast.info('Reassign needs iOS prompt support — use the web admin for now.');
+      }
     }
   };
 
@@ -288,6 +269,17 @@ export default function AdminBookings() {
           ))
         )}
       </ScrollView>
+
+      {/* Cross-platform reassign prompt (replaces iOS-only Alert.prompt). */}
+      <PromptSheet
+        visible={!!reassignTarget}
+        title="Reassign booking"
+        message={reassignTarget ? `Paste the driver, team, or company UUID to take #${reassignTarget.short_code}.` : ''}
+        fields={[{ key: 'partner_id', label: 'Partner UUID', placeholder: 'driver / team / company UUID', required: true }]}
+        confirmLabel="Reassign"
+        onSubmit={submitReassign}
+        onClose={() => setReassignTarget(null)}
+      />
     </SafeAreaView>
   );
 }

@@ -34,6 +34,19 @@ export function useAutoRegisterPushToken() {
       try {
         // Lazy import keeps the package out of the web bundle
         const Notifications = await import('expo-notifications');
+
+        // ANDROID: a notification channel MUST exist or Android 8+ silently
+        // drops heads-up notifications (they'd never appear on the driver's
+        // phone). iOS has no channels — this is Android-only parity.
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('default', {
+            name: 'Movvy',
+            importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: '#059669',
+          });
+        }
+
         const { status: existing } = await Notifications.getPermissionsAsync();
         const final = existing === 'granted'
           ? existing

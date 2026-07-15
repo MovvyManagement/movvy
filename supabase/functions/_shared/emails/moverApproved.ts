@@ -27,6 +27,9 @@ export function moverApproved(args: {
     paragraph(
       `Welcome to Movvy. You're <strong>approved</strong> and live on the platform. Job offers will start hitting your phone the moment a booking matches your service area + vehicle.`,
     ),
+    paragraph(
+      `<strong>How to get in:</strong> open the Movvy app and sign in with the same email or phone number and password you set when you applied — no new account needed. (Forgot your password? Tap "Forgot password" on the sign-in screen.)`,
+    ),
     paragraph(`<strong>Before your first job:</strong>`),
     stepList([
       {
