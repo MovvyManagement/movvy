@@ -177,8 +177,9 @@ export default function ModifyBooking() {
               <Ionicons name="information-circle-outline" size={18} color="#71717A" />
               <Text className="ml-2 flex-1 text-xs text-silver-600 leading-4">
                 You can edit your move up until 24 hours before the scheduled
-                start. Your 20% deposit is non-refundable — modifying changes
-                the plan, not the deposit.
+                start. Your 20% deposit stays attached to this move — it's
+                refunded only if you cancel more than 48 hours before the
+                scheduled start.
               </Text>
             </View>
           )}

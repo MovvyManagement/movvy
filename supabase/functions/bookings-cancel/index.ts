@@ -2,11 +2,12 @@
 // Customer cancels a booking. Refund eligibility computed server-side based on
 // how close to scheduled time the cancellation comes.
 //
-// Cancellation policy (placeholder until you provide the official one):
-//   > 48h before scheduled → full refund
-//   24-48h before          → 80% refund
-//   2-24h before           → 50% refund
-//   < 2h before / completed → no refund (driver paid)
+// DEPOSIT POLICY (Adam, 2026-07-07 — replaces the old 100/80/50/0 tiers):
+//   The 20% booking deposit is refunded IN FULL if the cancellation happens
+//   MORE than 48 hours before the scheduled start. At ≤48h it is forfeited
+//   (compensates the crew that held the slot). The refund is a real Stripe
+//   refund against the deposit PaymentIntent; the signature-verified webhook
+//   confirms it (charge.refunded → deposit_status='refunded').
 
 import { z } from 'https://esm.sh/zod@3.23.8';
 import {
@@ -23,12 +24,8 @@ const Body = z.object({
   reason: z.string().min(3).max(500),
 });
 
-function refundPercent(hoursUntil: number): number {
-  if (hoursUntil > 48) return 100;
-  if (hoursUntil > 24) return 80;
-  if (hoursUntil > 2) return 50;
-  return 0;
-}
+// Deposit refundable only with more than 48 hours' notice (47h59m = forfeited).
+const REFUND_CUTOFF_HOURS = 48;
 
 handle(async (req) => {
   const cors = corsHeaders(req);
@@ -54,7 +51,7 @@ handle(async (req) => {
     // Load the booking — admin client bypasses RLS so we can read for ownership check
     const { data: booking, error: loadErr } = await admin
       .from('bookings')
-      .select('id, short_code, customer_id, status, scheduled_for_window_starts_at, scheduled_for_date, price_total_cents, assigned_team_id, assigned_company_id, assigned_driver_profile_id')
+      .select('id, short_code, customer_id, status, scheduled_for_window_starts_at, scheduled_for_date, price_total_cents, assigned_team_id, assigned_company_id, assigned_driver_profile_id, deposit_cents, deposit_status, stripe_deposit_payment_intent_id')
       .eq('id', booking_id)
       .single();
 
@@ -69,13 +66,16 @@ handle(async (req) => {
       throw httpError(400, `Booking is already ${booking.status}`);
     }
 
-    // Compute refund based on time-until-move
+    // Deposit refund eligibility: strictly more than 48h notice (admins can
+    // always refund as a goodwill override).
     const scheduled = booking.scheduled_for_window_starts_at
       ? new Date(booking.scheduled_for_window_starts_at)
       : new Date(booking.scheduled_for_date + 'T08:00:00Z');
     const hoursUntil = (scheduled.getTime() - Date.now()) / 3_600_000;
-    const refundPct = isAdmin ? 100 : refundPercent(hoursUntil);
-    const refundCents = Math.round((booking.price_total_cents * refundPct) / 100);
+    const depositPaid = booking.deposit_status === 'paid' && (booking.deposit_cents ?? 0) > 0;
+    const depositRefundable = isAdmin || hoursUntil > REFUND_CUTOFF_HOURS;
+    const refundPct = depositRefundable ? 100 : 0;
+    const refundCents = depositPaid && depositRefundable ? (booking.deposit_cents ?? 0) : 0;
 
     // Update through user-scoped client so RLS applies for non-admins
     const supabase = userClient(req.headers.get('Authorization'));
@@ -152,8 +152,40 @@ handle(async (req) => {
       console.warn('[bookings-cancel] crew notify failed (non-fatal)', notifyErr);
     }
 
-    // Stripe refund is issued in a later phase — for now we just record the eligible amount.
-    // TODO: enqueue refund job once Stripe Connect is wired in Phase 3.
+    // ─── Deposit settlement ────────────────────────────────────────────────
+    // >48h notice → real Stripe refund of the deposit (webhook confirms and
+    // flips deposit_status to 'refunded'). ≤48h → forfeited immediately.
+    // A refund API failure never blocks the cancel — we log + leave the
+    // deposit 'paid' so the admin Payments page shows it for manual follow-up.
+    if (depositPaid) {
+      if (depositRefundable && booking.stripe_deposit_payment_intent_id) {
+        const secretKey = Deno.env.get('STRIPE_SECRET_KEY');
+        if (secretKey) {
+          try {
+            const refundRes = await fetch('https://api.stripe.com/v1/refunds', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${secretKey}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Idempotency-Key': `movvy_dep_refund_${booking.id}`,
+              },
+              body: `payment_intent=${encodeURIComponent(booking.stripe_deposit_payment_intent_id)}`,
+            });
+            if (!refundRes.ok) {
+              console.error('[bookings-cancel] deposit refund failed', refundRes.status, await refundRes.text());
+            }
+          } catch (refundErr) {
+            console.error('[bookings-cancel] deposit refund error', refundErr);
+          }
+        } else {
+          console.error('[bookings-cancel] STRIPE_SECRET_KEY unset — deposit refund needs manual follow-up');
+        }
+      } else if (!depositRefundable) {
+        await admin.from('bookings')
+          .update({ deposit_status: 'forfeited' })
+          .eq('id', booking.id);
+      }
+    }
 
     // Branded cancellation email — fire-and-forget so a Resend hiccup
     // never blocks the cancel response.

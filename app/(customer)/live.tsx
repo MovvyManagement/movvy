@@ -103,6 +103,9 @@ export default function LiveMove() {
         dropoff: { line1: live.dropoff_line1 ?? '', city: live.dropoff_city ?? '', lat: live.dropoff_lat, lng: live.dropoff_lng },
         totalCents: live.price_total_cents,
         totalDollars: live.price_total_cents / 100,
+        // Deposit already collected at booking — credited on the final bill.
+        depositDollars:
+          (live as any).deposit_status === 'paid' ? ((live as any).deposit_cents ?? 0) / 100 : 0,
       }
     : showMock
     ? {
@@ -114,6 +117,7 @@ export default function LiveMove() {
         dropoff: { line1: fallback.dropoff.line1, city: fallback.dropoff.city, lat: fallback.dropoff.lat, lng: fallback.dropoff.lng },
         totalCents: Math.round((fallback.total ?? 0) * 100),
         totalDollars: fallback.total ?? 0,
+        depositDollars: 0,
       }
     : null;
 
@@ -229,7 +233,7 @@ export default function LiveMove() {
   // the modal can survive useActiveBooking() returning null on the next
   // poll (the active-booking query filters out completed statuses).
   const [showReview, setShowReview] = useState(false);
-  const [reviewTarget, setReviewTarget] = useState<{ id: string; totalDollars: number; moverName: string } | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<{ id: string; totalDollars: number; depositDollars: number; moverName: string } | null>(null);
   const reviewedRef = useRef(false);
   useEffect(() => {
     if (
@@ -241,6 +245,7 @@ export default function LiveMove() {
       setReviewTarget({
         id: booking.id,
         totalDollars: booking.totalDollars,
+        depositDollars: booking.depositDollars ?? 0,
         moverName: crewName ?? 'Movvy Crew',
       });
       setShowReview(true);
@@ -280,6 +285,7 @@ export default function LiveMove() {
           visible={showReview && !!reviewTarget}
           bookingId={reviewTarget?.id ?? ''}
           bookingTotalDollars={reviewTarget?.totalDollars ?? 0}
+          depositDollars={reviewTarget?.depositDollars ?? 0}
           moverName={reviewTarget?.moverName ?? 'Movvy Crew'}
           onClose={() => setShowReview(false)}
         />
@@ -572,6 +578,7 @@ export default function LiveMove() {
         visible={showReview}
         bookingId={booking.id}
         bookingTotalDollars={booking.totalDollars}
+        depositDollars={booking.depositDollars ?? 0}
         moverName={crewName ?? 'Movvy Crew'}
         onClose={() => setShowReview(false)}
       />
@@ -609,11 +616,13 @@ const CATEGORIES = [
 const COMPLIMENT_TAGS = ['Friendly', 'Fast', 'Careful', 'On time', 'Strong'];
 
 function ReviewModal({
-  visible, bookingId, bookingTotalDollars, moverName, onClose,
+  visible, bookingId, bookingTotalDollars, depositDollars = 0, moverName, onClose,
 }: {
   visible: boolean;
   bookingId: string;
   bookingTotalDollars: number;
+  /** Deposit already collected at booking — credited against this bill. */
+  depositDollars?: number;
   moverName: string;
   onClose: () => void;
 }) {
@@ -690,7 +699,7 @@ function ReviewModal({
               <View className="mt-4">
                 <PayMoveButton
                   bookingId={bookingId}
-                  amountDollars={bookingTotalDollars + (tip ?? 0)}
+                  amountDollars={Math.max(bookingTotalDollars - depositDollars, 0) + (tip ?? 0)}
                   tipCents={(tip ?? 0) * 100}
                   onPaid={() => {
                     // Record the tip for the crew's earnings view once the charge
@@ -702,7 +711,9 @@ function ReviewModal({
                 />
               </View>
               <Text className="text-[11px] text-silver-400 mt-2 text-center">
-                Move ${bookingTotalDollars.toFixed(2)}{tip ? ` + $${tip} tip` : ''} · secure payment via Stripe
+                Move ${bookingTotalDollars.toFixed(2)}
+                {depositDollars > 0 ? ` − $${depositDollars.toFixed(2)} deposit paid` : ''}
+                {tip ? ` + $${tip} tip` : ''} · secure payment via Stripe
               </Text>
             </View>
             <View className="h-px bg-silver-100 mb-5" />
@@ -837,8 +848,9 @@ function CancelMoveSheet({
             <View className="px-5 pt-5 pb-4">
               <Text className="text-lg font-bold text-ink-900">Cancel this move?</Text>
               <Text className="mt-1 text-sm text-silver-500 leading-5">
-                Your crew has held this slot. Cancelling within 48 hours of
-                your move incurs a fee that goes to the crew.
+                Your crew has held this slot. Cancel more than 48 hours before
+                your move and your deposit is fully refunded — within 48
+                hours it's non-refundable and goes to the crew.
               </Text>
 
               <Text className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-silver-500">

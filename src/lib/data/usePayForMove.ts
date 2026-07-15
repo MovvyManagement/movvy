@@ -21,22 +21,27 @@ import { supabase } from '@/lib/supabase';
 
 export type PayResult =
   | { status: 'paid'; amountCents: number }
+  | { status: 'settled' }          // nothing left to charge (deposit covered it)
   | { status: 'canceled' }
   | { status: 'error'; message: string };
+
+export type PayKind = 'deposit' | 'final';
 
 export function usePayForMove() {
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [isPaying, setIsPaying] = useState(false);
 
-  async function pay(bookingId: string, tipCents = 0): Promise<PayResult> {
+  async function pay(bookingId: string, tipCents = 0, kind: PayKind = 'final'): Promise<PayResult> {
     setIsPaying(true);
     try {
       const { data, error } = await supabase.functions.invoke(
         'stripe-create-payment-intent',
-        { body: { booking_id: bookingId, tip_cents: Math.max(0, Math.round(tipCents)) } },
+        { body: { booking_id: bookingId, kind, tip_cents: Math.max(0, Math.round(tipCents)) } },
       );
       if (error) throw new Error(error.message ?? 'Could not start the payment.');
       if ((data as any)?.error) throw new Error((data as any).error);
+      // Deposit covered the whole bill — nothing to present, already settled.
+      if ((data as any)?.settled) return { status: 'settled' };
 
       const clientSecret = (data as any).client_secret as string;
       const amountCents = (data as any).amount_cents as number;

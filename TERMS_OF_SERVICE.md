@@ -4,7 +4,7 @@
 **Effective Date:** July 5, 2026
 **Version:** 2.0
 
-> **Plain-language summary (not a substitute for the full Terms below).** Movvy is a booking platform that connects you with independent moving crews in Alberta. We are not a moving company and we do not move your belongings ourselves. Pricing is honest and hourly — no deposits, no surprise upcharges; you pay for the time actually used plus any disclosed travel/materials and GST. The crews are independent contractors, not Movvy employees. If something goes wrong, the crew (not Movvy) is primarily responsible, and you can open a claim in the app. These Terms limit our liability and set the rules for using the service. Please read the full document.
+> **Plain-language summary (not a substitute for the full Terms below).** Movvy is a booking platform that connects you with independent moving crews in Alberta. We are not a moving company and we do not move your belongings ourselves. Pricing is honest and hourly — you pay a 20% deposit when you book (credited to your final bill), and the rest is charged for the time actually used plus any disclosed travel/materials and GST. Cancel more than 48 hours before your move and the deposit is fully refunded; within 48 hours it is non-refundable. The crews are independent contractors, not Movvy employees. If something goes wrong, the crew (not Movvy) is primarily responsible, and you can open a claim in the app. These Terms limit our liability and set the rules for using the service. Please read the full document.
 
 ---
 
@@ -91,7 +91,7 @@ By offering services through the App, you represent, warrant, and agree that:
 
 7.1 **Formation.** A Booking is confirmed only when a Crew accepts it through the App. Until acceptance, a request is an offer that may be withdrawn.
 
-7.2 **Honest hourly pricing.** Pricing is **hourly**, based on the actual time the Crew spends performing the move, plus any clearly disclosed travel/fuel and materials fees, plus applicable **GST/HST**. **No deposit is required to book, and there are no hidden or surprise upcharges.**
+7.2 **Honest hourly pricing with a booking deposit.** Pricing is **hourly**, based on the actual time the Crew spends performing the move, plus any clearly disclosed travel/fuel and materials fees, plus applicable **GST/HST**. A **deposit equal to 20% of the estimate** is payable at the time of booking and is **credited in full against the final bill**. There are no hidden or surprise upcharges. The deposit's refund terms are set out in Section 8.
 
 7.3 **Estimates vs. final charges.** Any price shown before or during a Booking is a **non-binding estimate**. The final amount reflects actual time and disclosed fees. Movvy's systems calculate pricing on the server; the App may display an estimate for convenience only.
 
@@ -111,7 +111,7 @@ By offering services through the App, you represent, warrant, and agree that:
 
 ## 8. Cancellations, Reschedules & No-Shows
 
-8.1 **Customer cancellations.** Cancellations made **more than 48 hours** before the scheduled start are free. Cancellations **within 48 hours** may incur a reasonable cancellation fee disclosed at the time of booking.
+8.1 **Customer cancellations.** If you cancel **more than 48 hours** before the scheduled start, your deposit is **refunded in full**. If you cancel **within 48 hours** of the scheduled start, the deposit is **non-refundable** and is retained to compensate the Crew that reserved the time. No further cancellation charge applies beyond the deposit.
 
 8.2 **Reschedules** are subject to Crew availability and may be treated as a cancellation and re-booking if made on short notice.
 

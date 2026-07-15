@@ -42,7 +42,8 @@
 // MATERIALS: Flat $50 every move. No tiers, no packing add-on.
 // GST: 5% on (service + travel + fuel + materials).
 // TOTAL: ceil to nearest $1.
-// DEPOSIT: 20% non-refundable.
+// DEPOSIT: 20% of the estimate, due at booking, credited to the final bill.
+//          Refundable only if cancelled >48h before the scheduled start.
 //
 // DRIVER / PARTNER:
 //   driver_payout = total × 0.80

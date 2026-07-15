@@ -19,17 +19,20 @@ import { track } from '@/lib/analytics';
 import { supabaseConfigured } from '@/lib/supabase';
 import { MaxWidth } from '@/components/MaxWidth';
 import { haptic } from '@/lib/haptics';
+import { PayMoveButton } from '@/components/PayMoveButton';
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 // =============================================================================
-// Pay-after-the-move flow (Phase 1).
+// Deposit-at-booking flow (2026-07-07).
 //
-// The deposit + saved-card picker that used to live on this screen has been
-// removed — the customer commits to the booking now and Movvy invoices the
-// final amount once the crew marks the job complete. When Stripe lands
-// (Phase 3), reintroduce the payment-method picker + deposit charge here.
+// The customer pays a 20% deposit (of the estimate) right after the booking
+// is created — the success takeover presents the Stripe Payment Sheet. The
+// deposit is credited against the final bill and is refundable only when the
+// move is cancelled more than 48 hours before its scheduled start.
 // =============================================================================
+
+const DEPOSIT_RATE = 0.20; // keep in sync with stripe-create-payment-intent
 
 export default function ConfirmStep() {
   const draft = useBookingStore((s) => s.draft);
@@ -53,11 +56,13 @@ export default function ConfirmStep() {
   // booking and spells out what happens next — the old flow silently dumped
   // the customer on the Moves list with no "did it work?" answer.
   const [confirmed, setConfirmed] = useState<{
+    id: string | null;          // booking id — needed to charge the deposit
     code: string | null;
     date: string | null;
     window: string;
     totalCents: number;
   } | null>(null);
+  const [depositPaid, setDepositPaid] = useState(false);
 
   // Every dismissal path (CTA, Android back) lands on the Moves tab — the
   // fresh booking is at the top of Upcoming, so the modal hands off to the
@@ -109,6 +114,7 @@ export default function ConfirmStep() {
       // Demo mode — same confirmed moment as the real flow, minus the
       // server-issued booking code.
       setConfirmed({
+        id: null,
         code: null,
         date: draft.date ?? null,
         window: draft.timeWindow ?? 'Anytime',
@@ -172,6 +178,7 @@ export default function ConfirmStep() {
       // renders from this state, not the store. Navigation to the Moves tab
       // now happens when the customer dismisses the modal (goToMoves).
       setConfirmed({
+        id: created?.id ?? null,
         code: created?.short_code ?? null,
         date: draft.date ?? null,
         window: draft.timeWindow ?? 'Anytime',
@@ -284,22 +291,25 @@ export default function ConfirmStep() {
           </View>
         </Card>
 
-        {/* Pay-after-the-move banner — replaces the payment-method picker
-            until Stripe lands. Sets the customer's expectation that no
-            card is required upfront and the final number is invoiced
-            after the crew completes the job. */}
+        {/* How-payment-works banner — 20% deposit now, remainder billed on
+            actual hours after the move. The deposit refund cutoff is spelled
+            out HERE, before the customer commits, so it never surprises. */}
         <Card className="mt-3">
           <View className="flex-row items-start">
             <View className="h-10 w-10 rounded-2xl bg-brand-50 items-center justify-center">
-              <Ionicons name="cash-outline" size={20} color="#047857" />
+              <Ionicons name="card-outline" size={20} color="#047857" />
             </View>
             <View className="ml-3 flex-1">
               <Text className="text-sm font-bold text-ink-900">
-                Book now, pay after the move
+                {fmtCurrency(Math.round(price.totalCents * DEPOSIT_RATE) / 100)} deposit
+                to lock it in
               </Text>
               <Text className="mt-1 text-xs text-silver-500 leading-5">
-                No card or deposit required to confirm. We'll send your invoice
-                once the move wraps, charged on actual hours on site.
+                20% of your estimate secures your crew and counts toward the
+                final bill — you're only invoiced the rest after the move,
+                based on actual hours. Fully refundable if you cancel more
+                than 48 hours before your move; inside 48 hours it's
+                non-refundable.
               </Text>
             </View>
           </View>
@@ -448,12 +458,11 @@ export default function ConfirmStep() {
         </MaxWidth>
       </ScrollView>
 
-      {/* ─── Bottom CTA — pay-after-the-move ──────────────────────────────
-          The headline is the estimated total (NOT a deposit). Nothing is
-          charged here. The customer just commits the booking — billing
-          happens after the crew marks the job complete. The big number
-          is purposely the same one the estimate breakdown shows so the
-          customer's expectation matches the screen above.
+      {/* ─── Bottom CTA — book + 20% deposit ──────────────────────────────
+          The headline stays the estimated total (the number the breakdown
+          above promised); the sub-line spells out the deposit due right
+          after booking. The deposit Payment Sheet is presented in the
+          success takeover the moment the booking lands.
           Style note: bottom inset is handled here (paddingBottom 28) so
           the CTA hugs the home-indicator. */}
       <View
@@ -464,19 +473,22 @@ export default function ConfirmStep() {
           <Text className="text-xs font-bold uppercase tracking-wider text-silver-500">
             Estimated total
           </Text>
-          <Text className="text-[11px] text-silver-500">Billed after move</Text>
+          <Text className="text-[11px] text-silver-500">
+            {fmtCurrency(Math.round(price.totalCents * DEPOSIT_RATE) / 100)} deposit due now
+          </Text>
         </View>
         <Text className="text-3xl font-bold text-ink-900 mt-0.5">
           {fmtCurrency(price.totalCents / 100)}
         </Text>
         <Text className="text-[11px] text-silver-500 mt-0.5">
-          Final invoice based on actual hours on site — could be less if the
-          crew finishes early, more if the job runs over.
+          20% deposit today, credited to your final bill. The rest is billed
+          on actual hours after the move — less if the crew finishes early,
+          more if it runs over.
         </Text>
 
         <View className="mt-3">
           <Button
-            label="Book now · pay after"
+            label={`Book now · ${fmtCurrency(Math.round(price.totalCents * DEPOSIT_RATE) / 100)} deposit`}
             size="lg"
             fullWidth
             loading={createBooking.isPending}
@@ -484,7 +496,7 @@ export default function ConfirmStep() {
           />
         </View>
         <Text className="text-center text-[11px] text-silver-500 mt-2 leading-4 px-4">
-          No card required. Cancel free up to 48 hours before your move.
+          Deposit fully refundable until 48 hours before your move.
         </Text>
       </View>
 
@@ -524,28 +536,51 @@ export default function ConfirmStep() {
 
             <View className="mt-6 gap-3">
               <NextStep
+                icon="card-outline"
+                text={`Pay your ${fmtCurrency(
+                  Math.round((confirmed?.totalCents ?? 0) * DEPOSIT_RATE) / 100,
+                )} deposit below to lock in your crew — it counts toward your final bill.`}
+              />
+              <NextStep
                 icon="people-outline"
                 text="We're arranging your crew now — they'll appear on your move card the moment they confirm."
               />
               <NextStep
-                icon="chatbubble-ellipses-outline"
-                text="Chat opens 24 hours before pickup so you can confirm parking and access."
-              />
-              <NextStep
                 icon="cash-outline"
-                text={`Nothing is charged today — your ${fmtCurrency(
+                text={`The remaining balance of your ${fmtCurrency(
                   (confirmed?.totalCents ?? 0) / 100,
-                )} estimate is billed on actual hours after the move.`}
+                )} estimate is billed on actual hours after the move. Deposit refundable until 48h before.`}
               />
             </View>
 
+            {/* Deposit payment — the modal's primary action. Real bookings
+                have an id; demo mode (no backend) skips straight to Moves. */}
+            {confirmed?.id ? (
+              <View className="mt-6">
+                <PayMoveButton
+                  bookingId={confirmed.id}
+                  amountDollars={Math.round((confirmed.totalCents ?? 0) * DEPOSIT_RATE) / 100}
+                  kind="deposit"
+                  onPaid={() => setDepositPaid(true)}
+                />
+              </View>
+            ) : null}
+
             <Pressable
               onPress={goToMoves}
-              className="mt-6 h-14 rounded-2xl bg-brand-600 items-center justify-center active:opacity-90"
+              className={`mt-3 h-14 rounded-2xl items-center justify-center active:opacity-90 ${
+                depositPaid || !confirmed?.id ? 'bg-brand-600' : 'bg-white border border-silver-300'
+              }`}
               accessibilityRole="button"
               accessibilityLabel="Track your move in My Moves"
             >
-              <Text className="text-base font-bold text-white">Track it in My Moves</Text>
+              <Text
+                className={`text-base font-bold ${
+                  depositPaid || !confirmed?.id ? 'text-white' : 'text-ink-700'
+                }`}
+              >
+                {depositPaid || !confirmed?.id ? 'Track it in My Moves' : 'Pay deposit later · go to My Moves'}
+              </Text>
             </Pressable>
           </View>
         </View>

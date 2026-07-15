@@ -15,7 +15,7 @@ const faqs = [
   },
   {
     q: 'Can I cancel after I book?',
-    a: 'Yes. Cancellations are free up to 48 hours before your move. Inside 48 hours we charge a small fee — that goes straight to the crew who held the slot for you.',
+    a: 'Yes. Cancel more than 48 hours before your move and your 20% deposit is fully refunded. Inside 48 hours the deposit is non-refundable — it goes straight to the crew who held the slot for you.',
   },
   {
     q: 'Are the movers insured?',

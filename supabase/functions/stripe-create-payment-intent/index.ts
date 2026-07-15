@@ -27,15 +27,23 @@ import { handle } from '../_shared/serve.ts';
 
 const Body = z.object({
   booking_id: z.string().uuid(),
-  // Optional gratuity the customer chose, in cents. Validated + capped
-  // server-side below so a client can't tip a negative or absurd amount.
+  // 'deposit' = 20% of the estimate, payable right after booking.
+  // 'final'   = actual bill minus the deposit already paid (+ tip).
+  kind: z.enum(['deposit', 'final']).default('final'),
+  // Optional gratuity the customer chose, in cents (final payment only).
+  // Validated + capped server-side below so a client can't tip a negative
+  // or absurd amount.
   tip_cents: z.number().int().min(0).max(100000).optional(),
 });
 
-// Statuses at which it makes sense to collect payment. Movvy is "pay after the
-// move", so payment is expected once the crew has finished (final amount known)
-// — but we also allow an already-confirmed move with a set amount, for testing.
-const PAYABLE_STATUSES = ['completed', 'unloading', 'in_transit'];
+const DEPOSIT_RATE = 0.20; // 20% of the estimate, due at booking
+
+// Statuses at which each payment kind makes sense:
+// • FINAL — once the crew has finished (final amount known); we also allow the
+//   tail-end in-flight statuses for testing.
+// • DEPOSIT — right after booking, any time before the move is done/cancelled.
+const FINAL_PAYABLE_STATUSES = ['completed', 'unloading', 'in_transit'];
+const DEPOSIT_PAYABLE_STATUSES = ['draft', 'pending', 'searching', 'assigned', 'confirmed'];
 
 function form(params: Record<string, string>): string {
   return Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
@@ -66,31 +74,65 @@ handle(async (req) => {
       throw httpError(503, 'Payments are not configured yet.');
     }
 
+    const kind = parsed.data.kind;
+
     // RLS-bound client — the customer can only read their own booking.
     const supabase = userClient(req.headers.get('Authorization'));
     const { data: booking, error } = await supabase
       .from('bookings')
-      .select('id, short_code, status, payment_status, actual_total_cents, price_total_cents, stripe_payment_intent_id, customer_id')
+      .select('id, short_code, status, payment_status, actual_total_cents, price_total_cents, stripe_payment_intent_id, customer_id, deposit_cents, deposit_status')
       .eq('id', booking_id)
       .maybeSingle();
 
     if (error || !booking) throw httpError(404, 'Booking not found');
     if (booking.customer_id !== user.id) throw httpError(403, 'Not your booking');
-    if (booking.payment_status === 'captured') throw httpError(409, 'This move is already paid.');
-    if (!PAYABLE_STATUSES.includes(booking.status)) {
-      throw httpError(409, 'This move is not ready for payment yet.');
+
+    // SERVER-SIDE amounts — never trust any client-supplied figure.
+    let moveCents: number;   // the portion of THIS charge that is move revenue
+    let tipCents = 0;
+    let depositApplied = 0;
+
+    if (kind === 'deposit') {
+      if (booking.deposit_status === 'paid') throw httpError(409, 'Deposit already paid.');
+      if (!DEPOSIT_PAYABLE_STATUSES.includes(booking.status)) {
+        throw httpError(409, 'This move can no longer take a deposit.');
+      }
+      if (!booking.price_total_cents || booking.price_total_cents <= 0) {
+        throw httpError(409, 'No estimate on this move yet.');
+      }
+      moveCents = Math.round(booking.price_total_cents * DEPOSIT_RATE);
+    } else {
+      if (booking.payment_status === 'captured') throw httpError(409, 'This move is already paid.');
+      if (!FINAL_PAYABLE_STATUSES.includes(booking.status)) {
+        throw httpError(409, 'This move is not ready for payment yet.');
+      }
+      const bill = booking.actual_total_cents ?? booking.price_total_cents;
+      if (!bill || bill <= 0) throw httpError(409, 'No amount to charge on this move.');
+
+      // Credit the deposit the customer already paid at booking.
+      depositApplied = booking.deposit_status === 'paid' ? (booking.deposit_cents ?? 0) : 0;
+      moveCents = Math.max(bill - depositApplied, 0);
+
+      // Tip is 100% the crew's. Cap it at the bill amount (or $1000) to stop
+      // fat-finger / abuse, but otherwise honour the customer's choice.
+      tipCents = Math.max(0, Math.min(parsed.data.tip_cents ?? 0, Math.min(bill, 100000)));
     }
 
-    // SERVER-SIDE amount — final bill if known, else the estimate. Never trust
-    // any client-supplied figure.
-    const moveCents = booking.actual_total_cents ?? booking.price_total_cents;
-    if (!moveCents || moveCents <= 0) throw httpError(409, 'No amount to charge on this move.');
-
-    // Tip is 100% the crew's. Cap it at the move amount (or $1000) to stop
-    // fat-finger / abuse, but otherwise honour the customer's choice. The
-    // customer pays the move + tip in a single charge.
-    const tipCents = Math.max(0, Math.min(parsed.data.tip_cents ?? 0, Math.min(moveCents, 100000)));
     const total = moveCents + tipCents;
+    // Stripe's minimum charge is $0.50 CAD. A fully-deposit-covered move with
+    // no tip has nothing left to collect — mark it settled (the deposit money
+    // was already captured, confirmed by the signature-verified webhook) and
+    // return a distinct state the app treats as success, not an error dialog.
+    if (total < 50) {
+      if (kind === 'final' && depositApplied > 0) {
+        await adminClient().from('bookings').update({
+          payment_status: 'captured',
+          amount_paid_cents: depositApplied,
+          paid_at: new Date().toISOString(),
+        }).eq('id', booking.id);
+      }
+      return jsonResponse({ settled: true, amount_cents: 0, deposit_applied_cents: depositApplied }, { status: 200 }, cors);
+    }
 
     // Reuse/create a Stripe customer for this profile (service role — the
     // stripe_customer_id column isn't customer-writable).
@@ -125,12 +167,16 @@ handle(async (req) => {
       amount: String(total),
       currency: 'cad',
       'automatic_payment_methods[enabled]': 'true',
-      description: `Movvy move #${booking.short_code}`,
+      description: kind === 'deposit'
+        ? `Movvy move #${booking.short_code} — 20% deposit`
+        : `Movvy move #${booking.short_code}`,
       'metadata[booking_id]': booking.id,
       'metadata[short_code]': booking.short_code ?? '',
       'metadata[customer_id]': user.id,
+      'metadata[kind]': kind,
       'metadata[move_cents]': String(moveCents),
       'metadata[tip_cents]': String(tipCents),
+      'metadata[deposit_applied_cents]': String(depositApplied),
     };
     if (customerId) piParams.customer = customerId;
 
@@ -139,9 +185,10 @@ handle(async (req) => {
       headers: {
         Authorization: `Bearer ${secretKey}`,
         'Content-Type': 'application/x-www-form-urlencoded',
-        // Key includes the total so changing the tip creates a fresh intent
-        // rather than colliding with the prior amount.
-        'Idempotency-Key': `movvy_pi_${booking.id}_${total}`,
+        // Key includes kind + total so a deposit and a final never collide,
+        // and changing the tip creates a fresh intent rather than reusing
+        // the prior amount.
+        'Idempotency-Key': `movvy_pi_${kind}_${booking.id}_${total}`,
       },
       body: form(piParams),
     });
@@ -153,18 +200,22 @@ handle(async (req) => {
     }
     const pi = await piRes.json();
 
-    // Record the PI id on the booking now (payment_status stays 'uncharged'
-    // until the webhook confirms 'captured' — the source of truth is Stripe).
+    // Record the PI id on the booking now (statuses stay unpaid until the
+    // signature-verified webhook confirms — the source of truth is Stripe).
     await admin.from('bookings')
-      .update({ stripe_payment_intent_id: pi.id })
+      .update(kind === 'deposit'
+        ? { stripe_deposit_payment_intent_id: pi.id }
+        : { stripe_payment_intent_id: pi.id })
       .eq('id', booking.id);
 
     return jsonResponse({
       client_secret: pi.client_secret,
       payment_intent_id: pi.id,
-      amount_cents: total,      // what the customer is charged (move + tip)
+      kind,
+      amount_cents: total,      // what the customer is charged now
       move_cents: moveCents,
       tip_cents: tipCents,
+      deposit_applied_cents: depositApplied,
       currency: 'cad',
       customer_id: customerId,
     }, { status: 200 }, cors);

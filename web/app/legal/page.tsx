@@ -60,7 +60,7 @@ const sections = [
   {
     title: '6. Honest hourly pricing & payment',
     body: [
-      'Pricing is hourly, based on the actual time the Crew spends, plus any clearly disclosed travel/materials fees and applicable GST/HST. No deposit is required to book, and there are no hidden or surprise upcharges.',
+      'Pricing is hourly, based on the actual time the Crew spends, plus any clearly disclosed travel/materials fees and applicable GST/HST. A deposit equal to 20% of the estimate is payable at booking and is credited in full against the final bill. There are no hidden or surprise upcharges.',
       'Estimates shown before or during a booking are non-binding; the final amount reflects actual time. Movvy calculates pricing on the server.',
       'Payment is due on completion and is processed through the App by a third-party PCI-DSS-compliant payment processor, or another method disclosed at booking. Movvy does not store full card numbers. Tips are optional and go fully to the Crew.',
     ],
@@ -68,7 +68,7 @@ const sections = [
   {
     title: '7. Cancellations',
     body: [
-      'Customer cancellations more than 48 hours before the scheduled start are free. Cancellations within 48 hours may incur a reasonable fee disclosed at booking.',
+      'Cancel more than 48 hours before the scheduled start and your deposit is refunded in full. Within 48 hours of the scheduled start the deposit is non-refundable — it compensates the Crew that reserved the time. No further cancellation charge applies beyond the deposit.',
       'If you are not present or cannot provide access at the scheduled time, a reasonable wait, trip, or cancellation fee may apply.',
       'Movvy may cancel a booking for safety, legal, fraud, weather, or operational reasons; you are not charged for services not performed.',
     ],

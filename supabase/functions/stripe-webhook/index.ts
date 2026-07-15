@@ -87,18 +87,33 @@ Deno.serve(async (req: Request): Promise<Response> => {
     switch (event.type) {
       case 'payment_intent.succeeded': {
         const bookingId = obj.metadata?.booking_id ?? null;
+        const kind = obj.metadata?.kind === 'deposit' ? 'deposit' : 'final';
         const amount = obj.amount_received ?? obj.amount ?? 0;
         // Tip travels in PI metadata (set by stripe-create-payment-intent). It's
         // 100% the crew's, so we store it separately for the admin payout math.
         const tipCents = Number(obj.metadata?.tip_cents ?? 0) || 0;
         const chargeId = obj.latest_charge ?? null;
         if (bookingId) {
-          await admin.from('bookings').update({
-            payment_status: 'captured',
-            amount_paid_cents: amount,
-            paid_at: new Date().toISOString(),
-            stripe_payment_intent_id: obj.id,
-          }).eq('id', bookingId);
+          if (kind === 'deposit') {
+            // Deposit paid — the booking's FINAL payment_status is untouched;
+            // the deposit has its own lifecycle.
+            await admin.from('bookings').update({
+              deposit_status: 'paid',
+              deposit_cents: amount,
+              deposit_paid_at: new Date().toISOString(),
+              stripe_deposit_payment_intent_id: obj.id,
+            }).eq('id', bookingId);
+          } else {
+            const depositApplied = Number(obj.metadata?.deposit_applied_cents ?? 0) || 0;
+            await admin.from('bookings').update({
+              payment_status: 'captured',
+              // Total collected for the move = this charge + the deposit that
+              // was credited against it (tip excluded — it's the crew's).
+              amount_paid_cents: amount - tipCents + depositApplied,
+              paid_at: new Date().toISOString(),
+              stripe_payment_intent_id: obj.id,
+            }).eq('id', bookingId);
+          }
         }
         await upsertPayment({
           booking_id: bookingId,
@@ -107,6 +122,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           stripe_charge_id: chargeId,
           amount_cents: amount,
           tip_cents: tipCents,
+          kind,
           currency: obj.currency ?? 'cad',
           status: 'succeeded',
           raw_event_type: event.type,
@@ -115,7 +131,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
       case 'payment_intent.payment_failed': {
         const bookingId = obj.metadata?.booking_id ?? null;
-        if (bookingId) {
+        const kind = obj.metadata?.kind === 'deposit' ? 'deposit' : 'final';
+        // A failed DEPOSIT attempt never touches the booking's final
+        // payment_status — the customer just retries from the app.
+        if (bookingId && kind === 'final') {
           await admin.from('bookings').update({ payment_status: 'failed' }).eq('id', bookingId);
         }
         await upsertPayment({
@@ -123,6 +142,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           customer_id: obj.metadata?.customer_id ?? null,
           stripe_payment_intent_id: obj.id,
           amount_cents: obj.amount ?? 0,
+          kind,
           currency: obj.currency ?? 'cad',
           status: 'failed',
           raw_event_type: event.type,
@@ -135,12 +155,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const total = obj.amount ?? 0;
         const fully = refunded >= total && total > 0;
         if (piId) {
+          // Final-payment refund → flips the booking's payment_status.
           const { data: bk } = await admin.from('bookings')
             .select('id').eq('stripe_payment_intent_id', piId).maybeSingle();
           if (bk) {
             await admin.from('bookings')
               .update({ payment_status: fully ? 'refunded' : 'partially_refunded' })
               .eq('id', (bk as any).id);
+          }
+          // Deposit refund (>48h cancellation) → flips deposit_status instead.
+          const { data: depBk } = await admin.from('bookings')
+            .select('id').eq('stripe_deposit_payment_intent_id', piId).maybeSingle();
+          if (depBk && fully) {
+            await admin.from('bookings')
+              .update({ deposit_status: 'refunded' })
+              .eq('id', (depBk as any).id);
           }
           await admin.from('payments').update({
             status: fully ? 'refunded' : 'partially_refunded',

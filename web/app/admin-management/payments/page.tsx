@@ -36,7 +36,7 @@ export default async function PaymentsPage() {
   const { data: rows } = await supabase
     .from('payments')
     .select(
-      'id, amount_cents, tip_cents, refunded_cents, status, currency, created_at, stripe_payment_intent_id, ' +
+      'id, amount_cents, tip_cents, refunded_cents, status, kind, currency, created_at, stripe_payment_intent_id, ' +
       'booking:bookings(short_code, pickup_city, dropoff_city), ' +
       'customer:profiles!payments_customer_id_fkey(full_name, email)',
     )
@@ -84,8 +84,8 @@ export default async function PaymentsPage() {
         <div className="rounded-2xl bg-white border border-zinc-200 border-dashed p-12 text-center">
           <p className="text-sm font-semibold text-zinc-900">No payments yet</p>
           <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">
-            When a customer pays for a completed move in the app, it appears here. In test mode,
-            run a move through the app and pay with card 4242 4242 4242 4242.
+            Deposits (20% at booking) and final payments both land here the moment they succeed.
+            In test mode, book a move in the app and pay with card 4242 4242 4242 4242.
           </p>
         </div>
       ) : (
@@ -136,6 +136,11 @@ export default async function PaymentsPage() {
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold ${STATUS_STYLE[p.status] ?? 'bg-zinc-200 text-zinc-600'}`}>
                         {p.status.replace(/_/g, ' ')}
                       </span>
+                      {p.kind === 'deposit' ? (
+                        <span className="ml-1 inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-sky-100 text-sky-700">
+                          deposit
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-5 py-3 text-right text-xs text-zinc-400" title={fmtDateTime(p.created_at)}>
                       {fmtRelative(p.created_at)}
