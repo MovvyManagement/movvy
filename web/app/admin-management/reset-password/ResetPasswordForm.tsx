@@ -18,6 +18,18 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/supabase/client';
 
+// Marks the current session as "created by a recovery link, password not yet
+// reset". The proxy reads this and pins the user to this page until they save
+// — so a recovery link can't grant free run of the console. Not a secret, just
+// a flag; the real protection is that redeeming the link required inbox access.
+const RECOVERY_COOKIE = 'movvy_recovery_pending';
+const setRecoveryLock = () => {
+  document.cookie = `${RECOVERY_COOKIE}=1; path=/; max-age=1800; samesite=lax`;
+};
+const clearRecoveryLock = () => {
+  document.cookie = `${RECOVERY_COOKIE}=; path=/; max-age=0; samesite=lax`;
+};
+
 export function ResetPasswordForm() {
   const supabase = supabaseBrowser();
   const router = useRouter();
@@ -51,6 +63,9 @@ export function ResetPasswordForm() {
             token_hash: tokenHash,
           });
           if (otpErr) throw otpErr;
+          // This session exists ONLY to set a new password — lock the console
+          // until they do (the proxy enforces it).
+          setRecoveryLock();
         } else if (code) {
           // Legacy PKCE flow ({{ .ConfirmationURL }} template). Only works in
           // the same browser that requested the reset.
@@ -63,6 +78,7 @@ export function ResetPasswordForm() {
               'Request a new link below and open it here, or copy the link from your email into this browser.',
             );
           }
+          setRecoveryLock();
         }
 
         // Whether the code path or the fragment path was used, getUser
@@ -81,6 +97,16 @@ export function ResetPasswordForm() {
       cancelled = true;
     };
   }, [supabase]);
+
+  // Bail out of a recovery session without setting a password: drop the
+  // session, release the lock, and land on login. This is the escape hatch
+  // for "I clicked the link but don't want to reset right now".
+  async function cancelRecovery() {
+    clearRecoveryLock();
+    await supabase.auth.signOut().catch(() => {});
+    router.push('/admin-management/login');
+    router.refresh();
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -102,7 +128,9 @@ export function ResetPasswordForm() {
         password: pw1,
       });
       if (updErr) throw updErr;
-      // Successful update keeps the session live — go straight to dashboard.
+      // Password is set — the recovery session is now a legitimate session.
+      // Release the lock so the console opens up, then go to the dashboard.
+      clearRecoveryLock();
       router.push('/admin-management/dashboard');
       router.refresh();
     } catch (e: any) {
@@ -190,6 +218,17 @@ export function ResetPasswordForm() {
       >
         {busy ? 'Saving…' : 'Save new password'}
       </button>
+
+      <p className="text-center text-xs text-zinc-500 pt-1">
+        You must set a new password to continue.{' '}
+        <button
+          type="button"
+          onClick={cancelRecovery}
+          className="font-semibold text-zinc-600 underline hover:text-zinc-900"
+        >
+          Cancel &amp; sign out
+        </button>
+      </p>
     </form>
   );
 }

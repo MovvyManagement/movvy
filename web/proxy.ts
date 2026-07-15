@@ -24,6 +24,14 @@ import { updateSession } from './lib/supabase/middleware';
 
 const ADMIN_PREFIX = '/admin-management';
 const AUTH_PREFIX = '/admin-management/login';
+const RESET_PATH = '/admin-management/reset-password';
+
+// Set by the reset-password page the instant it redeems a recovery link, and
+// cleared only when the new password is actually saved. While present, the
+// session is a RECOVERY session that has not completed the reset — it must
+// not be able to touch anything but the reset form (a recovery link should
+// never grant durable console access on its own).
+const RECOVERY_COOKIE = 'movvy_recovery_pending';
 
 // Paths that must render without a session so unauthenticated users can
 // actually GET to login / recover their password.
@@ -44,6 +52,15 @@ export async function proxy(request: NextRequest) {
 
   // Refresh the session cookie so it doesn't silently expire.
   const { response, user } = await updateSession(request);
+
+  // RECOVERY LOCK: a session created by a password-reset link may not use the
+  // console until the password is saved. While the recovery cookie is set,
+  // pin the user to the reset form — even a valid session is bounced off
+  // every other admin route. Cleared by the reset form on a successful save.
+  const recoveryPending = request.cookies.get(RECOVERY_COOKIE)?.value === '1';
+  if (recoveryPending && !pathname.startsWith(RESET_PATH)) {
+    return NextResponse.redirect(new URL(RESET_PATH, request.url));
+  }
 
   const isPublicPath = PUBLIC_ADMIN_PATHS.some((p) => pathname.startsWith(p));
 
