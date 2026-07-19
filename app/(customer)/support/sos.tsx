@@ -235,7 +235,7 @@ export default function SosScreen() {
             {/* Emergency contact reminder */}
             {!profile?.emergency_contact_phone ? (
               <Pressable
-                onPress={() => router.push('/(customer)/profile')}
+                onPress={() => router.push('/(customer)/(tabs)/profile')}
                 className="mt-6 rounded-2xl bg-amber-50 border border-amber-100 p-3 flex-row items-center active:opacity-80"
               >
                 <Ionicons name="alert-circle" size={18} color="#B45309" />

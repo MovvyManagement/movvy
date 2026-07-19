@@ -1,5 +1,5 @@
 // =============================================================================
-// /(company)/dispatch — redirect to /(company)/jobs.
+// /(company)/dispatch — redirect to /(company)/(tabs)/jobs.
 //
 // Dispatch used to be its own tab with its own screen. It's been folded
 // into the unified Jobs screen — the dispatcher now does new-request
@@ -12,5 +12,5 @@
 import { Redirect } from 'expo-router';
 
 export default function DispatchRedirect() {
-  return <Redirect href="/(company)/jobs" />;
+  return <Redirect href="/(company)/(tabs)/jobs" />;
 }

@@ -82,7 +82,7 @@ export default function WelcomeTour() {
   const finish = async () => {
     haptic.success();
     await markTourSeen();
-    router.replace('/(customer)/home');
+    router.replace('/(customer)/(tabs)/home');
   };
 
   return (

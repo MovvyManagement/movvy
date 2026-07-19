@@ -3,7 +3,7 @@
 //
 // Pushed onto the driver Stack (sibling of (tabs)), so back / edge-swipe
 // returns to whichever tab the driver came from. Tapped job/booking rows
-// deep-link into /(mover)/jobs rather than any customer screen.
+// deep-link into /(mover)/(tabs)/jobs rather than any customer screen.
 // =============================================================================
 
 import React from 'react';

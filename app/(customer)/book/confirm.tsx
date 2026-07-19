@@ -75,7 +75,7 @@ export default function ConfirmStep() {
   // exact card the "arranging your crew" copy promised.
   const goToMoves = () => {
     setConfirmed(null);
-    router.replace('/(customer)/bookings');
+    router.replace('/(customer)/(tabs)/bookings');
   };
 
   const applyPromo = async () => {

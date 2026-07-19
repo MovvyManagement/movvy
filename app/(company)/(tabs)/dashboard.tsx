@@ -275,7 +275,7 @@ export default function CompanyDashboard() {
           <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500">
             Incoming jobs
           </Text>
-          <Pressable onPress={() => router.push('/(company)/jobs')}>
+          <Pressable onPress={() => router.push('/(company)/(tabs)/jobs')}>
             <Text className="text-sm font-semibold text-brand-700">See all</Text>
           </Pressable>
         </View>
@@ -327,13 +327,13 @@ export default function CompanyDashboard() {
                       duplicate the driver-picker; Dispatch is the single source
                       of truth and lets the dispatcher pick from the live roster. */}
                   <Pressable
-                    onPress={() => router.push('/(company)/jobs')}
+                    onPress={() => router.push('/(company)/(tabs)/jobs')}
                     className="flex-1 h-10 rounded-2xl bg-silver-100 items-center justify-center active:opacity-70"
                   >
                     <Text className="text-sm font-semibold text-ink-900">Assign driver</Text>
                   </Pressable>
                   <Pressable
-                    onPress={() => router.push('/(company)/jobs')}
+                    onPress={() => router.push('/(company)/(tabs)/jobs')}
                     className="flex-1 h-10 rounded-2xl bg-brand-600 items-center justify-center active:opacity-90"
                   >
                     <Text className="text-sm font-semibold text-white">Open in Jobs</Text>

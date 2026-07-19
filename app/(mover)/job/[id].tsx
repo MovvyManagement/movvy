@@ -130,7 +130,7 @@ export default function JobDetail() {
           title="Job not available"
           body="This job may have been taken by another partner or removed. Pull to refresh the Jobs feed."
           actionLabel="Back to jobs"
-          onAction={() => router.replace('/(mover)/jobs')}
+          onAction={() => router.replace('/(mover)/(tabs)/jobs')}
         />
       </SafeAreaView>
     );
@@ -170,7 +170,7 @@ export default function JobDetail() {
               haptic.medium();
               await accept.mutateAsync({ booking_id: booking.id, ...onBehalfOf });
               haptic.success();
-              router.replace('/(mover)/active');
+              router.replace('/(mover)/(tabs)/active');
             } catch (e: any) {
               haptic.error();
               Alert.alert('Could not accept', e?.message ?? 'Try again.');

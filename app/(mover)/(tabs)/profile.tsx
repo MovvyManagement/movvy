@@ -1,5 +1,5 @@
 // =============================================================================
-// /(mover)/profile — driver/mover "Driver Profile" tab
+// /(mover)/(tabs)/profile — driver/mover "Driver Profile" tab
 //
 // Every row is now a real, working entry point:
 //   • Personal info        → EditNameSheet         (profiles.full_name)

@@ -111,12 +111,12 @@ export default function Signup() {
   const onApple = async () => {
     const res = await signInWithApple();
     if (!res.ok) return toast.error(res.error ?? 'Apple sign-in failed.');
-    router.replace('/(customer)/home');
+    router.replace('/(customer)/(tabs)/home');
   };
   const onGoogle = async () => {
     const res = await google.signIn();
     if (!res.ok) return toast.error(res.error ?? 'Google sign-in failed.');
-    router.replace('/(customer)/home');
+    router.replace('/(customer)/(tabs)/home');
   };
 
   // ─── Step 1 → Step 2: create the pending auth user + send SMS OTP ───────
@@ -242,7 +242,7 @@ export default function Signup() {
 
       haptic.success();
       toast.success('Welcome to Movvy!');
-      router.replace('/(customer)/home');
+      router.replace('/(customer)/(tabs)/home');
     } catch (e: any) {
       setError(e?.message ?? "Couldn't verify the code. Try again.");
     } finally {

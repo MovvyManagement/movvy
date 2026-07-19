@@ -88,9 +88,9 @@ export default function PartnerSignIn() {
       }
       // Route into the right partner surface — each lands on its Dashboard.
       if (res.data?.kind === 'company') {
-        router.replace('/(company)/dashboard');
+        router.replace('/(company)/(tabs)/dashboard');
       } else {
-        router.replace('/(mover)/dashboard');
+        router.replace('/(mover)/(tabs)/dashboard');
       }
     } catch (e: any) {
       setError(e?.message ?? 'Could not sign in. Check your connection and try again.');

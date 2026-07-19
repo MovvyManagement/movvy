@@ -51,7 +51,7 @@ export default function PendingApproval() {
       if (kind) {
         qc.invalidateQueries({ queryKey: ['my-membership'] });
         qc.invalidateQueries({ queryKey: ['my-pending-membership'] });
-        router.replace(kind === 'company' ? '/(company)/dashboard' : '/(mover)/dashboard');
+        router.replace(kind === 'company' ? '/(company)/(tabs)/dashboard' : '/(mover)/(tabs)/dashboard');
       }
       // else: nothing to route on yet — render the fallback + keep polling.
     }

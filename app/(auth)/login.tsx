@@ -51,7 +51,7 @@ export default function Login() {
       toast.error(res.error ?? 'Apple sign-in failed.');
       return;
     }
-    router.replace('/(customer)/home');
+    router.replace('/(customer)/(tabs)/home');
   };
   const onGoogle = async () => {
     const res = await google.signIn();
@@ -59,7 +59,7 @@ export default function Login() {
       toast.error(res.error ?? 'Google sign-in failed.');
       return;
     }
-    router.replace('/(customer)/home');
+    router.replace('/(customer)/(tabs)/home');
   };
 
   const submit = async () => {
@@ -81,7 +81,7 @@ export default function Login() {
         setError(res.error ?? 'Could not sign in.');
         return;
       }
-      router.replace('/(customer)/home');
+      router.replace('/(customer)/(tabs)/home');
     } catch (e: any) {
       setError(e?.message ?? 'Could not sign in. Check your connection and try again.');
     } finally {

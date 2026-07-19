@@ -313,13 +313,13 @@ export default function CustomerHome() {
               <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500">
                 Move history
               </Text>
-              <Pressable onPress={() => router.push('/(customer)/bookings')}>
+              <Pressable onPress={() => router.push('/(customer)/(tabs)/bookings')}>
                 <Text className="text-sm font-semibold text-brand-700">See all</Text>
               </Pressable>
             </View>
             {history.slice(0, 2).map((b) => (
               <View key={b.id} className="mb-3">
-                <Card onPress={() => router.push('/(customer)/bookings')}>
+                <Card onPress={() => router.push('/(customer)/(tabs)/bookings')}>
                   <View className="flex-row items-center">
                     <MovvyMark size={44} />
                     <View className="ml-3 flex-1">

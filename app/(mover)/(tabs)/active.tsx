@@ -272,7 +272,7 @@ export default function MoverActive() {
           title="No active move"
           body="When you accept a job from the jobs feed, it'll show up here."
           actionLabel="See available jobs"
-          onAction={() => router.replace('/(mover)/jobs')}
+          onAction={() => router.replace('/(mover)/(tabs)/jobs')}
         />
       </SafeAreaView>
     );

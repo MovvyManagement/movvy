@@ -117,7 +117,7 @@ export default function MoverJobs() {
               haptic.medium();
               await accept.mutateAsync({ booking_id: jobId, ...onBehalfOf });
               haptic.success();
-              router.replace('/(mover)/active');
+              router.replace('/(mover)/(tabs)/active');
             } catch (e: any) {
               haptic.error();
               Alert.alert('Could not accept', e?.message ?? 'Try again.');
@@ -234,7 +234,7 @@ export default function MoverJobs() {
                     const chips = jobEffort(b).chips;
                     return (
                       <View key={b.id} className="mb-3">
-                        <Card onPress={() => router.push('/(mover)/active')}>
+                        <Card onPress={() => router.push('/(mover)/(tabs)/active')}>
                           <View className="flex-row">
                             {/* Time column — the spine of a shift view. */}
                             <View
@@ -335,7 +335,7 @@ export default function MoverJobs() {
                   they have. Avoids the deflating "$0 / $0" first impression. */}
               {((earnings.data?.todayCents ?? 0) + (earnings.data?.weekCents ?? 0)) === 0 ? (
                 <Pressable
-                  onPress={() => router.push('/(mover)/earnings')}
+                  onPress={() => router.push('/(mover)/(tabs)/earnings')}
                   className="mb-4 rounded-3xl bg-ink-900 p-5 flex-row items-center active:opacity-90"
                 >
                   <View className="h-10 w-10 rounded-2xl bg-white/10 items-center justify-center">
@@ -367,7 +367,7 @@ export default function MoverJobs() {
                     </Text>
                   </View>
                   <Pressable
-                    onPress={() => router.push('/(mover)/earnings')}
+                    onPress={() => router.push('/(mover)/(tabs)/earnings')}
                     className="h-9 px-3 rounded-full bg-white/10 items-center justify-center flex-row self-center"
                   >
                     <Text className="text-xs font-bold text-white">Details</Text>

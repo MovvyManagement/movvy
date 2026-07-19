@@ -17,7 +17,7 @@ import { useAuth } from '@/lib/supabase';
 import { Skeleton } from '@/components/Skeleton';
 
 // =============================================================================
-// /(mover)/earnings — real driver_payouts data.
+// /(mover)/(tabs)/earnings — real driver_payouts data.
 //
 // Previously rendered hardcoded mockEarnings.week / .today / .month / daily
 // bars / "Recent payouts" — a driver saw "$X this week" while their real

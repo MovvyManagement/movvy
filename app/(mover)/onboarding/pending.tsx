@@ -154,7 +154,7 @@ export default function Pending() {
             label="See the driver app"
             size="lg"
             fullWidth
-            onPress={() => router.replace('/(mover)/dashboard')}
+            onPress={() => router.replace('/(mover)/(tabs)/dashboard')}
           />
         </View>
       </SafeAreaView>

@@ -173,7 +173,7 @@ export default function MoverDashboard() {
               <Text className="text-2xl font-bold text-ink-900 mt-1">
                 {fmtCurrency(weekCents / 100)}
               </Text>
-              <Pressable onPress={() => router.push('/(mover)/earnings')} className="mt-2">
+              <Pressable onPress={() => router.push('/(mover)/(tabs)/earnings')} className="mt-2">
                 <Text className="text-xs font-semibold text-brand-700">View earnings →</Text>
               </Pressable>
             </Card>
@@ -184,7 +184,7 @@ export default function MoverDashboard() {
             underway, else the next scheduled move (time + where), else the
             right idle nudge. */}
         {inFlightJob ? (
-          <Card className="mt-3" onPress={() => router.push('/(mover)/active')}>
+          <Card className="mt-3" onPress={() => router.push('/(mover)/(tabs)/active')}>
             <View className="flex-row items-center">
               <View className="h-12 w-12 rounded-2xl bg-brand-50 items-center justify-center">
                 <Ionicons name="navigate-circle" size={22} color="#047857" />
@@ -207,7 +207,7 @@ export default function MoverDashboard() {
             onPress={() =>
               router.push(
                 (isHourly
-                  ? '/(mover)/active'
+                  ? '/(mover)/(tabs)/active'
                   : `/(mover)/job/${nextScheduledJob.id}`) as any,
               )
             }
@@ -281,7 +281,7 @@ export default function MoverDashboard() {
           <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500">
             {isHourly ? 'Your shift' : 'Available jobs'}
           </Text>
-          <Pressable onPress={() => router.push('/(mover)/jobs')}>
+          <Pressable onPress={() => router.push('/(mover)/(tabs)/jobs')}>
             <Text className="text-sm font-semibold text-brand-700">See all</Text>
           </Pressable>
         </View>
@@ -298,7 +298,7 @@ export default function MoverDashboard() {
           ) : (
             shiftPreview.map((b) => (
               <View key={b.id} className="mb-3">
-                <Card onPress={() => router.push('/(mover)/active')}>
+                <Card onPress={() => router.push('/(mover)/(tabs)/active')}>
                   <View className="flex-row items-center">
                     {/* Time column — the spine of a shift view. */}
                     <View className="items-center mr-3" style={{ width: 60 }}>

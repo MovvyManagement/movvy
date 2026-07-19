@@ -278,7 +278,7 @@ export default function LiveMove() {
             title="No active move"
             body="When you book your next move, you'll see live tracking, ETA, and a chat with your crew here."
             actionLabel="Book a move"
-            onAction={() => router.push('/(customer)/home')}
+            onAction={() => router.push('/(customer)/(tabs)/home')}
           />
         )}
         <ReviewModal
@@ -830,7 +830,7 @@ function CancelMoveSheet({
       toast.success('Move cancelled.');
       setSelected(null);
       onClose();
-      router.replace('/(customer)/home');
+      router.replace('/(customer)/(tabs)/home');
     } catch (e: any) {
       haptic.error();
       toast.error(e?.message ?? "Couldn't cancel — try again or contact support.");

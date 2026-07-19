@@ -18,7 +18,7 @@ export function useRequireAuth(redirectTo: string = '/') {
 }
 
 /** Redirect signed-in users away from auth screens (welcome, login, signup). */
-export function useRedirectIfAuthed(redirectTo: string = '/(customer)/home') {
+export function useRedirectIfAuthed(redirectTo: string = '/(customer)/(tabs)/home') {
   const { loading, session } = useAuth();
   useEffect(() => {
     if (loading) return;

@@ -157,7 +157,7 @@ export default function CompanyPending() {
             label="Go to dashboard"
             size="lg"
             fullWidth
-            onPress={() => router.replace('/(company)/dashboard')}
+            onPress={() => router.replace('/(company)/(tabs)/dashboard')}
           />
         </View>
       </SafeAreaView>

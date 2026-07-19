@@ -223,7 +223,7 @@ function BookingHistory() {
               // makes sense. Letting them skip straight into /book/type
               // produced bookings without addresses; routing through
               // home guarantees the draft has coordinates first.
-              onAction={() => router.push('/(customer)/home')}
+              onAction={() => router.push('/(customer)/(tabs)/home')}
             />
           ) : (
             list.map((b) => (

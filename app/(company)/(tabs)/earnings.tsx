@@ -11,7 +11,7 @@ import { NotificationBell } from '@/components/NotificationBell';
 import { Skeleton } from '@/components/Skeleton';
 
 // =============================================================================
-// /(company)/earnings — real driver_payouts data, scoped by company_id.
+// /(company)/(tabs)/earnings — real driver_payouts data, scoped by company_id.
 //
 // Replaced the entire fabricated set ("mockEarnings.month * 3.4", "+34%",
 // "128 jobs", "$290 avg", hardcoded top-driver names). Numbers + the

@@ -1,5 +1,5 @@
 // =============================================================================
-// /(company)/jobs — unified company workflow.
+// /(company)/(tabs)/jobs — unified company workflow.
 //
 // Merges what used to be two separate tabs (Dispatch + Jobs) into one
 // screen so the dispatcher only ever has one place to act. Four chips:

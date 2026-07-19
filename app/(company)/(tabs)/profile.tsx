@@ -1,5 +1,5 @@
 // =============================================================================
-// /(company)/profile — company-side "Company" tab
+// /(company)/(tabs)/profile — company-side "Company" tab
 //
 // Every row is now a real, working entry point:
 //   • Company Info        → EditCompanyInfoSheet  (legal/display/phone/email/HQ/trucks)

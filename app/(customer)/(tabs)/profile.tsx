@@ -104,7 +104,7 @@ export default function Profile() {
       // lands directly on their finished moves instead of the default
       // Upcoming view. ?tab=completed is read by useLocalSearchParams in
       // bookings.tsx and seeds the initial chip.
-      onPress: () => router.push('/(customer)/bookings?tab=completed'),
+      onPress: () => router.push('/(customer)/(tabs)/bookings?tab=completed'),
     },
     {
       // Dedicated PDF-receipts surface. Movvy doesn't email receipts; this
