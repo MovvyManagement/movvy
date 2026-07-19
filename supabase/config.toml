@@ -139,3 +139,36 @@ verify_jwt = false
 verify_jwt = false
 [functions.cron-weekly-payouts]
 verify_jwt = false
+# External webhooks — the sender can't attach a Supabase JWT; each function
+# authenticates its caller itself (Twilio X-Twilio-Signature, Resend/svix
+# signature, or a shared secret) and fails closed if its secret is unset.
+[functions.twilio-voice-webhook]
+verify_jwt = false
+[functions.resend-webhook]
+verify_jwt = false
+[functions.send-test-emails]
+verify_jwt = false
+[functions.smoke-test]
+verify_jwt = false
+[functions.smoke-probe]
+verify_jwt = false
+# Called with a Supabase JWT (anon pre-signup, signed-in user, or — for
+# support-ai-reply — the service-role bearer that chat-send attaches).
+[functions.support-ai-reply]
+verify_jwt = true
+[functions.partners-invite-accept]
+verify_jwt = true
+[functions.admin-console]
+verify_jwt = true
+[functions.bookings-dispatch-accept]
+verify_jwt = true
+[functions.bookings-dispatch-assign]
+verify_jwt = true
+[functions.bookings-dispatch-decline]
+verify_jwt = true
+[functions.partners-invite-send]
+verify_jwt = true
+[functions.admin-refund-booking]
+verify_jwt = true
+[functions.admin-set-background-check]
+verify_jwt = true
