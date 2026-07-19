@@ -23,7 +23,18 @@
       "icon": "./assets/icon.png",
       "associatedDomains": [
         "applinks:movvy.ca"
-      ]
+      ],
+      "infoPlist": {
+        "LSApplicationQueriesSchemes": [
+          "tel",
+          "telprompt",
+          "mailto",
+          "maps",
+          "comgooglemaps",
+          "https",
+          "http"
+        ]
+      }
     },
     "android": {
       "package": "com.movvy.app",
@@ -64,18 +75,32 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Movvy needs access to your photos so you can attach images of items being moved."
+          "photosPermission": "Movvy needs access to your photos so you can attach images of items being moved.",
+          "cameraPermission": "Movvy uses your camera to photograph your documents and items being moved."
         }
       ],
       "expo-secure-store",
       "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#059669"
+        }
+      ],
       [
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "Movvy uses your location to center the map on where you are so you can book a move from there faster."
         }
       ],
-      "@stripe/stripe-react-native"
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "",
+          "enableGooglePay": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -29,6 +29,16 @@
       "android": { "gradleCommand": ":app:assembleDebug" },
       "ios": { "simulator": true }
     },
+    "development-device": {
+      "extends": "base",
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "APP_ENV": "development"
+      },
+      "android": { "buildType": "apk" },
+      "ios": { "simulator": false }
+    },
     "staging": {
       "extends": "base",
       "distribution": "internal",
@@ -37,6 +47,7 @@
         "APP_ENV": "staging",
         "EXPO_PUBLIC_SUPABASE_URL": "$STAGING_SUPABASE_URL",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "$STAGING_SUPABASE_ANON_KEY",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "$STAGING_STRIPE_PUBLISHABLE_KEY",
         "EXPO_PUBLIC_SENTRY_ENV": "staging"
       },
       "android": { "buildType": "apk" },
@@ -50,6 +61,7 @@
         "APP_ENV": "production",
         "EXPO_PUBLIC_SUPABASE_URL": "$PROD_SUPABASE_URL",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "$PROD_SUPABASE_ANON_KEY",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "$PROD_STRIPE_PUBLISHABLE_KEY",
         "EXPO_PUBLIC_SENTRY_ENV": "production"
       },
       "android": { "buildType": "app-bundle" },

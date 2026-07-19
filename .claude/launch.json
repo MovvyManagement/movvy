@@ -19,6 +19,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "stripe-connect-sample", "run", "dev"],
       "port": 4242
+    },
+    {
+      "name": "loqma-proto",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4517", "--directory", "/private/tmp/claude-501/-Users-adamhmedat-Desktop-Movvy/6f93c666-7dd1-464a-91ef-0389e3f801a7/scratchpad/preview"],
+      "port": 4517
     }
   ]
 }
