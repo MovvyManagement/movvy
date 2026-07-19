@@ -9,7 +9,7 @@
 //
 // Used from:
 //   • app/(customer)/live.tsx — "Chat with crew" button on the live tracker
-//   • app/(mover)/active.tsx  — "Chat with customer" button on active job
+//   • app/(mover)/(tabs)/active.tsx  — "Chat with customer" button on active job
 // =============================================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -21,11 +21,12 @@ import {
   TextInput,
   Pressable,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from './Avatar';
 import { MovvyMark } from './MovvyMark';
@@ -58,6 +59,27 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
   const [threadId, setThreadId] = useState<string | null>(threadIdProp ?? null);
   const [text, setText] = useState('');
   const scrollRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
+
+  // Track the keyboard so the composer can drop its bottom safe-area padding
+  // while the keyboard is up. Without this the home-indicator inset stacks on
+  // top of the keyboard height and shoves the input under the keyboard, which
+  // is what hid the text being typed.
+  const [keyboardUp, setKeyboardUp] = useState(false);
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = Keyboard.addListener(showEvt, () => {
+      setKeyboardUp(true);
+      // Keep the latest message visible above the raised composer.
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60);
+    });
+    const onHide = Keyboard.addListener(hideEvt, () => setKeyboardUp(false));
+    return () => {
+      onShow.remove();
+      onHide.remove();
+    };
+  }, []);
 
   // If the caller handed us a threadId directly, use it. Otherwise bootstrap
   // the booking-scoped thread on open. Only one path runs per render.
@@ -114,9 +136,16 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <SafeAreaView className="flex-1 bg-white" edges={['top', 'bottom']}>
+      {/* edges: top only. The bottom inset is applied to the composer instead
+          (and dropped while the keyboard is up) — leaving it on SafeAreaView
+          double-counted against KeyboardAvoidingView's padding and pushed the
+          input underneath the keyboard. */}
+      <SafeAreaView className="flex-1 bg-white" edges={['top']}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          // Android needs an explicit behavior inside a Modal — with
+          // `undefined` the OS resize never reaches this subtree, so the
+          // composer stayed under the keyboard there too.
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           className="flex-1"
         >
           {/* Header */}
@@ -157,6 +186,12 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
             <ScrollView
               ref={scrollRef}
               contentContainerStyle={{ padding: 20, paddingBottom: 30 }}
+              // Tapping a message or dragging the transcript closes the
+              // keyboard; "handled" keeps the Send button tappable on the
+              // first tap while the keyboard is still open.
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              onScrollBeginDrag={Keyboard.dismiss}
             >
               {renderMessages.map((m) => {
                 if (m.is_admin || m.from === 'admin') {
@@ -197,8 +232,12 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
             </ScrollView>
           )}
 
-          {/* Composer */}
-          <View className="border-t border-silver-100 px-4 py-3 flex-row items-end gap-2">
+          {/* Composer — owns the bottom safe-area inset, but drops it while the
+              keyboard is up (the keyboard already clears the home indicator). */}
+          <View
+            className="border-t border-silver-100 px-4 pt-3 flex-row items-end gap-2 bg-white"
+            style={{ paddingBottom: keyboardUp ? 12 : Math.max(insets.bottom, 12) }}
+          >
             <View className="flex-1 flex-row items-end rounded-3xl border border-silver-200 bg-white px-4">
               <TextInput
                 value={text}

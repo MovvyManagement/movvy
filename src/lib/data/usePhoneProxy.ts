@@ -63,7 +63,12 @@ export async function placeProxyCall(proxyNumber: string): Promise<void> {
     throw new Error('Calls aren\'t supported in the browser. Please use the mobile app.');
   }
   const url = `tel:${proxyNumber}`;
-  const can = await Linking.canOpenURL(url);
-  if (!can) throw new Error('Your device can\'t place phone calls.');
-  await Linking.openURL(url);
+  // Don't gate on canOpenURL: on iOS it reports false for any scheme not
+  // listed in LSApplicationQueriesSchemes, even though openURL would work.
+  // Attempt the dial and translate a rejection into the friendly error.
+  try {
+    await Linking.openURL(url);
+  } catch {
+    throw new Error('Your device can\'t place phone calls.');
+  }
 }

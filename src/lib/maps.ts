@@ -53,11 +53,12 @@ export async function openInMaps(target: MapsTarget): Promise<boolean> {
 
   for (const url of urls) {
     try {
-      const supported = await Linking.canOpenURL(url);
-      if (supported) {
-        await Linking.openURL(url);
-        return true;
-      }
+      // Attempt directly instead of asking canOpenURL first: iOS answers
+      // false for schemes missing from LSApplicationQueriesSchemes even
+      // when openURL would succeed. openURL rejects if truly unsupported,
+      // which sends us to the next candidate (https always works).
+      await Linking.openURL(url);
+      return true;
     } catch {
       // try next
     }
