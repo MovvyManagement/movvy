@@ -21,9 +21,17 @@ export type MembershipRole =
   | 'mover'
   | null;
 
+/** The unified two-tier org role (migration 0066). `admin` runs the org —
+ *  accepts jobs, assigns crew, sees pricing/revenue, onboards/removes. `crew`
+ *  performs assigned moves and never sees dollars. This is the value the app
+ *  should gate on going forward; the legacy `role` (owner/driver) is kept only
+ *  for back-compat. */
+export type OrgRole = 'admin' | 'crew' | null;
+
 export interface Membership {
   kind: MembershipKind;
   role: MembershipRole;
+  org_role: OrgRole;
   company_id: string | null;
   team_id: string | null;
   company_name: string | null;
@@ -82,6 +90,7 @@ export function useMyMembership() {
       const empty: Membership = {
         kind: null,
         role: null,
+        org_role: null,
         company_id: null,
         team_id: null,
         company_name: null,
@@ -100,7 +109,7 @@ export function useMyMembership() {
       const { data: company } = await supabase
         .from('company_members')
         .select(
-          'company_id, role, companies!inner(display_name, primary_city_id, cities:primary_city_id(slug, name, region))',
+          'company_id, role, org_role, companies!inner(display_name, primary_city_id, cities:primary_city_id(slug, name, region))',
         )
         .eq('profile_id', user!.id)
         .eq('status', 'active')
@@ -109,16 +118,19 @@ export function useMyMembership() {
         .maybeSingle();
       if (company) {
         const c: any = (company as any).companies;
+        // Merged model: org_role is the source of truth. `crew` are the hourly
+        // laborers who don't see per-move revenue; `admin` runs the org.
+        const orgRole = ((company as any).org_role ?? null) as OrgRole;
         return {
           kind: 'company',
           role: company.role as MembershipRole,
+          org_role: orgRole,
           company_id: company.company_id,
           team_id: null,
           company_name: c?.display_name ?? null,
           team_name: null,
-          is_company_driver: company.role === 'driver',
-          // Company drivers are hourly laborers; owners & dispatchers are not.
-          is_hourly: company.role === 'driver',
+          is_company_driver: orgRole === 'crew',
+          is_hourly: orgRole === 'crew',
           city_id: c?.primary_city_id ?? null,
           city_slug: c?.cities?.slug ?? null,
           city_name: c?.cities?.name ?? null,
@@ -139,9 +151,13 @@ export function useMyMembership() {
         .maybeSingle();
       if (team) {
         const t: any = (team as any).partner_teams;
+        // Legacy path — partner_teams were migrated into companies in
+        // migration 0068 and retired, so this no longer resolves for real
+        // users. Kept compiling for safety during the transition.
         return {
           kind: 'team',
           role: team.role as MembershipRole,
+          org_role: team.role === 'mover' ? 'crew' : 'admin',
           company_id: null,
           team_id: team.team_id,
           company_name: null,
