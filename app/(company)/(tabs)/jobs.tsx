@@ -72,7 +72,7 @@ export default function CompanyJobs() {
   const companyId = membership?.kind === 'company' ? membership.company_id : null;
   const isDispatcher =
     membership?.kind === 'company' &&
-    (membership.role === 'owner' || membership.role === 'dispatcher');
+    membership.org_role === 'admin';
 
   // Dispatch queue — drives Requests + Needs Driver. Already polled +
   // realtime-subscribed inside the hook.

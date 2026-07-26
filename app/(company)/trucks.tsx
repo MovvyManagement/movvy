@@ -46,7 +46,7 @@ export default function CompanyTrucks() {
   const companyId = membership?.kind === 'company' ? membership.company_id : null;
   const isDispatcher =
     membership?.kind === 'company' &&
-    (membership.role === 'owner' || membership.role === 'dispatcher');
+    membership.org_role === 'admin';
 
   const { data: trucks, isLoading, refetch, isRefetching } = useCompanyVehicles(companyId);
   const del = useDeleteCompanyVehicle(companyId);

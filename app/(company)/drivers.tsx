@@ -40,7 +40,7 @@ export default function CompanyDrivers() {
   const companyId = membership?.kind === 'company' ? membership.company_id : null;
   const isDispatcher =
     membership?.kind === 'company' &&
-    (membership.role === 'owner' || membership.role === 'dispatcher');
+    membership.org_role === 'admin';
   const { data: roster, isLoading, refetch, isRefetching } = useCompanyDriverRoster(companyId);
 
   // Self-joiners who used the company code and are waiting to be let in. Pulled

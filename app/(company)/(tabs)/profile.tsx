@@ -68,7 +68,7 @@ export default function CompanyProfile() {
 
   const isDispatcher =
     membership?.kind === 'company' &&
-    (membership.role === 'owner' || membership.role === 'dispatcher');
+    membership.org_role === 'admin';
 
   const companyName = company?.display_name ?? membership?.company_name ?? 'Your company';
   const initials = companyName
