@@ -50,33 +50,36 @@ handle(async (req) => {
 
     const admin = adminClient();
 
-    // 1. Caller must be an ACTIVE owner / dispatcher of the company
+    // 1. Caller must be an ACTIVE ADMIN of the org. Assigning who performs a
+    //    move (the live-tracking target) is an admin-only action even in the
+    //    merged model — crew can CLAIM jobs, but only an admin decides who runs
+    //    them. org_role is the canonical tier from migration 0066.
     const { data: dispatcher } = await admin
       .from('company_members')
-      .select('role')
+      .select('org_role')
       .eq('company_id', company_id)
       .eq('profile_id', user.id)
       .eq('status', 'active')
       .is('removed_at', null)
       .maybeSingle();
-    if (!dispatcher || !['owner', 'dispatcher'].includes(dispatcher.role)) {
-      throw httpError(403, 'Only owners and dispatchers can assign drivers');
+    if (!dispatcher || dispatcher.org_role !== 'admin') {
+      throw httpError(403, 'Only an org admin can assign who performs a move');
     }
 
-    // 2. The target driver must be an ACTIVE driver in the same company.
-    // status='active' is essential — a dispatcher must not be able to hand a
-    // live customer move to someone who only self-joined and is still
-    // pending_approval (or was rejected).
+    // 2. The target performer must be an ACTIVE member of the same org. Merged
+    //    model: any active member can be assigned as the performer/tracking
+    //    target — an admin can assign themselves or any crew member. status=
+    //    'active' is essential so a pending_approval / rejected self-join can
+    //    never be handed a live customer move.
     const { data: driver } = await admin
       .from('company_members')
-      .select('role')
+      .select('org_role')
       .eq('company_id', company_id)
       .eq('profile_id', driver_profile_id)
       .eq('status', 'active')
       .is('removed_at', null)
       .maybeSingle();
-    if (!driver) throw httpError(400, 'Selected driver is not an active member of your company');
-    if (driver.role !== 'driver') throw httpError(400, 'Selected member is not a driver');
+    if (!driver) throw httpError(400, 'Selected performer is not an active member of your org');
 
     // 2b. The target driver must be fully verified — refuses assignment of
     // anyone whose ID / criminal check / employment contract is incomplete.

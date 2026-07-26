@@ -49,20 +49,20 @@ handle(async (req) => {
 
     const admin = adminClient();
 
-    // Verify the caller is an ACTIVE owner or dispatcher of this company.
-    // status='active' excludes pending_approval / rejected self-joins.
+    // Verify the caller is an ACTIVE member of this org. Merged model: ANY
+    // member — admin OR crew — can claim a job for the org (the job then
+    // awaits a performer being assigned). status='active' excludes
+    // pending_approval / rejected self-joins. Only ASSIGNING a performer
+    // (bookings-dispatch-assign) stays admin-gated.
     const { data: membership } = await admin
       .from('company_members')
-      .select('role')
+      .select('org_role')
       .eq('company_id', company_id)
       .eq('profile_id', user.id)
       .eq('status', 'active')
       .is('removed_at', null)
       .maybeSingle();
-    if (!membership) throw httpError(403, 'You are not a member of this company');
-    if (!['owner', 'dispatcher'].includes(membership.role)) {
-      throw httpError(403, 'Only owners and dispatchers can accept bookings');
-    }
+    if (!membership) throw httpError(403, 'You are not a member of this org');
 
     // Atomic claim — only succeeds if the booking is still searching.
     const { data, error } = await admin

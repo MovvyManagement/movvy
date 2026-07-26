@@ -15,6 +15,7 @@ import { fmtDateShort, firstNameOf } from '@/lib/format';
 import { buildCalendar, firstBookableDay } from '@/lib/scheduling';
 import { useBookingStore } from '@/store/bookingStore';
 import { cityProvinceFromGeocode, type GeocodeResult } from '@/lib/geocoding';
+import { roadKm } from '@/lib/distance';
 import { useBookingHistory, useProfile, useSavedAddresses } from '@/lib/data';
 import { NotificationBell } from '@/components/NotificationBell';
 import { useAuth } from '@/lib/supabase';
@@ -61,6 +62,23 @@ export default function CustomerHome() {
   const [dropoffText, setDropoffText] = useState('');
   const [dropoffGeo, setDropoffGeo] = useState<GeocodeResult | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(earliest.iso);
+
+  // Option B — guided flow: one question is expanded at a time. Filled steps
+  // collapse to a tappable summary so the screen never feels like a wall of
+  // fields, and the map above grows into the hero. `active` is the currently
+  // open question; selecting an address auto-advances to the next.
+  const [active, setActive] = useState<'from' | 'to' | 'when'>('from');
+
+  // Distance + time for the chip that floats on the map once both ends are in.
+  // roadKm() is the crude straight-line→road factor used elsewhere; the time
+  // estimate assumes ~35 km/h average city driving. Both are labelled "~" —
+  // the real ETA comes from the routing engine on the live-tracking screen.
+  const trip = useMemo(() => {
+    if (!pickupGeo || !dropoffGeo) return null;
+    const km = roadKm(pickupGeo, dropoffGeo);
+    const mins = Math.max(5, Math.round((km / 35) * 60 / 5) * 5);
+    return { km: km < 10 ? km.toFixed(1) : String(Math.round(km)), mins };
+  }, [pickupGeo, dropoffGeo]);
 
   // GPS — fires once on mount, asks for permission, returns the user's
   // current lat/lng. We pass it to LiveMap as the initial center so the
@@ -124,159 +142,184 @@ export default function CustomerHome() {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
-        {/* === BOOKING WIDGET ===
-            Container intentionally does NOT have `overflow-hidden`: the
-            AddressAutocomplete dropdown extends below the input, and we
-            need it to overflow the card downward (otherwise typed
-            addresses never surface their suggestions). The gradient
-            header has its own borderTopLeftRadius/Right so the rounded
-            visual stays intact even without parent clipping. */}
+        {/* === BOOKING WIDGET — guided flow (Option B) ===
+            The map is the hero: it fills the top of the card and confirms the
+            move visually with pins + a route line + a distance/time chip. Below
+            it, one question is expanded at a time ("Where from?" → "Where to?"
+            → "When?"); answered steps collapse to a tappable summary so the
+            screen never reads as a wall of fields. The card itself is NOT
+            overflow-hidden so the address dropdown can spill below; only the
+            map is clipped, for its rounded top. */}
         <View className="px-5 pt-4">
           <View className="rounded-3xl bg-white border border-silver-200">
-            <LinearGradient
-              colors={['#047857', '#16A34A']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={{
-                padding: 18,
-                borderTopLeftRadius: 24,
-                borderTopRightRadius: 24,
-              }}
-            >
-              <Text className="text-white/80 text-xs font-bold uppercase tracking-wider">
-                Book a move
-              </Text>
-              <Text className="text-white text-2xl font-bold mt-1">
-                Enter an address · pick a date
-              </Text>
-              <View className="mt-2 flex-row items-center">
-                <Ionicons name="navigate" size={12} color="rgba(255,255,255,0.8)" />
-                <Text className="ml-1 text-white/80 text-xs font-semibold">
-                  Alberta-wide · Calgary, Edmonton, Red Deer & beyond
-                </Text>
-              </View>
-            </LinearGradient>
-
-            <View className="px-5 pt-5">
-              <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500 mb-2">
-                Moving From
-              </Text>
-              {/* Saved-address quick picks. One tap fills both the visible text
-                  AND the geocoded lat/lng (so canBook flips immediately
-                  without a network round-trip). */}
-              {savedAddresses && savedAddresses.length > 0 ? (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 8, paddingBottom: 8 }}
-                >
-                  {savedAddresses.slice(0, 6).map((a) => {
-                    const isHome = a.label?.toLowerCase() === 'home';
-                    const isWork = a.label?.toLowerCase() === 'work';
-                    const icon: keyof typeof Ionicons.glyphMap = isHome
-                      ? 'home'
-                      : isWork
-                      ? 'briefcase'
-                      : 'location';
-                    return (
-                      <Pressable
-                        key={a.id}
-                        onPress={() => {
-                          setPickupText(a.line1);
-                          setPickupGeo({
-                            id: `saved-${a.id}`,
-                            label: a.line1,
-                            secondary: a.city_name,
-                            lat: a.lat,
-                            lng: a.lng,
-                            raw: { address: { postcode: a.postal ?? '' } },
-                          } as GeocodeResult);
-                        }}
-                        className="flex-row items-center rounded-full bg-silver-100 px-3 py-1.5 active:opacity-70"
-                      >
-                        <Ionicons name={icon} size={14} color="#047857" />
-                        <Text className="ml-1.5 text-xs font-bold text-ink-900" numberOfLines={1}>
-                          {a.label ?? a.line1}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              ) : null}
-              <AddressAutocomplete
-                placeholder="Enter starting address"
-                value={pickupText}
-                onChangeText={(t) => {
-                  setPickupText(t);
-                  if (pickupGeo && t !== `${pickupGeo.label}`) setPickupGeo(null);
-                }}
-                onSelect={(r) => setPickupGeo(r)}
-                leftDotColor="#0A0A0A"
-              />
-            </View>
-
-            <View className="px-5 pt-4">
-              <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500 mb-2">
-                Moving To
-              </Text>
-              <AddressAutocomplete
-                placeholder="Enter destination address"
-                value={dropoffText}
-                onChangeText={(t) => {
-                  setDropoffText(t);
-                  if (dropoffGeo && t !== `${dropoffGeo.label}`) setDropoffGeo(null);
-                }}
-                onSelect={(r) => setDropoffGeo(r)}
-                leftDotColor="#16A34A"
-              />
-            </View>
-
-            <View className="px-5 pt-5">
-              <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500 mb-2">
-                Move date
-              </Text>
-              <DateScroller value={selectedDate} onChange={setSelectedDate} />
-            </View>
-
-            <View className="px-5 pt-5">
+            {/* MAP HERO */}
+            <View className="rounded-t-3xl overflow-hidden">
               <LiveMap
-                height={180}
+                height={236}
                 pickup={pickupGeo ? { lat: pickupGeo.lat, lng: pickupGeo.lng, label: pickupGeo.label } : undefined}
                 dropoff={dropoffGeo ? { lat: dropoffGeo.lat, lng: dropoffGeo.lng, label: dropoffGeo.label } : undefined}
-                // Map opens centered on the user's actual GPS location
-                // (falls back to Calgary if permission denied).
                 initialCenter={userLoc ?? undefined}
                 showRoute={!!pickupGeo && !!dropoffGeo}
-                caption={
-                  pickupGeo && dropoffGeo
-                    ? `${pickupGeo.label} → ${dropoffGeo.label}`
-                    : pickupGeo
-                    ? 'Now pick a drop-off'
-                    : 'Pick pickup + drop-off to see route'
-                }
               />
+              {/* Floating chip: distance + time once both ends are set,
+                  otherwise a gentle nudge toward the next step. */}
+              {trip ? (
+                <View
+                  className="absolute top-3 self-center flex-row items-center rounded-full bg-white px-3 py-1.5 border border-silver-200"
+                  style={{ shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 }}
+                >
+                  <Ionicons name="navigate-circle" size={14} color="#047857" />
+                  <Text className="ml-1.5 text-xs font-bold text-brand-700">~{trip.km} km</Text>
+                  <View className="mx-2 h-1 w-1 rounded-full bg-silver-300" />
+                  <Text className="text-xs font-semibold text-ink-900">~{trip.mins} min</Text>
+                </View>
+              ) : (
+                <View className="absolute top-3 self-center rounded-full bg-black/55 px-3 py-1.5">
+                  <Text className="text-xs font-semibold text-white">
+                    {!pickupGeo ? 'Start with your pick-up' : 'Now add your drop-off'}
+                  </Text>
+                </View>
+              )}
             </View>
 
-            {/* No price preview here on purpose — the customer sees the
-                total only on the confirm step, after they've picked a
-                preset that drives the actual estimate. Showing a number
-                under the map before details are picked sets the wrong
-                expectation. */}
+            {/* GUIDED SECTION */}
+            <View className="px-5 pt-4 pb-5">
+              {/* progress: pick-up · drop-off · date */}
+              <View className="flex-row gap-1.5 mb-4">
+                <View className={`h-1 flex-1 rounded-full ${pickupGeo ? 'bg-brand-600' : active === 'from' ? 'bg-brand-200' : 'bg-silver-200'}`} />
+                <View className={`h-1 flex-1 rounded-full ${dropoffGeo ? 'bg-brand-600' : active === 'to' ? 'bg-brand-200' : 'bg-silver-200'}`} />
+                <View className={`h-1 flex-1 rounded-full ${active === 'when' ? 'bg-brand-600' : 'bg-silver-200'}`} />
+              </View>
 
-            <View className="px-5 pt-5 pb-5">
-              <Button
-                label={
-                  canBook
-                    ? 'Continue Booking Move'
-                    : !pickupGeo
-                    ? 'Enter where you’re moving from'
-                    : 'Enter where you’re moving to'
-                }
-                size="lg"
-                fullWidth
-                disabled={!canBook}
-                onPress={handleBookMove}
-              />
+              {/* ── FROM ── */}
+              {active === 'from' ? (
+                <View>
+                  <Text className="text-2xl font-bold text-ink-900" style={{ letterSpacing: -0.4 }}>
+                    Where are you moving from?
+                  </Text>
+                  <Text className="mt-1 mb-3 text-sm text-silver-500">
+                    We’ll match you with crews near here.
+                  </Text>
+                  {savedAddresses && savedAddresses.length > 0 ? (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{ gap: 8, paddingBottom: 8 }}
+                    >
+                      {savedAddresses.slice(0, 6).map((a) => {
+                        const isHome = a.label?.toLowerCase() === 'home';
+                        const isWork = a.label?.toLowerCase() === 'work';
+                        const icon: keyof typeof Ionicons.glyphMap = isHome ? 'home' : isWork ? 'briefcase' : 'location';
+                        return (
+                          <Pressable
+                            key={a.id}
+                            onPress={() => {
+                              setPickupText(a.line1);
+                              setPickupGeo({
+                                id: `saved-${a.id}`,
+                                label: a.line1,
+                                secondary: a.city_name,
+                                lat: a.lat,
+                                lng: a.lng,
+                                raw: { address: { postcode: a.postal ?? '' } },
+                              } as GeocodeResult);
+                              setActive('to');
+                            }}
+                            className="flex-row items-center rounded-full bg-silver-100 px-3 py-2 active:opacity-70"
+                          >
+                            <Ionicons name={icon} size={14} color="#047857" />
+                            <Text className="ml-1.5 text-xs font-bold text-ink-900" numberOfLines={1}>
+                              {a.label ?? a.line1}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+                  ) : null}
+                  <AddressAutocomplete
+                    placeholder="Enter starting address"
+                    value={pickupText}
+                    onChangeText={(t) => {
+                      setPickupText(t);
+                      if (pickupGeo && t !== `${pickupGeo.label}`) setPickupGeo(null);
+                    }}
+                    onSelect={(r) => {
+                      setPickupGeo(r);
+                      setActive('to');
+                    }}
+                    leftDotColor="#0A0A0A"
+                  />
+                </View>
+              ) : pickupGeo ? (
+                <TripRow tone="origin" label="Pick-up" value={pickupGeo.label} onEdit={() => setActive('from')} />
+              ) : null}
+
+              {/* ── TO ── */}
+              {active === 'to' ? (
+                <View className="mt-2">
+                  <Text className="text-2xl font-bold text-ink-900" style={{ letterSpacing: -0.4 }}>
+                    And where to?
+                  </Text>
+                  <Text className="mt-1 mb-3 text-sm text-silver-500">
+                    Your route and distance appear as you go.
+                  </Text>
+                  <AddressAutocomplete
+                    placeholder="Enter destination address"
+                    value={dropoffText}
+                    onChangeText={(t) => {
+                      setDropoffText(t);
+                      if (dropoffGeo && t !== `${dropoffGeo.label}`) setDropoffGeo(null);
+                    }}
+                    onSelect={(r) => {
+                      setDropoffGeo(r);
+                      setActive('when');
+                    }}
+                    leftDotColor="#16A34A"
+                  />
+                </View>
+              ) : dropoffGeo ? (
+                <TripRow tone="dest" label="Drop-off" value={dropoffGeo.label} onEdit={() => setActive('to')} />
+              ) : pickupGeo ? (
+                <Pressable
+                  onPress={() => setActive('to')}
+                  className="mt-2 flex-row items-center rounded-2xl border border-dashed border-silver-300 px-4 py-4 active:opacity-70"
+                >
+                  <View className="h-3 w-3 rounded-sm bg-brand-500" />
+                  <Text className="ml-3 text-base font-semibold text-silver-500">Add drop-off address</Text>
+                </Pressable>
+              ) : null}
+
+              {/* ── WHEN ── */}
+              {active === 'when' ? (
+                <View className="mt-4">
+                  <Text className="text-2xl font-bold text-ink-900" style={{ letterSpacing: -0.4 }}>
+                    When’s the big day?
+                  </Text>
+                  <Text className="mt-1 mb-3 text-sm text-silver-500">
+                    Pick a date — you’ll choose an arrival window next.
+                  </Text>
+                  <DateScroller value={selectedDate} onChange={setSelectedDate} />
+                </View>
+              ) : pickupGeo && dropoffGeo ? (
+                <TripRow tone="date" label="When" value={fmtDateShort(selectedDate)} onEdit={() => setActive('when')} />
+              ) : null}
+
+              {/* CTA */}
+              <View className="pt-5">
+                <Button
+                  label={
+                    canBook
+                      ? 'Continue Booking Move'
+                      : !pickupGeo
+                      ? 'Enter where you’re moving from'
+                      : 'Enter where you’re moving to'
+                  }
+                  size="lg"
+                  fullWidth
+                  disabled={!canBook}
+                  onPress={handleBookMove}
+                />
+              </View>
             </View>
           </View>
         </View>
@@ -369,6 +412,43 @@ export default function CustomerHome() {
         </View>
       </ScrollView>
     </View>
+  );
+}
+
+// A completed step, collapsed to a single tappable line. Keeps answered
+// questions visible (and editable) without re-expanding their input — the
+// core of the guided flow's "one question at a time" feel.
+function TripRow({
+  tone,
+  label,
+  value,
+  onEdit,
+}: {
+  tone: 'origin' | 'dest' | 'date';
+  label: string;
+  value: string;
+  onEdit: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onEdit}
+      className="mt-2 flex-row items-center rounded-2xl bg-silver-50 px-4 py-3.5 active:opacity-70"
+    >
+      {tone === 'origin' ? (
+        <View className="h-3 w-3 rounded-full border-2 border-ink-900" />
+      ) : tone === 'dest' ? (
+        <View className="h-3 w-3 rounded-sm bg-brand-600" />
+      ) : (
+        <Ionicons name="calendar-clear" size={15} color="#047857" />
+      )}
+      <View className="ml-3 flex-1">
+        <Text className="text-[10px] font-bold uppercase tracking-wider text-silver-500">{label}</Text>
+        <Text className="text-sm font-semibold text-ink-900" numberOfLines={1}>
+          {value}
+        </Text>
+      </View>
+      <Text className="text-xs font-semibold text-brand-700">Edit</Text>
+    </Pressable>
   );
 }
 
