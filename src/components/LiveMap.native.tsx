@@ -25,9 +25,12 @@ export interface LiveMapProps {
   /** Fallback center when no pickup/dropoff is set yet (e.g. the user's
    *  GPS location on the home-screen booking widget). */
   initialCenter?: { lat: number; lng: number };
+  /** Corner radius of the map container. Default 24; pass 0 for a full-bleed
+   *  hero (e.g. the Option B booking screen). */
+  borderRadius?: number;
 }
 
-export function LiveMap({ height = 220, pickup, dropoff, showRoute, initialCenter }: LiveMapProps) {
+export function LiveMap({ height = 220, pickup, dropoff, showRoute, initialCenter, borderRadius = 24 }: LiveMapProps) {
   const ref = useRef<MapView | null>(null);
   const driverCoord = useRef<AnimatedRegion | null>(null);
   const isDriverPin = pickup?.label === 'Driver';
@@ -83,7 +86,7 @@ export function LiveMap({ height = 220, pickup, dropoff, showRoute, initialCente
     <View
       style={{
         height,
-        borderRadius: 24,
+        borderRadius,
         overflow: 'hidden',
         backgroundColor: '#ECFDF5',
       }}

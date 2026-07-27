@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, Pressable } from 'react-native';
+import React, { useMemo, useState, useRef } from 'react';
+import { View, Text, ScrollView, Pressable, useWindowDimensions, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -92,6 +92,24 @@ export default function CustomerHome() {
 
   const setDropoff = useBookingStore((s) => s.setDropoff);
 
+  // Option B is a full-bleed map hero with the guided card floating over its
+  // lower edge. Size the map to a chunk of the viewport so the card peeks above
+  // the fold, then clamp so it's sane on very short / very tall devices.
+  const { height: winH } = useWindowDimensions();
+  const mapHeight = Math.min(460, Math.max(320, Math.round(winH * 0.46)));
+
+  // Keyboard fix: when an address field focuses, scroll the floating card up to
+  // just under the header so its suggestions dropdown clears the keyboard
+  // instead of hiding behind it. cardY is captured via onLayout.
+  const scrollRef = useRef<ScrollView>(null);
+  const cardY = useRef(0);
+  const scrollFieldIntoView = () => {
+    // rAF lets the keyboard begin animating first so the scroll lands right.
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y: Math.max(0, cardY.current - 8), animated: true });
+    });
+  };
+
   const handleBookMove = () => {
     if (!pickupGeo || !dropoffGeo) return;
     // Derive the real city/province per address instead of stamping every
@@ -141,49 +159,62 @@ export default function CustomerHome() {
         </View>
       </SafeAreaView>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
-        {/* === BOOKING WIDGET — guided flow (Option B) ===
-            The map is the hero: it fills the top of the card and confirms the
-            move visually with pins + a route line + a distance/time chip. Below
-            it, one question is expanded at a time ("Where from?" → "Where to?"
-            → "When?"); answered steps collapse to a tappable summary so the
-            screen never reads as a wall of fields. The card itself is NOT
-            overflow-hidden so the address dropdown can spill below; only the
-            map is clipped, for its rounded top. */}
-        <View className="px-5 pt-4">
-          <View className="rounded-3xl bg-white border border-silver-200">
-            {/* MAP HERO */}
-            <View className="rounded-t-3xl overflow-hidden">
-              <LiveMap
-                height={236}
-                pickup={pickupGeo ? { lat: pickupGeo.lat, lng: pickupGeo.lng, label: pickupGeo.label } : undefined}
-                dropoff={dropoffGeo ? { lat: dropoffGeo.lat, lng: dropoffGeo.lng, label: dropoffGeo.label } : undefined}
-                initialCenter={userLoc ?? undefined}
-                showRoute={!!pickupGeo && !!dropoffGeo}
-              />
-              {/* Floating chip: distance + time once both ends are set,
-                  otherwise a gentle nudge toward the next step. */}
-              {trip ? (
-                <View
-                  className="absolute top-3 self-center flex-row items-center rounded-full bg-white px-3 py-1.5 border border-silver-200"
-                  style={{ shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 }}
-                >
-                  <Ionicons name="navigate-circle" size={14} color="#047857" />
-                  <Text className="ml-1.5 text-xs font-bold text-brand-700">~{trip.km} km</Text>
-                  <View className="mx-2 h-1 w-1 rounded-full bg-silver-300" />
-                  <Text className="text-xs font-semibold text-ink-900">~{trip.mins} min</Text>
-                </View>
-              ) : (
-                <View className="absolute top-3 self-center rounded-full bg-black/55 px-3 py-1.5">
-                  <Text className="text-xs font-semibold text-white">
-                    {!pickupGeo ? 'Start with your pick-up' : 'Now add your drop-off'}
-                  </Text>
-                </View>
-              )}
-            </View>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={{ paddingBottom: 32 }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        {...(Platform.OS === 'ios' ? { automaticallyAdjustKeyboardInsets: true } : {})}
+      >
+        {/* === BOOKING WIDGET — Option B (guided) ===
+            The map is the HERO — a full-bleed panel across the top that confirms
+            the move visually with pins + a route line + a distance/time chip.
+            The guided card FLOATS over the map's lower edge and asks one thing
+            at a time ("Where from?" → "Where to?" → "When?"); answered steps
+            collapse to a tappable summary. Focusing an address field scrolls the
+            card up so its suggestions clear the keyboard. */}
 
-            {/* GUIDED SECTION */}
-            <View className="px-5 pt-4 pb-5">
+        {/* MAP HERO — full-bleed */}
+        <View style={{ height: mapHeight }}>
+          <LiveMap
+            height={mapHeight}
+            borderRadius={0}
+            pickup={pickupGeo ? { lat: pickupGeo.lat, lng: pickupGeo.lng, label: pickupGeo.label } : undefined}
+            dropoff={dropoffGeo ? { lat: dropoffGeo.lat, lng: dropoffGeo.lng, label: dropoffGeo.label } : undefined}
+            initialCenter={userLoc ?? undefined}
+            showRoute={!!pickupGeo && !!dropoffGeo}
+          />
+          {/* Floating chip: distance + time once both ends are set,
+              otherwise a gentle nudge toward the next step. */}
+          {trip ? (
+            <View
+              className="absolute top-3 self-center flex-row items-center rounded-full bg-white px-3 py-1.5 border border-silver-200"
+              style={{ shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 }}
+            >
+              <Ionicons name="navigate-circle" size={14} color="#047857" />
+              <Text className="ml-1.5 text-xs font-bold text-brand-700">~{trip.km} km</Text>
+              <View className="mx-2 h-1 w-1 rounded-full bg-silver-300" />
+              <Text className="text-xs font-semibold text-ink-900">~{trip.mins} min</Text>
+            </View>
+          ) : (
+            <View className="absolute top-3 self-center rounded-full bg-black/55 px-3 py-1.5">
+              <Text className="text-xs font-semibold text-white">
+                {!pickupGeo ? 'Start with your pick-up' : 'Now add your drop-off'}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* FLOATING GUIDED CARD — overlaps the map's lower edge */}
+        <View
+          onLayout={(e) => {
+            cardY.current = e.nativeEvent.layout.y;
+          }}
+          className="mx-4 rounded-3xl bg-white border border-silver-200"
+          style={{ marginTop: -30, shadowColor: '#063C28', shadowOpacity: 0.16, shadowRadius: 22, shadowOffset: { width: 0, height: 10 }, elevation: 8 }}
+        >
+          {/* GUIDED SECTION */}
+          <View className="px-5 pt-4 pb-5">
               {/* progress: pick-up · drop-off · date */}
               <View className="flex-row gap-1.5 mb-4">
                 <View className={`h-1 flex-1 rounded-full ${pickupGeo ? 'bg-brand-600' : active === 'from' ? 'bg-brand-200' : 'bg-silver-200'}`} />
@@ -247,6 +278,7 @@ export default function CustomerHome() {
                       setPickupGeo(r);
                       setActive('to');
                     }}
+                    onFocus={scrollFieldIntoView}
                     leftDotColor="#0A0A0A"
                   />
                 </View>
@@ -274,6 +306,8 @@ export default function CustomerHome() {
                       setDropoffGeo(r);
                       setActive('when');
                     }}
+                    onFocus={scrollFieldIntoView}
+                    autoFocus
                     leftDotColor="#16A34A"
                   />
                 </View>
@@ -322,7 +356,6 @@ export default function CustomerHome() {
               </View>
             </View>
           </View>
-        </View>
 
         {/* Note: the "Active move" card used to live here. Removed because
             the Moves tab already shows a green dot badge when a move is

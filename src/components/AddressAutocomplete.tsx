@@ -17,6 +17,11 @@ interface Props {
   onChangeText: (text: string) => void;
   onSelect: (result: GeocodeResult) => void;
   leftDotColor?: string;
+  /** Fired when the input gains focus. The booking screen uses this to scroll
+   *  the field up so the suggestions dropdown clears the keyboard. */
+  onFocus?: () => void;
+  /** Auto-focus the input on mount (used when a guided step opens). */
+  autoFocus?: boolean;
 }
 
 export function AddressAutocomplete({
@@ -26,6 +31,8 @@ export function AddressAutocomplete({
   onChangeText,
   onSelect,
   leftDotColor = '#0A0A0A',
+  onFocus,
+  autoFocus,
 }: Props) {
   const [suggestions, setSuggestions] = useState<GeocodeResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -131,6 +138,11 @@ export function AddressAutocomplete({
             onChangeText(t);
             setOpen(true);
           }}
+          onFocus={() => {
+            setOpen(true);
+            onFocus?.();
+          }}
+          autoFocus={autoFocus}
           placeholder={placeholder}
           placeholderTextColor="#A1A1AA"
           className="flex-1 text-base text-ink-900"

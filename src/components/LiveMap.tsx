@@ -10,6 +10,7 @@ export interface LiveMapProps {
   showRoute?: boolean;
   // Accepted for prop parity with the native version — no-op on web.
   initialCenter?: { lat: number; lng: number };
+  borderRadius?: number;
 }
 
 export function LiveMap({ height, pickup, caption, showRoute }: LiveMapProps) {
