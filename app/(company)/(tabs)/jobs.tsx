@@ -53,8 +53,10 @@ import {
   useDispatcherAccept,
   useDispatcherDecline,
   useDispatcherAssign,
+  useOrgOpenJobs,
   type DispatchQueueRow,
   type CompanyDriverRosterRow,
+  type OrgOpenJob,
 } from '@/lib/data';
 import { fmtCurrency, fmtDateShort, fmtRelativeAgo } from '@/lib/format';
 import { jobUrgency } from '@/lib/partnerJobs';
@@ -196,20 +198,11 @@ export default function CompanyJobs() {
   }
 
   if (!isDispatcher) {
-    // Company drivers can still see what they're on — but the action
-    // surface (accept / assign) doesn't apply to them.
-    return (
-      <SafeAreaView className="flex-1 bg-silver-50 dark:bg-night-900" edges={['top']}>
-        <View className="bg-white dark:bg-night-100">
-          <ScreenHeader title="Jobs" showBack={false} right={<NotificationBell href="/(company)/notifications" />} />
-        </View>
-        <EmptyState
-          icon="shield-checkmark-outline"
-          title="Your dispatcher handles this"
-          body="Drivers don't accept or assign jobs directly — your dispatcher does. Open the Active tab to see what you're on."
-        />
-      </SafeAreaView>
-    );
+    // Merged model: crew see the same open-job pool and can CLAIM a job for
+    // the org. They never see pricing (gated in org_open_jobs), and they can't
+    // assign the performer — an admin does that. Once claimed, the job leaves
+    // the pool and moves into the admin's "needs performer" queue.
+    return <CrewOpenJobs companyId={companyId} />;
   }
 
   // ── Main content per tab ───────────────────────────────────────────────
@@ -777,5 +770,109 @@ function DriverPickRow({
         )}
       </View>
     </Pressable>
+  );
+}
+
+// ── Crew view: the open-job pool anyone in the org can claim ──────────────────
+// Merged model. Crew see move details + distance but NO pricing (gated in the
+// org_open_jobs RPC). Claiming routes through dispatch-accept, which now accepts
+// any active member; the job then awaits an admin assigning the performer.
+function CrewOpenJobs({ companyId }: { companyId: string | null }) {
+  const qc = useQueryClient();
+  const { data: jobs, isLoading, refetch, isRefetching } = useOrgOpenJobs();
+  const accept = useDispatcherAccept();
+  const [claimingId, setClaimingId] = useState<string | null>(null);
+
+  const onClaim = async (job: OrgOpenJob) => {
+    if (!companyId) return;
+    setClaimingId(job.id);
+    try {
+      await accept.mutateAsync({ booking_id: job.id, company_id: companyId });
+      haptic.success();
+      qc.invalidateQueries({ queryKey: ['org-open-jobs'] });
+    } catch (e: any) {
+      Alert.alert('Couldn’t claim job', e?.message ?? 'It may have just been taken by someone else.');
+    } finally {
+      setClaimingId(null);
+    }
+  };
+
+  return (
+    <SafeAreaView className="flex-1 bg-silver-50 dark:bg-night-900" edges={['top']}>
+      <View className="bg-white dark:bg-night-100">
+        <ScreenHeader
+          title="Open jobs"
+          subtitle="Claim one for your crew"
+          showBack={false}
+          right={<NotificationBell href="/(company)/notifications" />}
+        />
+      </View>
+
+      {isLoading && !jobs ? (
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <CardSkeleton count={3} />
+        </ScrollView>
+      ) : !jobs || jobs.length === 0 ? (
+        <EmptyState
+          icon="cube-outline"
+          title="No open jobs right now"
+          body="New moves near your base city appear here the moment a customer books. Pull down to refresh."
+        />
+      ) : (
+        <ScrollView
+          contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+          refreshControl={
+            <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor="#16A34A" />
+          }
+        >
+          {jobs.map((job) => (
+            <View
+              key={job.id}
+              className="mb-3 rounded-3xl bg-white dark:bg-night-100 border border-silver-200 dark:border-night-200 p-4"
+            >
+              <View className="flex-row items-center justify-between">
+                <Text className="text-sm font-bold text-ink-900 dark:text-white capitalize">
+                  {job.move_type.replace(/_/g, ' ')}
+                </Text>
+                <View className="flex-row items-center rounded-full bg-brand-50 px-2.5 py-1">
+                  <Ionicons name="navigate-circle" size={13} color="#047857" />
+                  <Text className="ml-1 text-[11px] font-bold text-brand-700">~{job.distance_km} km</Text>
+                </View>
+              </View>
+
+              <View className="mt-2.5 flex-row items-center">
+                <View className="h-2.5 w-2.5 rounded-full border-2 border-ink-900 dark:border-white" />
+                <Text className="ml-2 flex-1 text-[13px] text-ink-800 dark:text-silver-200" numberOfLines={1}>
+                  {job.pickup_city ?? job.pickup_line1}
+                </Text>
+              </View>
+              <View className="mt-1 flex-row items-center">
+                <View className="h-2.5 w-2.5 rounded-sm bg-brand-600" />
+                <Text className="ml-2 flex-1 text-[13px] text-ink-800 dark:text-silver-200" numberOfLines={1}>
+                  {job.dropoff_city ?? job.dropoff_line1 ?? 'In-home job'}
+                </Text>
+              </View>
+
+              <Text className="mt-2 text-xs text-silver-500">
+                {fmtDateShort(job.scheduled_for_date)}
+                {job.scheduled_for_window ? ` · ${job.scheduled_for_window}` : ''}
+              </Text>
+
+              <Pressable
+                onPress={() => onClaim(job)}
+                disabled={claimingId === job.id}
+                className={`mt-3 rounded-2xl items-center justify-center py-3 ${
+                  claimingId === job.id ? 'bg-silver-200' : 'bg-brand-600 active:opacity-90'
+                }`}
+              >
+                <Text className="text-sm font-bold text-white">
+                  {claimingId === job.id ? 'Claiming…' : 'Claim for your crew'}
+                </Text>
+              </Pressable>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+    </SafeAreaView>
   );
 }

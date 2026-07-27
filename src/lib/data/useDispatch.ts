@@ -221,6 +221,49 @@ export function useDispatchQueue(companyId: string | null | undefined) {
   });
 }
 
+// ─── Org open-job feed (pricing-gated) ───────────────────────────────────────
+// The merged-model feed EVERY member sees — admin and crew alike. Backed by the
+// org_open_jobs() RPC (migration 0067): move details for the unassigned pool
+// within range of the org's base city, with the dollar columns populated ONLY
+// for admins (crew receive null, enforced server-side). Any member can then
+// accept via dispatch-accept; only an admin assigns the performer.
+
+export interface OrgOpenJob {
+  id: string;
+  short_code: string;
+  status: string;
+  move_type: string;
+  pickup_line1: string;
+  pickup_city: string;
+  pickup_lat: number;
+  pickup_lng: number;
+  dropoff_line1: string | null;
+  dropoff_city: string | null;
+  dropoff_lat: number | null;
+  dropoff_lng: number | null;
+  scheduled_for_date: string;
+  scheduled_for_window: string | null;
+  scheduled_for_window_starts_at: string | null;
+  customer_id: string;
+  distance_km: number;
+  /** Null for crew — the pricing gate lives in the RPC, not the UI. */
+  price_total_cents: number | null;
+  driver_total_cents: number | null;
+}
+
+export function useOrgOpenJobs(radiusKm = 60) {
+  return useQuery({
+    queryKey: ['org-open-jobs', radiusKm],
+    enabled: supabaseConfigured,
+    refetchInterval: 10000, // new jobs surface for the whole org quickly
+    queryFn: async (): Promise<OrgOpenJob[]> => {
+      const { data, error } = await supabase.rpc('org_open_jobs', { p_radius_km: radiusKm });
+      if (error) throw error;
+      return (data ?? []) as OrgOpenJob[];
+    },
+  });
+}
+
 // ─── Company driver roster ───────────────────────────────────────────────────
 
 export interface CompanyDriverRosterRow {
