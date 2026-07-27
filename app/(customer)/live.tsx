@@ -74,6 +74,17 @@ function destinationFor(status: BookingStatus): 'pickup' | 'dropoff' | null {
   return null;
 }
 
+// Short, friendly line shown as an in-app toast the moment the crew flips the
+// move to a new stage (mirrors the push notification sent server-side).
+const MILESTONE_TOAST: Partial<Record<BookingStatus, string>> = {
+  on_the_way: 'Your crew is on the way to pickup 🚚',
+  arrived:    'Your crew has arrived at pickup 📍',
+  loading:    'Loading has started 📦',
+  in_transit: 'On the way to your drop-off 🚚',
+  unloading:  'Unloading has started at the drop-off 📦',
+  completed:  'Your move is complete! 🎉',
+};
+
 function liveEtaMinutes(
   driver: { lat: number; lng: number } | null,
   target: { lat?: number | null; lng?: number | null } | null,
@@ -156,13 +167,20 @@ export default function LiveMove() {
     setRefreshing(false);
   };
 
-  // STATUS PULSE — animate ETA banner when status changes
+  // STATUS PULSE + milestone popup — when the crew flips the move to a new
+  // stage, pulse the ETA banner AND pop an in-app toast ("Your crew has
+  // arrived", …) so the customer gets the live update without leaving the
+  // screen. A push notification is ALSO sent server-side (bookings-update-status)
+  // for when the app is closed.
+  const milestoneToast = useToast();
   const prevStatus = useRef<BookingStatus | null>(null);
   const pulseAnim = useRef(new RNAnimated.Value(0)).current;
   useEffect(() => {
     if (!booking) return;
     if (prevStatus.current && prevStatus.current !== booking.status) {
       haptic.success();
+      const msg = MILESTONE_TOAST[booking.status];
+      if (msg) milestoneToast.info(msg);
       pulseAnim.setValue(0);
       RNAnimated.sequence([
         RNAnimated.timing(pulseAnim, { toValue: 1, duration: 250, useNativeDriver: false }),
@@ -170,7 +188,7 @@ export default function LiveMove() {
       ]).start();
     }
     prevStatus.current = booking.status;
-  }, [booking?.status, pulseAnim]);
+  }, [booking?.status, pulseAnim, milestoneToast]);
   const pulseBg = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: ['#ECFDF5', '#A7F3D0'] });
 
   // Chat sheet — slide-up modal that replaces the deleted /chat/[id] route

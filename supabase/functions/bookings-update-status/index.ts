@@ -88,7 +88,7 @@ handle(async (req) => {
       .from('bookings')
       .update(stamp)
       .eq('id', booking_id)
-      .select('id, short_code, status, started_at, completed_at, hourly_rate_customer_cents, materials_cents, fuel_cents')
+      .select('id, short_code, status, customer_id, started_at, completed_at, hourly_rate_customer_cents, materials_cents, fuel_cents')
       .single();
 
     if (error) {
@@ -142,6 +142,36 @@ handle(async (req) => {
       ua: req.headers.get('user-agent') ?? undefined,
       payload: { new_status, reason, actual_bill: actualBill },
     });
+
+    // ─── Customer milestone notification ────────────────────────────────────
+    // Each move stage the crew flips → a push + in-app notification to the
+    // customer so they get real-time "your crew arrived / is loading / …"
+    // updates. The notifications_push_fanout trigger delivers it to their
+    // device. Fire-and-forget; a notification failure must never fail the
+    // status transition itself.
+    const CUSTOMER_MILESTONES: Record<string, { title: string; body: string }> = {
+      on_the_way: { title: 'Your crew is on the way', body: 'Your movers have left and are heading to your pickup.' },
+      arrived:    { title: 'Your crew has arrived', body: 'Your movers are at the pickup location.' },
+      loading:    { title: 'Loading has started', body: 'Your crew has begun loading your belongings.' },
+      in_transit: { title: 'On the way to your drop-off', body: 'Your belongings are on the way to the destination.' },
+      unloading:  { title: 'Unloading has started', body: 'Your crew has arrived at the drop-off and is unloading.' },
+      completed:  { title: 'Your move is complete 🎉', body: 'All done — thanks for moving with Movvy!' },
+    };
+    const milestone = CUSTOMER_MILESTONES[new_status];
+    if (milestone && data.customer_id) {
+      try {
+        const admin = adminClient();
+        await admin.from('notifications').insert({
+          profile_id: data.customer_id,
+          category: `booking.${new_status}`,
+          title: milestone.title,
+          body: milestone.body,
+          data: { booking_id, short_code: data.short_code, new_status },
+        });
+      } catch (notifErr) {
+        console.warn('[bookings-update-status] milestone notification failed (non-fatal)', notifErr);
+      }
+    }
 
     // ─── Move-complete email ────────────────────────────────────────────────
     // Fires only on the completed transition + only if we computed an actual
