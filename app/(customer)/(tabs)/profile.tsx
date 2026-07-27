@@ -135,8 +135,8 @@ export default function Profile() {
     {
       icon: 'headset-outline',
       label: 'Customer Service',
-      value: 'Chat · SOS · claims · safety',
-      onPress: () => router.push('/(customer)/support'),
+      value: 'Chat with a real person',
+      onPress: () => router.push('/(customer)/support/chat'),
     },
     {
       icon: 'document-text-outline',

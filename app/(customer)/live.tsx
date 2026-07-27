@@ -182,7 +182,9 @@ export default function LiveMove() {
   // export, and emergency contact — so every safety/support path is one
   // tap from the live tracker. Headset icon in the header AND "Report an
   // issue" button both come here.
-  const openSupportHub = () => router.push('/(customer)/support');
+  // Straight to a live support chat (Adam's call). SOS / claims / disputes are
+  // still reachable via the "⋯" in the chat header.
+  const openSupportHub = () => router.push('/(customer)/support/chat');
 
   // Cancel-booking flow — opens CancelMoveSheet (bottom of this file).
   // The old Alert flow invoked bookings-cancel WITHOUT the required `reason`

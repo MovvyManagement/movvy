@@ -72,7 +72,11 @@ export function EditCompanyInfoSheet({ visible, companyId, onClose }: Props) {
     display.trim().length >= 2 &&
     /^\+[1-9]\d{6,14}$/.test(phone.trim()) &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) &&
-    Number(truckCount) >= 1 &&
+    // Allow 0 trucks — a solo mover or a company that hasn't added trucks yet is
+    // valid. Requiring >=1 silently disabled the whole Save button (incl. HQ
+    // address changes) for any org showing "0 active trucks".
+    Number.isFinite(Number(truckCount)) &&
+    Number(truckCount) >= 0 &&
     Number(truckCount) <= 200;
 
   const save = async () => {

@@ -50,9 +50,12 @@ interface Props {
   onClose: () => void;
   /** Display name shown in the header (e.g. driver name or customer name). */
   peerName?: string;
+  /** When set, a "⋯" header button appears that opens more options — used by
+   *  the support chat to reach SOS / claims / disputes without a hub menu. */
+  onMore?: () => void;
 }
 
-export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose, peerName }: Props) {
+export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose, peerName, onMore }: Props) {
   const { user } = useAuth();
   const ensureThread = useEnsureBookingThread();
   const send = useSendChatMessage();
@@ -133,7 +136,11 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
     <Modal
       visible={visible}
       animationType="slide"
-      presentationStyle="pageSheet"
+      // fullScreen (not pageSheet): a pageSheet is inset from the top, which
+      // makes KeyboardAvoidingView's `padding` mis-measure the keyboard and
+      // leave the composer hidden underneath it. Full screen keeps the input
+      // pinned above the keyboard reliably.
+      presentationStyle="fullScreen"
       onRequestClose={onClose}
     >
       {/* edges: top only. The bottom inset is applied to the composer instead
@@ -164,17 +171,28 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
                 </Text>
               </View>
             </View>
-            <Pressable
-              onPress={() =>
-                Alert.alert(
-                  'Calling via Movvy line',
-                  "We'll connect you through a Movvy number so your real phone stays private. (Activates once Twilio is wired.)"
-                )
-              }
-              className="h-10 w-10 rounded-full bg-brand-600 items-center justify-center"
-            >
-              <Ionicons name="call" size={18} color="#fff" />
-            </Pressable>
+            <View className="flex-row items-center">
+              {onMore ? (
+                <Pressable
+                  onPress={onMore}
+                  hitSlop={8}
+                  className="h-10 w-10 rounded-full bg-silver-100 items-center justify-center mr-2"
+                >
+                  <Ionicons name="ellipsis-horizontal" size={18} color="#0A0A0A" />
+                </Pressable>
+              ) : null}
+              <Pressable
+                onPress={() =>
+                  Alert.alert(
+                    'Calling via Movvy line',
+                    "We'll connect you through a Movvy number so your real phone stays private. (Activates once Twilio is wired.)"
+                  )
+                }
+                className="h-10 w-10 rounded-full bg-brand-600 items-center justify-center"
+              >
+                <Ionicons name="call" size={18} color="#fff" />
+              </Pressable>
+            </View>
           </View>
 
           {/* Messages */}

@@ -54,10 +54,13 @@ import {
   useDispatcherDecline,
   useDispatcherAssign,
   useOrgOpenJobs,
+  useBooking,
   type DispatchQueueRow,
   type CompanyDriverRosterRow,
   type OrgOpenJob,
 } from '@/lib/data';
+import { LiveMap } from '@/components/LiveMap';
+import { openInMaps } from '@/lib/maps';
 import { fmtCurrency, fmtDateShort, fmtRelativeAgo } from '@/lib/format';
 import { jobUrgency } from '@/lib/partnerJobs';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
@@ -222,20 +225,13 @@ export default function CompanyJobs() {
         <NewRequestCard
           key={b.id}
           row={b}
-          busy={accept.isPending || decline.isPending}
+          busy={accept.isPending}
           onAccept={async () => {
             try {
               await accept.mutateAsync({ booking_id: b.id, company_id: companyId! });
               haptic.success();
             } catch (e: any) {
               Alert.alert('Could not accept', e?.message ?? 'Try again.');
-            }
-          }}
-          onDecline={async () => {
-            try {
-              await decline.mutateAsync({ booking_id: b.id, company_id: companyId! });
-            } catch (e: any) {
-              Alert.alert('Could not decline', e?.message ?? 'Try again.');
             }
           }}
         />
@@ -379,12 +375,10 @@ function NewRequestCard({
   row,
   busy,
   onAccept,
-  onDecline,
 }: {
   row: DispatchQueueRow;
   busy: boolean;
   onAccept: () => void;
-  onDecline: () => void;
 }) {
   return (
     <View className="mb-3">
@@ -408,18 +402,11 @@ function NewRequestCard({
           </View>
           <Text className="text-xs text-silver-500">#{row.short_code}</Text>
         </View>
-        <View className="mt-4 flex-row gap-2">
-          <Pressable
-            onPress={onDecline}
-            disabled={busy}
-            className="flex-1 h-12 rounded-2xl bg-silver-100 items-center justify-center active:opacity-80"
-          >
-            <Text className="text-sm font-bold text-ink-900">Decline</Text>
-          </Pressable>
+        <View className="mt-4">
           <Pressable
             onPress={onAccept}
             disabled={busy}
-            className={`flex-[2] h-12 rounded-2xl items-center justify-center ${
+            className={`h-12 rounded-2xl items-center justify-center ${
               busy ? 'bg-silver-300' : 'bg-brand-600 active:opacity-90'
             }`}
           >
@@ -450,6 +437,18 @@ function NeedsDriverCard({
   // both surfaces agree on which job is "on fire" (red ≤6h / amber ≤24h).
   const urgency = jobUrgency(row.scheduled_for_window_starts_at);
 
+  // Full booking (for the drop-off coordinates the dispatch feed doesn't carry)
+  // so the accepted-job map can pin both ends + route.
+  const { data: full } = useBooking(row.id);
+  const pickup =
+    Number.isFinite(row.pickup_lat) && Number.isFinite(row.pickup_lng)
+      ? { lat: row.pickup_lat, lng: row.pickup_lng, label: row.pickup_line1 ?? 'Pickup' }
+      : undefined;
+  const dropoff =
+    full?.dropoff_lat != null && full?.dropoff_lng != null
+      ? { lat: Number(full.dropoff_lat), lng: Number(full.dropoff_lng), label: full.dropoff_line1 ?? 'Drop-off' }
+      : undefined;
+
   return (
     <View className="mb-3">
       <Card className="border-amber-200 bg-amber-50/40">
@@ -463,6 +462,29 @@ function NeedsDriverCard({
           </Text>
         </View>
         <RouteBlock row={row} />
+
+        {/* Route map — tap to open turn-by-turn directions in Apple/Google Maps
+            (starts routing to the pickup from wherever the driver is). */}
+        {pickup ? (
+          <Pressable
+            className="mt-3 rounded-2xl overflow-hidden"
+            onPress={() => openInMaps(pickup)}
+          >
+            <View pointerEvents="none">
+              <LiveMap
+                height={150}
+                borderRadius={16}
+                pickup={pickup}
+                dropoff={dropoff}
+                showRoute={!!dropoff}
+              />
+            </View>
+            <View className="absolute bottom-2 right-2 flex-row items-center rounded-full bg-black/70 px-3 py-1.5">
+              <Ionicons name="navigate" size={13} color="#fff" />
+              <Text className="ml-1.5 text-xs font-semibold text-white">Directions</Text>
+            </View>
+          </Pressable>
+        ) : null}
         <View className="mt-3 flex-row items-center justify-between">
           <View className="flex-row items-center">
             <Ionicons name="calendar-outline" size={14} color="#71717A" />

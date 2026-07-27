@@ -78,6 +78,16 @@ export function useCancelBooking() {
       return data as { ok: true; refund_percent: number; refund_cents: number };
     },
     onSuccess: (_, vars) => {
+      // Optimistically flip the cancelled row to 'cancelled' in every cached
+      // bookings list RIGHT NOW so the derived useActiveBooking() stops
+      // returning it and the Moves tab drops out of the live tracker
+      // immediately — instead of waiting on a refetch that could race the
+      // navigation and briefly leave the cancelled move showing as "active".
+      qc.setQueriesData<any[]>({ queryKey: ['bookings'] }, (old) =>
+        Array.isArray(old)
+          ? old.map((b) => (b?.id === vars.booking_id ? { ...b, status: 'cancelled' } : b))
+          : old,
+      );
       qc.invalidateQueries({ queryKey: ['booking', vars.booking_id] });
       qc.invalidateQueries({ queryKey: ['bookings'] });
     },

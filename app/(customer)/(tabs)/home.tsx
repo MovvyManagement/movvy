@@ -8,7 +8,7 @@ import { Card } from '@/components/Card';
 import { MovvyMark } from '@/components/MovvyMark';
 import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
-import { AddressAutocomplete } from '@/components/AddressAutocomplete';
+import { AddressSearchSheet } from '@/components/AddressSearchSheet';
 import { DateScroller } from '@/components/DateScroller';
 import { LiveMap } from '@/components/LiveMap';
 import { fmtDateShort, firstNameOf } from '@/lib/format';
@@ -103,12 +103,11 @@ export default function CustomerHome() {
   // instead of hiding behind it. cardY is captured via onLayout.
   const scrollRef = useRef<ScrollView>(null);
   const cardY = useRef(0);
-  const scrollFieldIntoView = () => {
-    // rAF lets the keyboard begin animating first so the scroll lands right.
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ y: Math.max(0, cardY.current - 8), animated: true });
-    });
-  };
+
+  // Which address field's full-screen search sheet is open (null = closed).
+  // Tapping a field opens the sheet so its suggestions sit above the keyboard
+  // instead of hiding behind it.
+  const [searchFor, setSearchFor] = useState<'from' | 'to' | null>(null);
 
   const handleBookMove = () => {
     if (!pickupGeo || !dropoffGeo) return;
@@ -163,6 +162,7 @@ export default function CustomerHome() {
         ref={scrollRef}
         contentContainerStyle={{ paddingBottom: 32 }}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
         {...(Platform.OS === 'ios' ? { automaticallyAdjustKeyboardInsets: true } : {})}
       >
@@ -267,20 +267,26 @@ export default function CustomerHome() {
                       })}
                     </ScrollView>
                   ) : null}
-                  <AddressAutocomplete
-                    placeholder="Enter starting address"
-                    value={pickupText}
-                    onChangeText={(t) => {
-                      setPickupText(t);
-                      if (pickupGeo && t !== `${pickupGeo.label}`) setPickupGeo(null);
-                    }}
-                    onSelect={(r) => {
-                      setPickupGeo(r);
-                      setActive('to');
-                    }}
-                    onFocus={scrollFieldIntoView}
-                    leftDotColor="#0A0A0A"
-                  />
+                  <Pressable
+                    onPress={() => setSearchFor('from')}
+                    className="flex-row items-center rounded-2xl border bg-white px-4 border-silver-200"
+                    style={{ minHeight: 52 }}
+                  >
+                    <View className="mr-3 h-3 w-3 rounded-full" style={{ backgroundColor: '#0A0A0A' }} />
+                    <Text
+                      className={`flex-1 text-base ${pickupText ? 'text-ink-900' : 'text-silver-400'}`}
+                      numberOfLines={1}
+                    >
+                      {pickupText || 'Enter starting address'}
+                    </Text>
+                    {pickupText ? (
+                      <Pressable onPress={() => { setPickupText(''); setPickupGeo(null); }} hitSlop={8}>
+                        <Ionicons name="close-circle" size={18} color="#A1A1AA" />
+                      </Pressable>
+                    ) : (
+                      <Ionicons name="search" size={18} color="#A1A1AA" />
+                    )}
+                  </Pressable>
                 </View>
               ) : pickupGeo ? (
                 <TripRow tone="origin" label="Pick-up" value={pickupGeo.label} onEdit={() => setActive('from')} />
@@ -295,21 +301,26 @@ export default function CustomerHome() {
                   <Text className="mt-1 mb-3 text-sm text-silver-500">
                     Your route and distance appear as you go.
                   </Text>
-                  <AddressAutocomplete
-                    placeholder="Enter destination address"
-                    value={dropoffText}
-                    onChangeText={(t) => {
-                      setDropoffText(t);
-                      if (dropoffGeo && t !== `${dropoffGeo.label}`) setDropoffGeo(null);
-                    }}
-                    onSelect={(r) => {
-                      setDropoffGeo(r);
-                      setActive('when');
-                    }}
-                    onFocus={scrollFieldIntoView}
-                    autoFocus
-                    leftDotColor="#16A34A"
-                  />
+                  <Pressable
+                    onPress={() => setSearchFor('to')}
+                    className="flex-row items-center rounded-2xl border bg-white px-4 border-silver-200"
+                    style={{ minHeight: 52 }}
+                  >
+                    <View className="mr-3 h-3 w-3 rounded-sm" style={{ backgroundColor: '#16A34A' }} />
+                    <Text
+                      className={`flex-1 text-base ${dropoffText ? 'text-ink-900' : 'text-silver-400'}`}
+                      numberOfLines={1}
+                    >
+                      {dropoffText || 'Enter destination address'}
+                    </Text>
+                    {dropoffText ? (
+                      <Pressable onPress={() => { setDropoffText(''); setDropoffGeo(null); }} hitSlop={8}>
+                        <Ionicons name="close-circle" size={18} color="#A1A1AA" />
+                      </Pressable>
+                    ) : (
+                      <Ionicons name="search" size={18} color="#A1A1AA" />
+                    )}
+                  </Pressable>
                 </View>
               ) : dropoffGeo ? (
                 <TripRow tone="dest" label="Drop-off" value={dropoffGeo.label} onEdit={() => setActive('to')} />
@@ -444,6 +455,27 @@ export default function CustomerHome() {
           </Pressable>
         </View>
       </ScrollView>
+
+      {/* Full-screen address search — opens above the keyboard so suggestions
+          are never hidden behind it. */}
+      <AddressSearchSheet
+        visible={searchFor !== null}
+        placeholder={searchFor === 'to' ? 'Enter destination address' : 'Enter starting address'}
+        accent={searchFor === 'to' ? '#16A34A' : '#0A0A0A'}
+        initialQuery={searchFor === 'to' ? dropoffText : pickupText}
+        onClose={() => setSearchFor(null)}
+        onSelect={(r, text) => {
+          if (searchFor === 'to') {
+            setDropoffText(text);
+            setDropoffGeo(r);
+            setActive('when');
+          } else {
+            setPickupText(text);
+            setPickupGeo(r);
+            setActive('to');
+          }
+        }}
+      />
     </View>
   );
 }

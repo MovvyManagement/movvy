@@ -45,6 +45,8 @@ export function EditBankAccountSheet({ visible, companyId, onClose }: Props) {
   const [transit, setTransit] = useState('');
   // Stored only in memory — derived to last-4 then discarded on save.
   const [accountRaw, setAccountRaw] = useState('');
+  // Interac e-Transfer email — an alternative payout method to bank wire.
+  const [etransfer, setEtransfer] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -53,41 +55,58 @@ export function EditBankAccountSheet({ visible, companyId, onClose }: Props) {
     setInstitution(company.bank_institution_number ?? '');
     setTransit(company.bank_transit_number ?? '');
     setAccountRaw('');
+    setEtransfer((company as any).etransfer_email ?? '');
   }, [visible, company]);
 
-  const valid =
-    !!company &&
-    !saving &&
+  const emailOk = etransfer.trim() === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(etransfer.trim());
+  // A fresh bank entry needs all four fields. If none is being entered we keep
+  // whatever's on file (so someone can add an e-transfer email without
+  // re-typing their account number).
+  const bankEntered =
+    accountRaw.trim().length > 0 ||
+    institution.trim().length > 0 ||
+    transit.trim().length > 0;
+  const bankComplete =
     holder.trim().length >= 2 &&
     /^[0-9]{3}$/.test(institution.trim()) &&
     /^[0-9]{5}$/.test(transit.trim()) &&
     /^[0-9]{6,12}$/.test(accountRaw.trim());
+  const hasExisting = !!company?.bank_account_last4;
+
+  const valid =
+    !!company &&
+    !saving &&
+    emailOk &&
+    // Need at least one usable payout method after saving.
+    (bankComplete ||
+      ((!bankEntered) && (hasExisting || etransfer.trim().length > 0)));
 
   const save = async () => {
     if (!valid) return;
     setSaving(true);
     try {
-      const cleaned = accountRaw.trim();
-      const last4 = cleaned.slice(-4);
-      await update.mutateAsync({
-        bank_holder_name: holder.trim(),
-        bank_institution_number: institution.trim(),
-        bank_transit_number: transit.trim(),
-        bank_account_last4: last4,
-        bank_updated_at: new Date().toISOString(),
-      });
+      const patch: Record<string, unknown> = {
+        etransfer_email: etransfer.trim() ? etransfer.trim().toLowerCase() : null,
+      };
+      // Only touch the bank fields when a complete new account was entered.
+      if (bankEntered && bankComplete) {
+        patch.bank_holder_name = holder.trim();
+        patch.bank_institution_number = institution.trim();
+        patch.bank_transit_number = transit.trim();
+        patch.bank_account_last4 = accountRaw.trim().slice(-4);
+        patch.bank_updated_at = new Date().toISOString();
+      }
+      await update.mutateAsync(patch);
       setAccountRaw('');  // drop the full PAN from memory the moment save lands
       haptic.success();
-      toast.success('Bank details saved');
+      toast.success('Payout details saved');
       onClose();
     } catch (e: any) {
-      toast.error(e?.message ?? "Couldn't save bank details.");
+      toast.error(e?.message ?? "Couldn't save payout details.");
     } finally {
       setSaving(false);
     }
   };
-
-  const hasExisting = !!company?.bank_account_last4;
 
   const body = (
     <ScrollView
@@ -162,6 +181,29 @@ export function EditBankAccountSheet({ visible, companyId, onClose }: Props) {
           onChangeText={(t) => setAccountRaw(t.replace(/[^0-9]/g, '').slice(0, 12))}
           leftIcon={<Ionicons name="lock-closed-outline" size={18} color="#71717A" />}
           hint="6–12 digits. Only the last 4 are stored; full number is discarded on save."
+        />
+      </View>
+
+      {/* Interac e-Transfer — an alternative to bank wire. Either method (or
+          both) is fine; you can save just this without bank details. */}
+      <View className="mt-6 flex-row items-center">
+        <View className="h-px flex-1 bg-silver-200" />
+        <Text className="mx-3 text-xs font-semibold uppercase tracking-wider text-silver-400">
+          or Interac e-Transfer
+        </Text>
+        <View className="h-px flex-1 bg-silver-200" />
+      </View>
+      <View className="mt-4">
+        <Input
+          label="e-Transfer email"
+          placeholder="payouts@yourcompany.ca"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          value={etransfer}
+          onChangeText={setEtransfer}
+          leftIcon={<Ionicons name="mail-outline" size={18} color="#71717A" />}
+          hint="Movvy can send your payout by Interac e-Transfer to this address."
+          error={emailOk ? undefined : 'Enter a valid email'}
         />
       </View>
 
