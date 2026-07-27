@@ -137,6 +137,45 @@ export async function searchAlberta(query: string, signal?: AbortSignal): Promis
 /** Legacy alias for backwards-compat. New code should use searchAlberta. */
 export const searchCalgary = searchAlberta;
 
+/**
+ * Resolve a Google Places `place_id` into a full GeocodeResult with coordinates.
+ *
+ * Google's autocomplete predictions carry NO lat/lng — only a place_id. Our
+ * whole booking flow needs coordinates (pricing distance, map pins, city
+ * routing), so when the user PICKS a Google suggestion we resolve it here via
+ * the protected `place-details` edge function (one paid Place Details call per
+ * accepted pick, budget-guarded + cached server-side).
+ *
+ * Returns null if resolution fails (no backend, budget blown, key missing,
+ * out-of-area) — callers should keep the prediction's display text but treat
+ * it as un-geocoded (i.e. not bookable) rather than proceeding with no coords.
+ */
+export async function resolvePlaceId(
+  placeId: string,
+  signal?: AbortSignal,
+): Promise<GeocodeResult | null> {
+  if (!placeId || !supabaseConfigured) return null;
+  try {
+    const { data, error } = await supabase.functions.invoke('place-details', {
+      body: { place_id: placeId },
+    });
+    if (signal?.aborted) return null;
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    const r = data?.result as GeocodeResult | undefined;
+    if (!r || !Number.isFinite(Number(r.lat)) || !Number.isFinite(Number(r.lng))) return null;
+    return r;
+  } catch (e) {
+    if (__DEV__) console.warn('[geocoding] place-details resolve failed:', e);
+    return null;
+  }
+}
+
+/** True when a result still needs coordinate resolution (Google prediction). */
+export function needsResolution(r: GeocodeResult): boolean {
+  return !!r.place_id && (!Number.isFinite(Number(r.lat)) || !Number.isFinite(Number(r.lng)));
+}
+
 /** Direct Nominatim — kept as the demo-mode fallback only. Alberta-wide. */
 async function nominatimDirect(q: string, signal?: AbortSignal): Promise<GeocodeResult[]> {
   const params = new URLSearchParams({

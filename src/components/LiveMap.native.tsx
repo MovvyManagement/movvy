@@ -1,6 +1,12 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Easing } from 'react-native';
-import MapView, { Marker, MarkerAnimated, AnimatedRegion, Polyline } from 'react-native-maps';
+import MapView, {
+  Marker,
+  MarkerAnimated,
+  AnimatedRegion,
+  Polyline,
+  PROVIDER_GOOGLE,
+} from 'react-native-maps';
 import { CALGARY } from '@/lib/geocoding';
 
 // Native (iOS / Android) implementation of <LiveMap />.
@@ -84,6 +90,12 @@ export function LiveMap({ height = 220, pickup, dropoff, showRoute, initialCente
     >
       <MapView
         ref={ref}
+        // Force Google Maps on BOTH platforms. Android already defaults to
+        // Google; this switches iOS off Apple Maps too so pins/tiles/labels
+        // match across devices. Requires the mobile Maps SDK key wired into
+        // native config (app.config.ts → ios.config.googleMapsApiKey /
+        // android.config.googleMaps.apiKey) — without it iOS renders blank.
+        provider={PROVIDER_GOOGLE}
         style={{ flex: 1 }}
         initialRegion={{
           // Priority: pickup pin > caller-passed initialCenter (user GPS) > Calgary default

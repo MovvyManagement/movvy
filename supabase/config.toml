@@ -92,6 +92,8 @@ verify_jwt = true
 verify_jwt = true
 [functions.geocoding-search]
 verify_jwt = true
+[functions.place-details]
+verify_jwt = true
 [functions.routes-distance]
 verify_jwt = true
 [functions.tips-submit]

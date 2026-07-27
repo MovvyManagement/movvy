@@ -1,7 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { searchCalgary, type GeocodeResult } from '@/lib/geocoding';
+import {
+  searchCalgary,
+  resolvePlaceId,
+  needsResolution,
+  cityProvinceFromGeocode,
+  type GeocodeResult,
+} from '@/lib/geocoding';
 import { haptic } from '@/lib/haptics';
 
 interface Props {
@@ -23,6 +29,7 @@ export function AddressAutocomplete({
 }: Props) {
   const [suggestions, setSuggestions] = useState<GeocodeResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [resolving, setResolving] = useState(false);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -76,11 +83,32 @@ export function AddressAutocomplete({
     };
   }, [value]);
 
-  const handleSelect = (r: GeocodeResult) => {
+  const handleSelect = async (r: GeocodeResult) => {
     haptic.success();
+
+    // Google autocomplete predictions carry NO coordinates — only a place_id.
+    // The booking flow needs lat/lng (pricing distance, map pins, city routing),
+    // so resolve the place_id to real coordinates before committing. Nominatim
+    // results already have coords and skip straight through.
+    let final = r;
+    if (needsResolution(r)) {
+      setResolving(true);
+      setError(null);
+      const resolved = await resolvePlaceId(r.place_id!);
+      setResolving(false);
+      if (!resolved) {
+        // Keep the dropdown open — never commit a coord-less address, or the
+        // booking silently breaks downstream (NaN distance, no pins).
+        setError('Couldn’t pin that address — try another suggestion');
+        return;
+      }
+      final = resolved;
+    }
+
     skipNextSearch.current = true;
-    onChangeText(`${r.label}${r.secondary ? `, ${r.secondary.split(' · ')[1] ?? ''}` : ''}`.trim());
-    onSelect(r);
+    const { city } = cityProvinceFromGeocode(final);
+    onChangeText(`${final.label}${city ? `, ${city}` : ''}`.trim());
+    onSelect(final);
     setSuggestions([]);
     setOpen(false);
   };
@@ -110,7 +138,7 @@ export function AddressAutocomplete({
           autoCorrect={false}
           autoCapitalize="words"
         />
-        {loading ? (
+        {loading || resolving ? (
           <ActivityIndicator size="small" color="#71717A" />
         ) : value ? (
           <Pressable
@@ -141,6 +169,7 @@ export function AddressAutocomplete({
             <Pressable
               key={s.id}
               onPress={() => handleSelect(s)}
+              disabled={resolving}
               className={`px-4 py-3 flex-row items-center active:bg-silver-50 ${
                 idx < suggestions.length - 1 ? 'border-b border-silver-100' : ''
               }`}
@@ -160,9 +189,9 @@ export function AddressAutocomplete({
           ))}
 
           <View className="flex-row items-center px-3 py-2 bg-silver-50">
-            <Ionicons name="logo-octocat" size={10} color="#A1A1AA" />
+            <Ionicons name="location-outline" size={10} color="#A1A1AA" />
             <Text className="ml-1.5 text-[10px] text-silver-400">
-              Alberta-wide · powered by OpenStreetMap
+              Alberta-wide address search
             </Text>
           </View>
         </View>

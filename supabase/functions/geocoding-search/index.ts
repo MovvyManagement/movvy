@@ -123,48 +123,76 @@ handle(async (req) => {
     if (useGoogle) {
       try {
         const googleKey = Deno.env.get('GOOGLE_MAPS_SERVER_KEY')!;
-        const url =
-          `https://maps.googleapis.com/maps/api/place/autocomplete/json` +
-          `?input=${encodeURIComponent(query)}` +
-          `&components=country:ca` +
-          `&location=${(bounds.n + bounds.s) / 2},${(bounds.e + bounds.w) / 2}` +
-          // Larger radius when scope is province-wide
-          `&radius=${city_slug ? 25000 : 400000}` +
-          `&strictbounds=true` +
-          `&key=${googleKey}`;
-        const r = await fetch(url);
-        const json = await r.json();
-        if (json.status === 'OK' || json.status === 'ZERO_RESULTS') {
-          // Google's strictbounds + 400km radius is a CIRCLE on top of
-          // Alberta's rectangle — it leaks into BC + SK at the edges.
-          // Movvy serves Alberta only. Post-filter every prediction to
-          // require an "AB" or "Alberta" term (Google's structured
-          // predictions split address parts into `terms[]`). Defense in
-          // depth on top of the bookings-create server check and the
-          // Nominatim viewbox.
-          const inAlbertaPrediction = (p: any): boolean => {
-            const terms = (p?.terms ?? []) as Array<{ value: string }>;
-            for (const t of terms) {
-              if (t?.value === 'AB' || t?.value === 'Alberta') return true;
-            }
-            const desc = (p?.description ?? '') as string;
-            return /\bAB\b|\bAlberta\b/.test(desc);
-          };
+        // Keep the AB/Alberta text filter as defence in depth on top of the
+        // bounds restriction, the bookings-create server check, and the
+        // Nominatim viewbox.
+        const inAlberta = (main: string, secondary: string): boolean =>
+          /\bAB\b|\bAlberta\b/.test(`${main} ${secondary}`);
 
-          results = (json.predictions ?? [])
-            .filter(inAlbertaPrediction)
-            .slice(0, 6)
+        // "Places API (New)" and the legacy "Places API" are SEPARATE console
+        // APIs — a project may have either enabled. Try New first (go-forward),
+        // fall back to legacy. Normalized prediction: { placeId, main, secondary }.
+        let preds: Array<{ placeId: string; main: string; secondary: string }> | null = null;
+
+        // New: POST places:autocomplete. locationRestriction.rectangle HARD-
+        // bounds to Alberta (the old circular radius leaked into BC/SK).
+        const rNew = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': googleKey },
+          body: JSON.stringify({
+            input: query,
+            includedRegionCodes: ['ca'],
+            locationRestriction: {
+              rectangle: {
+                low: { latitude: bounds.s, longitude: bounds.w },
+                high: { latitude: bounds.n, longitude: bounds.e },
+              },
+            },
+          }),
+        });
+        const jNew = await rNew.json();
+        if (rNew.ok && Array.isArray(jNew.suggestions)) {
+          preds = jNew.suggestions
+            .map((s: any) => s.placePrediction)
+            .filter((p: any) => p?.placeId)
             .map((p: any) => ({
-              id: p.place_id,
-              label: p.structured_formatting?.main_text ?? p.description,
-              secondary: p.structured_formatting?.secondary_text ?? '',
-              place_id: p.place_id,
+              placeId: p.placeId,
+              main: p.structuredFormat?.mainText?.text ?? p.text?.text ?? '',
+              secondary: p.structuredFormat?.secondaryText?.text ?? '',
             }));
+        } else {
+          console.warn('[geocoding] places(new) unavailable, trying legacy',
+            rNew.status, jNew?.error?.status ?? jNew?.error?.message ?? '');
+          // Legacy: GET place/autocomplete/json. strictbounds + a wide radius
+          // approximates the Alberta box; the AB text filter cleans the edges.
+          const rLeg = await fetch(
+            `https://maps.googleapis.com/maps/api/place/autocomplete/json` +
+            `?input=${encodeURIComponent(query)}` +
+            `&components=country:ca` +
+            `&location=${(bounds.n + bounds.s) / 2},${(bounds.e + bounds.w) / 2}` +
+            `&radius=${city_slug ? 25000 : 400000}` +
+            `&strictbounds=true` +
+            `&key=${googleKey}`,
+          );
+          const jLeg = await rLeg.json();
+          if (jLeg.status === 'OK' || jLeg.status === 'ZERO_RESULTS') {
+            preds = (jLeg.predictions ?? []).map((p: any) => ({
+              placeId: p.place_id,
+              main: p.structured_formatting?.main_text ?? p.description ?? '',
+              secondary: p.structured_formatting?.secondary_text ?? '',
+            }));
+          } else {
+            console.warn('[geocoding] legacy autocomplete failed', jLeg.status, jLeg.error_message ?? '');
+          }
+        }
+
+        if (preds) {
+          results = preds
+            .filter((p) => p.placeId && inAlberta(p.main, p.secondary))
+            .slice(0, 6)
+            .map((p) => ({ id: p.placeId, label: p.main, secondary: p.secondary, place_id: p.placeId }));
           source = 'google';
           costUsd = COST_GOOGLE_AUTOCOMPLETE;
-        } else {
-          console.warn('[geocoding] google status', json.status);
-          // Fall through to Nominatim
         }
       } catch (e) {
         console.error('[geocoding] google call failed, falling back', e);
