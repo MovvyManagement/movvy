@@ -49,9 +49,8 @@ export default function MoverSafety() {
     insurance?.status === 'approved' && license?.status === 'approved';
 
   const callMovvy = () => {
-    // Same placeholder hotline the company-side safety screen uses — swap to
-    // the real number once it's set.
-    Linking.openURL('tel:+18336668891').catch(() =>
+    // Movvy customer support line.
+    Linking.openURL('tel:+16134163426').catch(() =>
       Alert.alert("Couldn't open dialer"),
     );
   };

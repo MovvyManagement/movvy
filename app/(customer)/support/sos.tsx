@@ -143,7 +143,7 @@ export default function SosScreen() {
             <Text className="ml-2 text-base font-bold text-white">Call 911</Text>
           </Pressable>
           <Pressable
-            onPress={() => Linking.openURL('tel:+18335006689')}
+            onPress={() => Linking.openURL('tel:+16134163426')}
             className="flex-1 h-14 rounded-2xl bg-ink-900 items-center justify-center flex-row active:opacity-90"
           >
             <Ionicons name="headset" size={18} color="#fff" />

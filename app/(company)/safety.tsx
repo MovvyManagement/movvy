@@ -41,8 +41,8 @@ export default function CompanySafety() {
     liability?.status === 'approved' && fleet?.status === 'approved';
 
   const callMovvy = () => {
-    // Movvy emergency support line — placeholder until the real number is set.
-    Linking.openURL('tel:+18336668891').catch(() =>
+    // Movvy customer support line.
+    Linking.openURL('tel:+16134163426').catch(() =>
       Alert.alert("Couldn't open dialer"),
     );
   };

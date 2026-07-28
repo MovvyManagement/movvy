@@ -196,11 +196,11 @@ export default function SupportHub() {
             <Ionicons name="chevron-forward" size={16} color="#A1A1AA" />
           </Pressable>
           <Pressable
-            onPress={() => Linking.openURL('tel:+18335006689')}
+            onPress={() => Linking.openURL('tel:+16134163426')}
             className="px-5 py-4 flex-row items-center active:opacity-70"
           >
             <Ionicons name="call-outline" size={20} color="#0A0A0A" />
-            <Text className="ml-3 flex-1 text-sm font-semibold text-ink-900">1-833-500-MOVE</Text>
+            <Text className="ml-3 flex-1 text-sm font-semibold text-ink-900">+1 (613) 416-3426</Text>
             <Ionicons name="chevron-forward" size={16} color="#A1A1AA" />
           </Pressable>
         </Card>
