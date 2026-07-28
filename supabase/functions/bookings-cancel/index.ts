@@ -77,9 +77,16 @@ handle(async (req) => {
     const refundPct = depositRefundable ? 100 : 0;
     const refundCents = depositPaid && depositRefundable ? (booking.deposit_cents ?? 0) : 0;
 
-    // Update through user-scoped client so RLS applies for non-admins
-    const supabase = userClient(req.headers.get('Authorization'));
-    const { error: updateErr } = await supabase
+    // Update via the ADMIN client. Ownership was already verified above, and
+    // the customer's RLS UPDATE policy silently filters out a booking once a
+    // company is assigned — so a user-scoped update matched 0 ROWS and returned
+    // NO error, making the cancel "succeed" without changing anything (the move
+    // then lingered on the customer's live tracker AND the company/driver
+    // queues, where it could still be worked). The status-transition trigger
+    // still gates the change (assigned/confirmed → cancelled is allowed).
+    // `.eq('status', booking.status)` guards a concurrent change, and `.select()`
+    // proves a row actually flipped so we never report a phantom success again.
+    const { data: updatedRows, error: updateErr } = await admin
       .from('bookings')
       .update({
         status: 'cancelled',
@@ -87,9 +94,14 @@ handle(async (req) => {
         cancellation_reason: reason,
         cancelled_by: user.id,
       })
-      .eq('id', booking_id);
+      .eq('id', booking_id)
+      .eq('status', booking.status)
+      .select('id');
 
     if (updateErr) throw httpError(400, updateErr.message);
+    if (!updatedRows || updatedRows.length === 0) {
+      throw httpError(409, 'Move could not be cancelled — it may have just changed status. Pull to refresh and try again.');
+    }
 
     await audit({
       actorId: user.id,

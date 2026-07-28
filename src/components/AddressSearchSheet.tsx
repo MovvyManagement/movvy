@@ -9,7 +9,7 @@ import {
   FlatList,
   Keyboard,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
   searchCalgary,
@@ -54,6 +54,11 @@ export function AddressSearchSheet({
   const inputRef = useRef<TextInput>(null);
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Real device top inset from the ROOT provider (measured before the modal
+  // mounts) — applied as explicit padding so the header never lands under the
+  // Dynamic Island. Re-measuring inside the Modal was the source of the
+  // intermittent "input hidden under the island" glitch.
+  const insets = useSafeAreaInsets();
 
   // Reset + autofocus each time the sheet opens.
   useEffect(() => {
@@ -133,12 +138,11 @@ export function AddressSearchSheet({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={close}>
-      {/* A Modal is a separate native window that the app's root SafeAreaProvider
-          doesn't reach, so SafeAreaView reads 0 insets and content slides under
-          the Dynamic Island. Giving the modal its own provider fixes the top
-          inset (and makes the back button tappable instead of hidden). */}
-      <SafeAreaProvider>
-        <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      {/* Explicit top padding = the real device inset. A Modal is a separate
+          window the root SafeAreaProvider doesn't reach, so measuring insets
+          inside it is unreliable (content intermittently slid under the Dynamic
+          Island, hiding the input + back button). */}
+      <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: '#FFFFFF' }}>
         {/* Header: back + search input pinned to the top */}
         <View className="px-4 pt-2 pb-3 border-b border-silver-100">
           <View className="flex-row items-center">
@@ -206,8 +210,7 @@ export function AddressSearchSheet({
             </Pressable>
           )}
         />
-        </SafeAreaView>
-      </SafeAreaProvider>
+      </View>
     </Modal>
   );
 }
