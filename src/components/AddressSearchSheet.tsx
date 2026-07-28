@@ -9,7 +9,7 @@ import {
   FlatList,
   Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
   searchCalgary,
@@ -133,7 +133,12 @@ export function AddressSearchSheet({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={close}>
-      <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      {/* A Modal is a separate native window that the app's root SafeAreaProvider
+          doesn't reach, so SafeAreaView reads 0 insets and content slides under
+          the Dynamic Island. Giving the modal its own provider fixes the top
+          inset (and makes the back button tappable instead of hidden). */}
+      <SafeAreaProvider>
+        <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
         {/* Header: back + search input pinned to the top */}
         <View className="px-4 pt-2 pb-3 border-b border-silver-100">
           <View className="flex-row items-center">
@@ -201,7 +206,8 @@ export function AddressSearchSheet({
             </Pressable>
           )}
         />
-      </SafeAreaView>
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }

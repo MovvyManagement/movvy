@@ -26,7 +26,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from './Avatar';
 import { MovvyMark } from './MovvyMark';
@@ -147,6 +147,7 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
           (and dropped while the keyboard is up) — leaving it on SafeAreaView
           double-counted against KeyboardAvoidingView's padding and pushed the
           input underneath the keyboard. */}
+      <SafeAreaProvider>
       <SafeAreaView className="flex-1 bg-white" edges={['top']}>
         <KeyboardAvoidingView
           // Android needs an explicit behavior inside a Modal — with
@@ -279,6 +280,7 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }
