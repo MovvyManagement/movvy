@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Easing } from 'react-native';
 import MapView, {
   Marker,
@@ -7,7 +7,7 @@ import MapView, {
   Polyline,
   PROVIDER_GOOGLE,
 } from 'react-native-maps';
-import { CALGARY } from '@/lib/geocoding';
+import { CALGARY, fetchRoute, type LatLng } from '@/lib/geocoding';
 
 // Native (iOS / Android) implementation of <LiveMap />.
 // Metro picks this file over LiveMap.tsx when the platform is iOS or Android.
@@ -34,6 +34,57 @@ export function LiveMap({ height = 220, pickup, dropoff, showRoute, initialCente
   const ref = useRef<MapView | null>(null);
   const driverCoord = useRef<AnimatedRegion | null>(null);
   const isDriverPin = pickup?.label === 'Driver';
+
+  // Road-following route coordinates. Null until fetched (or when road routing
+  // is unavailable) — in which case we draw the straight pickup→dropoff line.
+  const [routeCoords, setRouteCoords] = useState<LatLng[] | null>(null);
+
+  // Fit the visible region to the route if we have one, else to the two pins.
+  // Called both from the coords effect AND from onMapReady, because on first
+  // mount the map often isn't laid out yet when the effect first runs — that
+  // race is why the Moves map didn't reliably frame both pins.
+  const fitToPins = () => {
+    if (!ref.current) return;
+    if (routeCoords && routeCoords.length >= 2) {
+      ref.current.fitToCoordinates(routeCoords, {
+        edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
+        animated: true,
+      });
+      return;
+    }
+    if (pickup && dropoff) {
+      ref.current.fitToCoordinates(
+        [
+          { latitude: pickup.lat, longitude: pickup.lng },
+          { latitude: dropoff.lat, longitude: dropoff.lng },
+        ],
+        { edgePadding: { top: 60, right: 60, bottom: 60, left: 60 }, animated: true }
+      );
+    }
+  };
+
+  // Fetch a road-following route for a STATIC pickup→dropoff (not the live
+  // driver pin, which moves every ping — re-routing on each would be costly).
+  // Falls back to the straight line when the backend can't provide roads.
+  useEffect(() => {
+    if (!showRoute || isDriverPin || !pickup || !dropoff) {
+      setRouteCoords(null);
+      return;
+    }
+    let cancelled = false;
+    const ctrl = new AbortController();
+    fetchRoute(
+      { lat: pickup.lat, lng: pickup.lng },
+      { lat: dropoff.lat, lng: dropoff.lng },
+      ctrl.signal,
+    ).then((coords) => {
+      if (!cancelled) setRouteCoords(coords);
+    });
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
+  }, [showRoute, isDriverPin, pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng]);
 
   // 3.1: smooth driver-pin interpolation
   useEffect(() => {
@@ -62,13 +113,7 @@ export function LiveMap({ height = 220, pickup, dropoff, showRoute, initialCente
   useEffect(() => {
     if (!ref.current) return;
     if (pickup && dropoff) {
-      ref.current.fitToCoordinates(
-        [
-          { latitude: pickup.lat, longitude: pickup.lng },
-          { latitude: dropoff.lat, longitude: dropoff.lng },
-        ],
-        { edgePadding: { top: 60, right: 60, bottom: 60, left: 60 }, animated: true }
-      );
+      fitToPins();
     } else if (pickup) {
       ref.current.animateToRegion(
         {
@@ -80,7 +125,8 @@ export function LiveMap({ height = 220, pickup, dropoff, showRoute, initialCente
         500
       );
     }
-  }, [pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, routeCoords]);
 
   return (
     <View
@@ -111,6 +157,9 @@ export function LiveMap({ height = 220, pickup, dropoff, showRoute, initialCente
         showsMyLocationButton={false}
         showsPointsOfInterest={false}
         toolbarEnabled={false}
+        // Re-fit once the map is actually laid out — the mount-time effect can
+        // fire before the map is ready, which left the Moves map un-framed.
+        onMapReady={fitToPins}
       >
         {pickup ? (
           isDriverPin && driverCoord.current ? (
@@ -136,10 +185,16 @@ export function LiveMap({ height = 220, pickup, dropoff, showRoute, initialCente
         ) : null}
         {showRoute && pickup && dropoff ? (
           <Polyline
-            coordinates={[
-              { latitude: pickup.lat, longitude: pickup.lng },
-              { latitude: dropoff.lat, longitude: dropoff.lng },
-            ]}
+            // Road-following coordinates when the directions backend gave us a
+            // route; otherwise the straight pickup→dropoff segment.
+            coordinates={
+              routeCoords && routeCoords.length >= 2
+                ? routeCoords
+                : [
+                    { latitude: pickup.lat, longitude: pickup.lng },
+                    { latitude: dropoff.lat, longitude: dropoff.lng },
+                  ]
+            }
             strokeColor="#047857"
             strokeWidth={4}
           />

@@ -25,7 +25,11 @@ export interface AppNotification {
   created_at: string;
 }
 
-/** Latest N in-app notifications for the signed-in user, newest first. */
+/** Latest N UNREAD in-app notifications for the signed-in user, newest first.
+ *  The inbox is unread-only by design: opening it marks everything read, and a
+ *  read notification drops out of the list so it never lingers ("deleted from
+ *  the bar"). The row stays in the table for audit/history — we just stop
+ *  surfacing it once it's been seen. */
 export function useNotifications(limit = 30) {
   const { user } = useAuth();
   return useQuery({
@@ -38,6 +42,7 @@ export function useNotifications(limit = 30) {
         .select('id, profile_id, category, title, body, data, read_at, created_at')
         .eq('profile_id', user!.id)
         .eq('channel', 'in_app')
+        .is('read_at', null)
         .order('created_at', { ascending: false })
         .limit(limit);
       if (error) throw error;

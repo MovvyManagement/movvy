@@ -25,6 +25,7 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -53,9 +54,15 @@ interface Props {
   /** When set, a "⋯" header button appears that opens more options — used by
    *  the support chat to reach SOS / claims / disputes without a hub menu. */
   onMore?: () => void;
+  /** A real phone number (E.164, e.g. "+16134163426") the header call button
+   *  should dial directly. Used by the support chat, where the Movvy support
+   *  line is a real number the customer can just call. When omitted (crew↔
+   *  customer chat) the button explains that calls route through a Movvy proxy
+   *  line, which isn't live yet. */
+  callNumber?: string;
 }
 
-export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose, peerName, onMore }: Props) {
+export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose, peerName, onMore, callNumber }: Props) {
   const { user } = useAuth();
   const ensureThread = useEnsureBookingThread();
   const send = useSendChatMessage();
@@ -182,12 +189,22 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
                 </Pressable>
               ) : null}
               <Pressable
-                onPress={() =>
+                onPress={() => {
+                  // Support chat → dial the real Movvy support line directly so
+                  // the customer lands in their phone dialer, number prefilled.
+                  if (callNumber) {
+                    const tel = `tel:${callNumber}`;
+                    Linking.openURL(tel).catch(() =>
+                      Alert.alert('Call', `Dial ${callNumber} to reach Movvy support.`),
+                    );
+                    return;
+                  }
+                  // Crew↔customer chat → private proxy line (not live yet).
                   Alert.alert(
                     'Calling via Movvy line',
                     "We'll connect you through a Movvy number so your real phone stays private. (Activates once Twilio is wired.)"
-                  )
-                }
+                  );
+                }}
                 className="h-10 w-10 rounded-full bg-brand-600 items-center justify-center"
               >
                 <Ionicons name="call" size={18} color="#fff" />

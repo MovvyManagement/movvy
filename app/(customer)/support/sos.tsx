@@ -276,6 +276,7 @@ export default function SosScreen() {
         visible={!!chatThreadId}
         threadId={chatThreadId}
         peerName="Movvy support"
+        callNumber="+16134163426"
         onClose={() => {
           setChatThreadId(null);
           router.back();

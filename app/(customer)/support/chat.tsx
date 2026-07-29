@@ -39,6 +39,7 @@ export default function SupportChatScreen() {
           visible
           threadId={threadId}
           peerName="Movvy Support"
+          callNumber="+16134163426"
           onClose={() => router.back()}
           onMore={() => router.push('/(customer)/support')}
         />

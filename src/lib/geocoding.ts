@@ -176,6 +176,71 @@ export function needsResolution(r: GeocodeResult): boolean {
   return !!r.place_id && (!Number.isFinite(Number(r.lat)) || !Number.isFinite(Number(r.lng)));
 }
 
+export interface LatLng { latitude: number; longitude: number; }
+
+/**
+ * Fetch a ROAD-FOLLOWING route between two points for the map. Returns the
+ * decoded polyline coordinates (street-tracing), or `null` when road routing
+ * isn't available (backend off, budget blown, Routes API not enabled) — the
+ * caller then falls back to a straight line so the map still renders.
+ */
+export async function fetchRoute(
+  origin: { lat: number; lng: number },
+  destination: { lat: number; lng: number },
+  signal?: AbortSignal,
+): Promise<LatLng[] | null> {
+  if (!supabaseConfigured) return null;
+  try {
+    const { data, error } = await supabase.functions.invoke('directions', {
+      body: { origin, destination },
+    });
+    if (signal?.aborted) return null;
+    if (error) throw error;
+    if (data?.error || !data?.polyline) return null;
+    const coords = decodePolyline(data.polyline as string);
+    return coords.length >= 2 ? coords : null;
+  } catch (e) {
+    if (__DEV__) console.warn('[geocoding] directions fetch failed, straight line:', e);
+    return null;
+  }
+}
+
+/**
+ * Decode a Google "encoded polyline" string into {latitude, longitude} points.
+ * Standard algorithm (precision 5) — no external dependency so it works inside
+ * the Expo/Hermes runtime with zero extra bundle weight.
+ */
+export function decodePolyline(encoded: string): LatLng[] {
+  const points: LatLng[] = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const len = encoded.length;
+  while (index < len) {
+    let result = 0;
+    let shift = 0;
+    let b: number;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : result >> 1;
+
+    result = 0;
+    shift = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    lng += (result & 1) ? ~(result >> 1) : result >> 1;
+
+    points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
+  }
+  return points;
+}
+
 /** Direct Nominatim — kept as the demo-mode fallback only. Alberta-wide. */
 async function nominatimDirect(q: string, signal?: AbortSignal): Promise<GeocodeResult[]> {
   const params = new URLSearchParams({

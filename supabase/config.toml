@@ -96,6 +96,8 @@ verify_jwt = true
 verify_jwt = true
 [functions.routes-distance]
 verify_jwt = true
+[functions.directions]
+verify_jwt = true
 [functions.tips-submit]
 verify_jwt = true
 [functions.proxy-session-create]

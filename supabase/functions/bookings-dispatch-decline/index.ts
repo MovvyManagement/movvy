@@ -32,8 +32,6 @@ const Body = z.object({
   reason: z.string().max(200).optional(),
 });
 
-const RELEASE_WINDOW_SECONDS = 5 * 60;
-
 handle(async (req) => {
   const cors = corsHeaders(req);
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
@@ -96,17 +94,12 @@ handle(async (req) => {
       && booking.assigned_company_id === company_id
       && booking.assigned_driver_profile_id === null
     ) {
-      // (b) Release window check
-      if (booking.dispatch_accepted_at) {
-        const acceptedMs = new Date(booking.dispatch_accepted_at).getTime();
-        const elapsedSec = (Date.now() - acceptedMs) / 1000;
-        if (elapsedSec > RELEASE_WINDOW_SECONDS) {
-          throw httpError(
-            403,
-            "You can only release a booking within 5 minutes of accepting it. After that, contact support.",
-          );
-        }
-      }
+      // (b) A company that accepted a job but can't staff it releases it back to
+      // the open pool. We used to cap this at 5 minutes after accepting, but that
+      // stranded jobs an operator genuinely couldn't cover — a no-show is far
+      // worse than a re-listing. Release is still only reachable while NO driver
+      // is assigned (checked above), so it can't yank a job out from under a
+      // crew that's already rolling.
 
       // Push it back to searching
       const { data, error: uErr } = await admin

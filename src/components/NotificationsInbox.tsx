@@ -15,7 +15,7 @@
 //              (companies have no referrals surface, so those stay put)
 // =============================================================================
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -44,7 +44,42 @@ export function NotificationsInbox({ surface }: { surface: NotificationSurface }
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
 
-  const unreadCount = (items ?? []).filter((n) => !n.read_at).length;
+  // Opening the inbox marks everything read, and the query is unread-only —
+  // so the moment we mark-all, the live `items` would empty out while the user
+  // is still looking at the list. To avoid that flicker: snapshot the first loaded
+  // batch and render the snapshot for this visit. The rows stay put; they're
+  // simply gone the NEXT time the inbox opens (the query no longer returns
+  // them). `snapshot === null` means "haven't captured this visit yet".
+  const [snapshot, setSnapshot] = useState<AppNotification[] | null>(null);
+  const markedRef = useRef(false);
+
+  useEffect(() => {
+    if (snapshot === null && items) {
+      setSnapshot(items);
+      // Auto-mark the whole batch read on open (once), so the badge clears and
+      // these don't reappear on the next visit.
+      if (!markedRef.current && items.some((n) => !n.read_at)) {
+        markedRef.current = true;
+        markAll.mutate();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, snapshot]);
+
+  // Pull-to-refresh re-captures the latest unread batch (and marks it read).
+  const onRefresh = async () => {
+    markedRef.current = false;
+    const r = await refetch();
+    const fresh = (r.data ?? []) as AppNotification[];
+    setSnapshot(fresh);
+    if (!markedRef.current && fresh.some((n) => !n.read_at)) {
+      markedRef.current = true;
+      markAll.mutate();
+    }
+  };
+
+  // Render the frozen snapshot, not the live (soon-empty) query result.
+  const shown = snapshot ?? items ?? [];
 
   const onTap = (n: AppNotification) => {
     if (!n.read_at) markRead.mutate(n.id);
@@ -87,34 +122,18 @@ export function NotificationsInbox({ surface }: { surface: NotificationSurface }
   return (
     <SafeAreaView className="flex-1 bg-silver-50 dark:bg-night-900" edges={['top']}>
       <View className="bg-white dark:bg-night-100">
-        <ScreenHeader
-          title="Notifications"
-          subtitle={unreadCount > 0 ? `${unreadCount} unread` : undefined}
-          right={
-            unreadCount > 0 ? (
-              <Pressable
-                onPress={() => markAll.mutate()}
-                hitSlop={6}
-                disabled={markAll.isPending}
-              >
-                <Text className="text-xs font-semibold text-brand-700">
-                  Mark all read
-                </Text>
-              </Pressable>
-            ) : null
-          }
-        />
+        <ScreenHeader title="Notifications" />
       </View>
 
-      {isLoading && !items ? (
+      {isLoading && snapshot === null ? (
         <ScrollView contentContainerStyle={{ padding: 16 }}>
           <CardSkeleton count={4} />
         </ScrollView>
-      ) : !items || items.length === 0 ? (
+      ) : shown.length === 0 ? (
         <EmptyState
           icon="notifications-outline"
-          title="No notifications yet"
-          body="Booking confirmations, status alerts, and move completion notices will show up here."
+          title="You're all caught up"
+          body="New booking confirmations, status alerts, and move updates will show up here."
         />
       ) : (
         <ScrollView
@@ -122,12 +141,12 @@ export function NotificationsInbox({ surface }: { surface: NotificationSurface }
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
-              onRefresh={() => refetch()}
+              onRefresh={onRefresh}
               tintColor="#16A34A"
             />
           }
         >
-          {items.map((n) => (
+          {shown.map((n) => (
             <NotificationRow key={n.id} item={n} onPress={() => onTap(n)} />
           ))}
         </ScrollView>
