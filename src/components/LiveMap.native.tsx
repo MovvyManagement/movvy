@@ -63,13 +63,29 @@ export function LiveMap({ height = 220, pickup, dropoff, showRoute, initialCente
     }
   };
 
-  // Fetch a road-following route for a STATIC pickup→dropoff (not the live
-  // driver pin, which moves every ping — re-routing on each would be costly).
-  // Falls back to the straight line when the backend can't provide roads.
+  // Origin of the last route we fetched — lets us skip re-routing on every GPS
+  // ping when the origin is a moving pin (driver). We only re-fetch once the
+  // pin has drifted far enough that the old road route is stale.
+  const lastRouteOrigin = useRef<{ lat: number; lng: number } | null>(null);
+
+  // Fetch a road-following route from origin → destination so the line traces
+  // streets instead of cutting straight across. Works for BOTH a static
+  // pickup→dropoff (booking preview, company/driver job cards) AND a live
+  // moving origin (the driver pin en route to pickup/drop-off) — for the live
+  // case we throttle by distance so a car doesn't trigger a paid call every
+  // ~10s ping. Falls back to the straight line when the backend can't route.
+  const isLiveOrigin = pickup?.label === 'Driver' || pickup?.label === 'You';
   useEffect(() => {
-    if (!showRoute || isDriverPin || !pickup || !dropoff) {
+    if (!showRoute || !pickup || !dropoff) {
       setRouteCoords(null);
+      lastRouteOrigin.current = null;
       return;
+    }
+    // Throttle re-routing for a moving origin: reuse the current route until
+    // the driver has moved > ~400 m from where we last routed.
+    if (isLiveOrigin && routeCoords && lastRouteOrigin.current) {
+      const moved = haversineMeters(lastRouteOrigin.current, { lat: pickup.lat, lng: pickup.lng });
+      if (moved < 400) return;
     }
     let cancelled = false;
     const ctrl = new AbortController();
@@ -78,13 +94,16 @@ export function LiveMap({ height = 220, pickup, dropoff, showRoute, initialCente
       { lat: dropoff.lat, lng: dropoff.lng },
       ctrl.signal,
     ).then((coords) => {
-      if (!cancelled) setRouteCoords(coords);
+      if (cancelled) return;
+      setRouteCoords(coords);
+      if (coords) lastRouteOrigin.current = { lat: pickup.lat, lng: pickup.lng };
     });
     return () => {
       cancelled = true;
       ctrl.abort();
     };
-  }, [showRoute, isDriverPin, pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showRoute, isLiveOrigin, pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng]);
 
   // 3.1: smooth driver-pin interpolation
   useEffect(() => {
@@ -202,4 +221,16 @@ export function LiveMap({ height = 220, pickup, dropoff, showRoute, initialCente
       </MapView>
     </View>
   );
+}
+
+// Great-circle distance in metres — used to throttle live re-routing.
+function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6_371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
 }

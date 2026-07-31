@@ -368,7 +368,13 @@ export default function LiveMove() {
               : undefined
           }
           dropoff={
-            booking.dropoff?.lat
+            // While the driver is live, route to the CURRENT leg's target
+            // (pickup while headed to pickup, drop-off after) so the road line
+            // matches where they're actually driving — not always the final
+            // drop-off. Falls back to the drop-off when there's no live target.
+            driverPing && targetCoords?.lat
+              ? { lat: targetCoords.lat as number, lng: targetCoords.lng as number, label: targetLabel ?? 'Destination' }
+              : booking.dropoff?.lat
               ? { lat: booking.dropoff.lat as number, lng: booking.dropoff.lng as number, label: booking.dropoff.line1 }
               : undefined
           }
