@@ -40,7 +40,6 @@ import { TERMS_VERSION } from '@/lib/brand';
 import { useToast } from '@/components/Toast';
 import { haptic } from '@/lib/haptics';
 
-type PartnerKind = 'solo' | 'company';
 type Step = 'form' | 'otp';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -51,7 +50,6 @@ export default function PartnerSignup() {
 
   // ─── State ────────────────────────────────────────────────────────────────
   const [step, setStep] = useState<Step>('form');
-  const [kind, setKind] = useState<PartnerKind>('solo');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -99,9 +97,12 @@ export default function PartnerSignup() {
     };
   }, [resendIn]);
 
+  // Everyone who signs up fresh is starting their OWN organization, so they're
+  // the admin. A solo operator is just a company of one — they can add crew
+  // later or never. People who work FOR an existing org never come here; they
+  // join with a code via /(auth)/partner-join.
   const continueOnboarding = () => {
-    if (kind === 'solo') router.replace('/(mover)/onboarding/personal');
-    else router.replace('/(company)/onboarding/company-info');
+    router.replace('/(company)/onboarding/company-info');
   };
 
   // ─── Step 1 → Step 2: signUp with phone + send SMS OTP ───────────────────
@@ -130,9 +131,9 @@ export default function PartnerSignup() {
     setError(null);
     setLoading(true);
     try {
-      // Role is encoded in metadata so handle_new_user writes the right
-      // partner role to profiles.
-      const role = kind === 'solo' ? 'driver' : 'company_owner';
+      // Fresh partner signup always creates an org admin (company_owner).
+      // Crew join an existing org with a code instead of signing up here.
+      const role = 'company_owner';
       const meta = {
         full_name: name.trim(),
         role,
@@ -286,14 +287,25 @@ export default function PartnerSignup() {
               />
             )}
             {step === 'form' ? (
-              <View className="mt-3 flex-row items-center justify-center">
-                <Text className="text-xs text-silver-500">Already a partner? </Text>
-                <Link
-                  href="/(auth)/partner-signin"
-                  className="text-xs font-semibold text-brand-700"
-                >
-                  Sign in with team code →
-                </Link>
+              <View className="mt-3 items-center gap-1.5">
+                <View className="flex-row items-center justify-center">
+                  <Text className="text-xs text-silver-500">Already a partner? </Text>
+                  <Link
+                    href="/(auth)/partner-signin"
+                    className="text-xs font-semibold text-brand-700"
+                  >
+                    Sign in →
+                  </Link>
+                </View>
+                <View className="flex-row items-center justify-center">
+                  <Text className="text-xs text-silver-500">Got a company invite code? </Text>
+                  <Link
+                    href="/(auth)/partner-join"
+                    className="text-xs font-semibold text-brand-700"
+                  >
+                    Join here →
+                  </Link>
+                </View>
               </View>
             ) : null}
           </View>
@@ -313,38 +325,13 @@ export default function PartnerSignup() {
             </Text>
           </View>
           <Text className="mt-3 text-3xl font-bold text-ink-900 leading-9">
-            Join Movvy.{'\n'}Start earning.
+            Start your{'\n'}moving company.
           </Text>
           <Text className="mt-2 text-base text-silver-500 leading-6">
-            Same account whether you're a 2-person crew or a fleet operator.
-            Pick which one you are and we'll tailor the rest.
+            Set up your company on Movvy — solo operator or a full fleet, it's
+            the same account. You can add drivers and crew any time (or work
+            solo). Got an invite from a company? Join with their code instead.
           </Text>
-        </View>
-
-        <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500 mt-6 mb-2">
-          I'm signing up as a…
-        </Text>
-        <View className="flex-row gap-3">
-          <Pressable
-            onPress={() => setKind('solo')}
-            className={`flex-1 rounded-3xl border p-4 ${
-              kind === 'solo' ? 'border-brand-600 bg-brand-50' : 'border-silver-200 bg-white'
-            }`}
-          >
-            <Ionicons name="people" size={22} color={kind === 'solo' ? '#047857' : '#0A0A0A'} />
-            <Text className="mt-2 text-base font-bold text-ink-900">Solo crew</Text>
-            <Text className="text-xs text-silver-500 mt-1">2-person team · 1 driver + 1 mover</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setKind('company')}
-            className={`flex-1 rounded-3xl border p-4 ${
-              kind === 'company' ? 'border-brand-600 bg-brand-50' : 'border-silver-200 bg-white'
-            }`}
-          >
-            <Ionicons name="business" size={22} color={kind === 'company' ? '#047857' : '#0A0A0A'} />
-            <Text className="mt-2 text-base font-bold text-ink-900">Moving company</Text>
-            <Text className="text-xs text-silver-500 mt-1">Fleet · multiple drivers</Text>
-          </Pressable>
         </View>
 
         <View className="mt-6 gap-4">
@@ -472,11 +459,8 @@ export default function PartnerSignup() {
 
         <View className="my-4 rounded-2xl bg-silver-50 p-4">
           <Text className="text-[11px] text-silver-500 leading-5">
-            After you verify your phone we'll guide you through{' '}
-            {kind === 'solo'
-              ? 'team setup, vehicle, and document verification'
-              : 'company info, driver roster, and document verification'}
-            . Approval usually within 24–48 hours.
+            After you verify your phone we'll guide you through company info and
+            document verification. Approval usually within 24–48 hours.
           </Text>
         </View>
       </>

@@ -235,19 +235,36 @@ export default function PartnerSignIn() {
               </Text>
             </View>
 
-            {/* Single onboarding cross-link — if they don't have an account
-                yet, this is the way in. Goes to /partner (the onboarding
-                hub where they pick "Two-person crew" or "Company"). */}
-            <View className="mt-6 mb-4 items-center">
-              <Text className="text-sm text-silver-500">Don't have an account yet?</Text>
+            {/* Two ways in for someone WITHOUT an account yet:
+                  • Invited to an existing company → JOIN with the code (this is
+                    the path a new driver/crew takes — they set a password here
+                    for the first time, then wait for the admin to approve).
+                  • Starting their own company → onboard as a new org admin.
+                This block is the fix for "I got a code but there's nowhere to
+                create my login" — the join path was previously unreachable from
+                the sign-in screen. */}
+            <View className="mt-6 mb-4 gap-3">
               <Pressable
-                onPress={() => router.push('/partner')}
-                className="mt-1"
+                onPress={() => router.push('/(auth)/partner-join')}
+                className="rounded-2xl border border-brand-200 bg-brand-50 p-4 flex-row items-center active:opacity-80"
               >
-                <Text className="text-sm font-semibold text-brand-700">
-                  Onboard as a new partner →
-                </Text>
+                <Ionicons name="people-outline" size={20} color="#047857" />
+                <View className="ml-3 flex-1">
+                  <Text className="text-sm font-bold text-ink-900">
+                    Invited to a company? Join here
+                  </Text>
+                  <Text className="text-xs text-silver-500 mt-0.5">
+                    New driver or crew — enter your invite code and set a password.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#047857" />
               </Pressable>
+              <View className="flex-row items-center justify-center">
+                <Text className="text-sm text-silver-500">Starting your own company? </Text>
+                <Pressable onPress={() => router.push('/partner')}>
+                  <Text className="text-sm font-semibold text-brand-700">Sign up →</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         </ScrollView>
