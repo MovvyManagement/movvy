@@ -63,7 +63,7 @@ import { LiveMap } from '@/components/LiveMap';
 import { openInMaps } from '@/lib/maps';
 import { fmtCurrency, fmtDateShort, fmtRelativeAgo } from '@/lib/format';
 import { jobUrgency } from '@/lib/partnerJobs';
-import { supabase, supabaseConfigured } from '@/lib/supabase';
+import { supabase, supabaseConfigured, useAuth } from '@/lib/supabase';
 import { haptic } from '@/lib/haptics';
 
 const TABS = ['Requests', 'Needs Driver', 'In Progress', 'Completed'] as const;
@@ -74,6 +74,7 @@ const IN_FLIGHT = ['confirmed', 'on_the_way', 'arrived', 'loading', 'in_transit'
 export default function CompanyJobs() {
   const [tab, setTab] = useState<Tab>('Requests');
   const { data: membership, isLoading: memLoading } = useMyMembership();
+  const { user } = useAuth();
   const companyId = membership?.kind === 'company' ? membership.company_id : null;
   const isDispatcher =
     membership?.kind === 'company' &&
@@ -348,6 +349,7 @@ export default function CompanyJobs() {
       <AssignDriverModal
         target={assignTarget}
         companyId={companyId!}
+        selfProfileId={user?.id ?? null}
         busy={assign.isPending}
         onClose={() => setAssignTarget(null)}
         onAssign={async (driverProfileId) => {
@@ -359,7 +361,13 @@ export default function CompanyJobs() {
               driver_profile_id: driverProfileId,
             });
             haptic.success();
+            // Assigning it to YOURSELF means you're driving it — jump straight
+            // into the crew perform screen (Begin Move / live tracking). A
+            // just-assigned job doesn't surface on the dispatch board yet, so
+            // this hand-off is what lets a one-person company run its own move.
+            const isSelf = driverProfileId === user?.id;
             setAssignTarget(null);
+            if (isSelf) router.push('/(mover)/(tabs)/active');
           } catch (e: any) {
             Alert.alert('Could not assign', e?.message ?? 'Try again.');
           }
@@ -516,6 +524,14 @@ function NeedsDriverCard({
 }
 
 function SummaryCard({ row }: { row: any }) {
+  const { user } = useAuth();
+  // When the admin assigned the move to THEMSELVES, give them a way back into
+  // the perform screen if they navigated away mid-move.
+  const mineToPerform =
+    !!user?.id &&
+    row.assigned_driver_profile_id === user.id &&
+    row.status !== 'completed' &&
+    row.status !== 'cancelled';
   return (
     <View className="mb-3">
       <Card>
@@ -554,6 +570,16 @@ function SummaryCard({ row }: { row: any }) {
           </View>
           <Text className="text-xs text-silver-500">#{row.short_code}</Text>
         </View>
+
+        {mineToPerform ? (
+          <Pressable
+            onPress={() => router.push('/(mover)/(tabs)/active')}
+            className="mt-4 h-12 rounded-2xl bg-brand-600 flex-row items-center justify-center active:opacity-90"
+          >
+            <Ionicons name="navigate" size={16} color="#fff" />
+            <Text className="ml-2 text-sm font-bold text-white">Open move</Text>
+          </Pressable>
+        ) : null}
       </Card>
     </View>
   );
@@ -593,12 +619,14 @@ function statusTone(status: string): 'success' | 'warning' | 'brand' | 'neutral'
 function AssignDriverModal({
   target,
   companyId,
+  selfProfileId,
   busy,
   onClose,
   onAssign,
 }: {
   target: DispatchQueueRow | null;
   companyId: string;
+  selfProfileId: string | null;
   busy: boolean;
   onClose: () => void;
   onAssign: (driverProfileId: string) => void;
@@ -634,16 +662,44 @@ function AssignDriverModal({
           </View>
 
           <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 28 }}>
+            {/* Assign to yourself — you're driving this one. Works even with an
+                empty roster, so a one-person company can run its own move. */}
+            {selfProfileId ? (
+              <Pressable
+                onPress={() => onAssign(selfProfileId)}
+                disabled={busy}
+                className="mb-3 flex-row items-center rounded-2xl border border-brand-200 bg-brand-50 p-4 active:opacity-80"
+              >
+                <View className="h-11 w-11 rounded-full bg-brand-600 items-center justify-center">
+                  <Ionicons name="person" size={20} color="#fff" />
+                </View>
+                <View className="ml-3 flex-1">
+                  <Text className="text-sm font-bold text-ink-900">I'll drive this one</Text>
+                  <Text className="text-xs text-silver-500 mt-0.5">
+                    Assign to yourself and jump into the move
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#047857" />
+              </Pressable>
+            ) : null}
+
             {isLoading ? (
               <View className="py-10 items-center">
                 <ActivityIndicator color="#16A34A" />
               </View>
             ) : !roster || roster.length === 0 ? (
+              selfProfileId ? (
+                <Text className="text-center text-xs text-silver-500 px-4 py-6">
+                  No crew on your roster yet — add drivers from the Company tab, or
+                  just drive it yourself above.
+                </Text>
+              ) : (
               <EmptyState
                 icon="people-outline"
                 title="No drivers on your roster"
                 body="Add drivers from the Company tab → Drivers — they'll get an invite to join your fleet."
               />
+              )
             ) : (
               roster
                 .slice()
