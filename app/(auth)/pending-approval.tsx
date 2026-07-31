@@ -51,7 +51,14 @@ export default function PendingApproval() {
       if (kind) {
         qc.invalidateQueries({ queryKey: ['my-membership'] });
         qc.invalidateQueries({ queryKey: ['my-pending-membership'] });
-        router.replace(kind === 'company' ? '/(company)/(tabs)/dashboard' : '/(mover)/(tabs)/dashboard');
+        // Only an org admin gets the company (price/dispatch) surface. Crew —
+        // which is what a just-approved join almost always is — land on the
+        // crew surface with no dollar figures anywhere.
+        const isAdmin =
+          kind === 'company' && membership.data?.org_role === 'admin';
+        router.replace(
+          isAdmin ? '/(company)/(tabs)/dashboard' : '/(mover)/(tabs)/dashboard',
+        );
       }
       // else: nothing to route on yet — render the fallback + keep polling.
     }

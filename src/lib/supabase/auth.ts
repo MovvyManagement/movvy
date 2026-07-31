@@ -80,7 +80,16 @@ export async function login(input: unknown): Promise<AuthResult> {
 
 export async function loginPartner(
   input: unknown,
-): Promise<AuthResult<{ kind: 'team' | 'company'; id: string; status: 'active' | 'pending_approval' }>> {
+): Promise<
+  AuthResult<{
+    kind: 'team' | 'company';
+    id: string;
+    status: 'active' | 'pending_approval';
+    // Merged model: admins run the org (see prices, assign); crew perform moves
+    // and never see money. Drives which partner surface we land them on.
+    org_role?: 'admin' | 'crew' | null;
+  }>
+> {
   const parsed = LoginInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };
 
@@ -180,7 +189,7 @@ export async function loginPartner(
   }
   const { data: cm } = await supabase
     .from('company_members')
-    .select('status')
+    .select('status, org_role')
     .eq('company_id', company.id)
     .eq('profile_id', user.id)
     .is('removed_at', null)
@@ -200,7 +209,12 @@ export async function loginPartner(
     }
     return {
       ok: true,
-      data: { kind: 'company', id: company.id, status: cm.status as 'active' | 'pending_approval' },
+      data: {
+        kind: 'company',
+        id: company.id,
+        status: cm.status as 'active' | 'pending_approval',
+        org_role: ((cm as any).org_role ?? 'crew') as 'admin' | 'crew',
+      },
     };
   }
   // No membership row yet — see if there's a legacy pending invite waiting.

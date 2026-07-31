@@ -27,6 +27,10 @@ interface BillingTimerProps {
   actualTotalCents?: number | null;
   /** Pre-computed actual_driver_payout_cents from DB when complete. */
   actualDriverPayoutCents?: number | null;
+  /** Hourly crew are paid a wage, not per move — they must never see any
+   *  dollar figure. When true we keep the running/elapsed CLOCK but drop every
+   *  money amount. */
+  hideMoney?: boolean;
 }
 
 export function BillingTimer({
@@ -36,6 +40,7 @@ export function BillingTimer({
   showDriverPayout,
   actualTotalCents,
   actualDriverPayoutCents,
+  hideMoney,
 }: BillingTimerProps) {
   // 1Hz tick — only when the move is actively running. We stop the
   // interval the moment completedAt lands so finished cards don't waste
@@ -100,12 +105,18 @@ export function BillingTimer({
           </View>
           <View className="ml-3 flex-1">
             <Text className="text-xs font-semibold uppercase tracking-wider text-brand-700">
-              Move complete · billed for {clock}
+              Move complete · worked {clock}
             </Text>
-            <Text className="text-2xl font-bold text-ink-900 mt-1">
-              ${(displayCents / 100).toFixed(2)}
-            </Text>
-            <Text className="text-xs text-silver-600 mt-0.5">{displayLabel}</Text>
+            {hideMoney ? (
+              <Text className="text-2xl font-bold text-ink-900 mt-1">Done</Text>
+            ) : (
+              <>
+                <Text className="text-2xl font-bold text-ink-900 mt-1">
+                  ${(displayCents / 100).toFixed(2)}
+                </Text>
+                <Text className="text-xs text-silver-600 mt-0.5">{displayLabel}</Text>
+              </>
+            )}
           </View>
         </View>
       </View>
@@ -132,17 +143,19 @@ export function BillingTimer({
             {clock}
           </Text>
         </View>
-        <View className="items-end">
-          <Text className="text-xs font-semibold uppercase tracking-wider text-brand-300">
-            {displayLabel}
-          </Text>
-          <Text
-            className="text-2xl font-bold text-white mt-1"
-            style={{ fontVariant: ['tabular-nums'] }}
-          >
-            ${(displayCents / 100).toFixed(2)}
-          </Text>
-        </View>
+        {hideMoney ? null : (
+          <View className="items-end">
+            <Text className="text-xs font-semibold uppercase tracking-wider text-brand-300">
+              {displayLabel}
+            </Text>
+            <Text
+              className="text-2xl font-bold text-white mt-1"
+              style={{ fontVariant: ['tabular-nums'] }}
+            >
+              ${(displayCents / 100).toFixed(2)}
+            </Text>
+          </View>
+        )}
       </View>
     </View>
   );

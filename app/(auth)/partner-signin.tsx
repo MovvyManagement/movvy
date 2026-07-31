@@ -86,12 +86,15 @@ export default function PartnerSignIn() {
         router.replace('/(auth)/pending-approval');
         return;
       }
-      // Route into the right partner surface — each lands on its Dashboard.
-      if (res.data?.kind === 'company') {
-        router.replace('/(company)/(tabs)/dashboard');
-      } else {
-        router.replace('/(mover)/(tabs)/dashboard');
-      }
+      // Route by ROLE, not org type: only an org ADMIN gets the company
+      // dashboard (prices, dispatch, assign). Crew — and legacy team members —
+      // land on the crew surface, which shows jobs to accept + perform and
+      // never shows dollar figures. This is what makes "the admin is the only
+      // one who sees prices" true at the navigation level.
+      const isAdmin = res.data?.kind === 'company' && res.data?.org_role === 'admin';
+      router.replace(
+        isAdmin ? '/(company)/(tabs)/dashboard' : '/(mover)/(tabs)/dashboard',
+      );
     } catch (e: any) {
       setError(e?.message ?? 'Could not sign in. Check your connection and try again.');
     } finally {

@@ -313,7 +313,8 @@ export default function MoverActive() {
           hourlyRateCustomerCents={(liveJob as any)?.hourly_rate_customer_cents ?? null}
           actualTotalCents={(liveJob as any)?.actual_total_cents ?? null}
           actualDriverPayoutCents={(liveJob as any)?.actual_driver_payout_cents ?? null}
-          showDriverPayout
+          showDriverPayout={!isHourly}
+          hideMoney={isHourly}
         />
 
         {/* In-app turn-by-turn navigation. Replaces the previous "Open in
