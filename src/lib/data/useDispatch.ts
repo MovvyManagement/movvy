@@ -106,16 +106,22 @@ export function useMyMembership() {
       // Look for a company membership first. We pull the company's
       // primary_city_id + the joined city slug so downstream feeds can
       // scope jobs to the right market instead of hardcoding 'calgary'.
-      const { data: company } = await supabase
+      const { data: memberships } = await supabase
         .from('company_members')
         .select(
           'company_id, role, org_role, companies!inner(display_name, primary_city_id, cities:primary_city_id(slug, name, region))',
         )
         .eq('profile_id', user!.id)
         .eq('status', 'active')
-        .is('removed_at', null)
-        .limit(1)
-        .maybeSingle();
+        .is('removed_at', null);
+      // A person can belong to two orgs at once: their OWN (org_role='admin',
+      // created at signup) and a crew they JOINED (org_role='crew'). When
+      // they've joined someone, that's the context they're working in — prefer
+      // it. Otherwise they're running solo under their own org.
+      const company =
+        (memberships ?? []).find((m: any) => m.org_role === 'crew') ??
+        (memberships ?? [])[0] ??
+        null;
       if (company) {
         const c: any = (company as any).companies;
         // Merged model: org_role is the source of truth. `crew` are the hourly
