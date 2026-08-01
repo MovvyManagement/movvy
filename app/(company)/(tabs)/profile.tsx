@@ -22,6 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { CrewPortal } from '@/components/CrewPortal';
 import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import {
@@ -266,6 +267,8 @@ export default function CompanyProfile() {
             ) : null}
           </View>
         </Card>
+
+        <CrewPortal />
 
         {sections.map((s) => (
           <View key={s.title}>
