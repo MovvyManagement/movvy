@@ -18,6 +18,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { RatingStars } from '@/components/RatingStars';
 import { ChatSheet } from '@/components/ChatSheet';
+import { fmtDateShort, fmtTime } from '@/lib/format';
 import { BillingTimer } from '@/components/BillingTimer';
 import { useRef, useEffect } from 'react';
 import { openInMaps } from '@/lib/maps';
@@ -139,8 +140,13 @@ export default function MoverActive() {
   // shift, get fuel between, etc. Solo teams rarely have more than one
   // assigned at a time so the list naturally stays empty for them.
   const allAssigned = useMyAssignedJobs();
+  // "Up next" = other jobs assigned to me, today or later. The date guard keeps
+  // stale/past leftovers (e.g. an old test booking still sitting at 'assigned')
+  // from cluttering the queue with moves that are effectively dead.
+  const todayStr = new Date().toISOString().slice(0, 10);
   const upNext = (allAssigned.data ?? [])
     .filter((j) => j.id !== liveJob?.id)
+    .filter((j) => !j.scheduled_for_date || j.scheduled_for_date >= todayStr)
     .slice(0, 3);
 
   // Resolve customer's name from their profile (RLS lets the assigned driver read this)
@@ -226,11 +232,30 @@ export default function MoverActive() {
           lat: liveJob.dropoff_lat ?? undefined,
           lng: liveJob.dropoff_lng ?? undefined,
         },
+        scheduled_for_date: liveJob.scheduled_for_date,
+        scheduled_for_window: liveJob.scheduled_for_window ?? null,
+        scheduled_for_window_starts_at: liveJob.scheduled_for_window_starts_at ?? null,
       };
 
   const status = booking.status as BookingStatus;
   const next = useMemo(() => nextFlag(status), [status]);
   const done = useMemo(() => completedFlags(status), [status]);
+
+  // Scheduled start + an early-start guard. A crew shouldn't be able to kick off
+  // billing hours before the customer's window — only the FIRST step ("We've
+  // left HQ") is gated, and only to 20 min before the scheduled start.
+  const EARLY_START_LEAD_MS = 20 * 60 * 1000;
+  const schedStartMs = !usingMock
+    ? ((booking as any).scheduled_for_window_starts_at
+        ? new Date((booking as any).scheduled_for_window_starts_at).getTime()
+        : (booking as any).scheduled_for_date
+        ? new Date(`${(booking as any).scheduled_for_date}T08:00:00`).getTime()
+        : null)
+    : null;
+  const isFirstStep = next?.key === 'left_hq';
+  const tooEarly =
+    isFirstStep && schedStartMs != null && Date.now() < schedStartMs - EARLY_START_LEAD_MS;
+  const unlockAt = schedStartMs != null ? new Date(schedStartMs - EARLY_START_LEAD_MS) : null;
 
   const headedTo: 'pickup' | 'dropoff' | null =
     status === 'on_the_way' ? 'pickup' :
@@ -239,6 +264,15 @@ export default function MoverActive() {
   const advance = async () => {
     if (!next || usingMock) {
       Alert.alert('Demo mode', 'Status updates need a live booking. Create one as a customer first.');
+      return;
+    }
+    if (tooEarly) {
+      Alert.alert(
+        'Too early to start',
+        `This move is scheduled for ${fmtDateShort((booking as any).scheduled_for_date)}${
+          (booking as any).scheduled_for_window ? ` · ${(booking as any).scheduled_for_window}` : ''
+        }. You can start it 20 minutes before the window.`,
+      );
       return;
     }
     try {
@@ -541,7 +575,22 @@ export default function MoverActive() {
             </Text>
           </View>
         ) : next ? (
-          <Button label={next.label} size="lg" fullWidth loading={update.isPending} onPress={advance} />
+          tooEarly ? (
+            <View className="rounded-2xl bg-silver-100 p-4 items-center">
+              <Ionicons name="time-outline" size={22} color="#71717A" />
+              <Text className="mt-2 text-sm font-bold text-ink-900">
+                Scheduled for {fmtDateShort((booking as any).scheduled_for_date)}
+                {(booking as any).scheduled_for_window ? ` · ${(booking as any).scheduled_for_window}` : ''}
+              </Text>
+              <Text className="mt-1 text-xs text-silver-500 text-center leading-5">
+                You can start this move at{' '}
+                {unlockAt ? fmtTime(unlockAt.toISOString()) : 'the scheduled time'} — 20 minutes
+                before the window opens.
+              </Text>
+            </View>
+          ) : (
+            <Button label={next.label} size="lg" fullWidth loading={update.isPending} onPress={advance} />
+          )
         ) : (
           <View className="rounded-2xl bg-brand-50 border border-brand-100 p-4 items-center">
             <Ionicons name="checkmark-circle" size={28} color="#047857" />

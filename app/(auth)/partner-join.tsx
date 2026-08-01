@@ -248,11 +248,14 @@ export default function PartnerJoin() {
             <View className="mt-6 mb-4 items-center">
               <Text className="text-sm text-silver-500">Already joined?</Text>
               <Pressable
-                onPress={() => router.replace('/(auth)/login')}
+                // Crew sign in through the PARTNER sign-in (code + password), not
+                // the customer login. This link used to drop them on the customer
+                // screen, which was a dead end for a driver.
+                onPress={() => router.replace('/(auth)/partner-signin')}
                 className="mt-1"
               >
                 <Text className="text-sm font-semibold text-brand-700">
-                  Sign in with your account
+                  Sign in with your team code
                 </Text>
               </Pressable>
             </View>
