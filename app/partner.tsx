@@ -102,7 +102,9 @@ export default function PartnerSignup() {
   // later or never. People who work FOR an existing org never come here; they
   // join with a code via /(auth)/partner-join.
   const continueOnboarding = () => {
-    router.replace('/(company)/onboarding/company-info');
+    // Cast: Expo's typed-route table regenerates on the next build; the route
+    // file exists at app/(company)/onboarding/operator.tsx.
+    router.replace('/(company)/onboarding/operator' as any);
   };
 
   // ─── Step 1 → Step 2: signUp with phone + send SMS OTP ───────────────────
