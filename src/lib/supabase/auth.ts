@@ -88,22 +88,13 @@ export async function loginPartner(
     // Merged model: admins run the org (see prices, assign); crew perform moves
     // and never see money. Drives which partner surface we land them on.
     org_role?: 'admin' | 'crew' | null;
+    // True when the account exists but has no org yet (signed up, never finished
+    // onboarding) — the caller routes them into onboarding to finish.
+    needsOnboarding?: boolean;
   }>
 > {
   const parsed = LoginInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };
-
-  // The schema doesn't include invite_code, so we read it off the raw input.
-  // We accept either the bare 6-char body ("X7QJ4M") or the full code
-  // ("TM-X7QJ4M" / "CO-X7QJ4M"). Normalise to uppercase.
-  const raw = (input as any)?.invite_code;
-  const codeInput = typeof raw === 'string' ? raw.trim().toUpperCase() : '';
-  if (!/^(TM|CO)-[A-Z0-9]{6}$/.test(codeInput)) {
-    return {
-      ok: false,
-      error: 'Enter your team or company invite code (TM-XXXXXX or CO-XXXXXX).',
-    };
-  }
 
   const { email, phone, password } = parsed.data;
   const creds = email ? { email, password } : { phone: phone!, password };
@@ -111,123 +102,51 @@ export async function loginPartner(
   const { error: signInErr } = await supabase.auth.signInWithPassword(creds);
   if (signInErr) return { ok: false, error: friendly(signInErr.message) };
 
-  // We're signed in — now verify the code matches a team/company we belong to.
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    // Should never happen — we just signed in. Defensive cleanup.
     await supabase.auth.signOut();
     return { ok: false, error: 'Sign-in succeeded but session is missing. Try again.' };
   }
 
-  // Look up the team/company the code points at, then confirm membership.
-  // Server-side enforcement of "currently on the roster" is via the
-  // removed_at IS NULL filter — RLS will return an empty row if not a member.
-  if (codeInput.startsWith('TM-')) {
-    const { data: team } = await supabase
-      .from('partner_teams')
-      .select('id, invite_code')
-      .eq('invite_code', codeInput)
-      .maybeSingle();
-    if (!team) {
-      await supabase.auth.signOut();
-      return { ok: false, error: "We couldn't find that team code." };
-    }
-    const { data: member } = await supabase
-      .from('partner_team_members')
-      .select('status')
-      .eq('team_id', team.id)
-      .eq('profile_id', user.id)
-      .is('removed_at', null)
-      .maybeSingle();
-    if (member) {
-      // Rejected rows keep removed_at=null (only rejected_at is set), so they
-      // surface here — deny + sign out. Pending → let them in but flag it so
-      // the caller routes to the waiting screen. Active → straight through.
-      if (member.status === 'rejected') {
-        await supabase.auth.signOut();
-        return {
-          ok: false,
-          error:
-            'Your request to join this team was declined. Reach out to the team owner if you think this is a mistake.',
-        };
-      }
-      if (member.status !== 'active' && member.status !== 'pending_approval') {
-        // 'removed' or anything unexpected — treat as off-roster.
-        await supabase.auth.signOut();
-        return { ok: false, error: "You're no longer on this team's roster." };
-      }
-      return {
-        ok: true,
-        data: { kind: 'team', id: team.id, status: member.status as 'active' | 'pending_approval' },
-      };
-    }
-    // No membership row — check for a legacy pending invite. If one exists,
-    // sign them in so the InviteAcceptHost popup can prompt Accept/Decline;
-    // accepting inserts the membership row (active).
-    const hasPendingInvite = await hasPendingInviteFor(user.id, team.id, null);
-    if (!hasPendingInvite) {
-      await supabase.auth.signOut();
-      return {
-        ok: false,
-        error: "You're not on this team's roster. Check your code or ask your team owner.",
-      };
-    }
-    return { ok: true, data: { kind: 'team', id: team.id, status: 'active' } };
-  }
-
-  // CO- prefix
-  const { data: company } = await supabase
-    .from('companies')
-    .select('id, invite_code')
-    .eq('invite_code', codeInput)
-    .maybeSingle();
-  if (!company) {
-    await supabase.auth.signOut();
-    return { ok: false, error: "We couldn't find that company code." };
-  }
-  const { data: cm } = await supabase
+  // Operator model: no invite code at login — your credentials ARE your access.
+  // Resolve which org you're working in from your active memberships: a crew
+  // you've JOINED wins over your OWN org (created at signup). The CO- code is
+  // only used later, from the profile, to join someone's crew.
+  const { data: memberships } = await supabase
     .from('company_members')
-    .select('status, org_role')
-    .eq('company_id', company.id)
+    .select('company_id, org_role, status')
     .eq('profile_id', user.id)
-    .is('removed_at', null)
-    .maybeSingle();
-  if (cm) {
-    if (cm.status === 'rejected') {
-      await supabase.auth.signOut();
-      return {
-        ok: false,
-        error:
-          'Your request to join this company was declined. Reach out to the owner if you think this is a mistake.',
-      };
-    }
-    if (cm.status !== 'active' && cm.status !== 'pending_approval') {
-      await supabase.auth.signOut();
-      return { ok: false, error: "You're no longer on this company's roster." };
-    }
+    .is('removed_at', null);
+
+  const active = (memberships ?? []).filter(
+    (m: any) => m.status === 'active' || m.status === 'pending_approval',
+  );
+  const chosen =
+    active.find((m: any) => m.org_role === 'crew') ??
+    active.find((m: any) => m.org_role === 'admin') ??
+    active[0] ??
+    null;
+
+  if (!chosen) {
+    // Signed up but never finished creating their org — let them through so the
+    // caller routes them into onboarding to finish setup.
     return {
       ok: true,
-      data: {
-        kind: 'company',
-        id: company.id,
-        status: cm.status as 'active' | 'pending_approval',
-        org_role: ((cm as any).org_role ?? 'crew') as 'admin' | 'crew',
-      },
+      data: { kind: 'company', id: '', status: 'active', org_role: null, needsOnboarding: true },
     };
   }
-  // No membership row yet — see if there's a legacy pending invite waiting.
-  // If yes, sign them in so InviteAcceptHost can prompt them.
-  const hasPendingInvite = await hasPendingInviteFor(user.id, null, company.id);
-  if (!hasPendingInvite) {
-    await supabase.auth.signOut();
-    return {
-      ok: false,
-      error: "You're not on this company's roster. Check your code or ask your dispatcher.",
-    };
-  }
-  return { ok: true, data: { kind: 'company', id: company.id, status: 'active' } };
+
+  return {
+    ok: true,
+    data: {
+      kind: 'company',
+      id: (chosen as any).company_id,
+      status: (chosen as any).status as 'active' | 'pending_approval',
+      org_role: ((chosen as any).org_role ?? 'crew') as 'admin' | 'crew',
+    },
+  };
 }
 
 /**

@@ -27,7 +27,7 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Input } from '@/components/Input';
@@ -38,8 +38,6 @@ import { loginPartner, supabaseConfigured } from '@/lib/supabase';
 type ContactMethod = 'email' | 'phone';
 
 export default function PartnerSignIn() {
-  const { code: codeFromUrl } = useLocalSearchParams<{ code?: string }>();
-  const [code, setCode] = useState((codeFromUrl ?? '').toUpperCase());
   const [contactMethod, setContactMethod] = useState<ContactMethod>('email');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -48,12 +46,11 @@ export default function PartnerSignIn() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Format check on the code — loose enough that typos turn into helpful
-  // server errors rather than disabled buttons.
-  const codeShape = /^(TM|CO)-[A-Z0-9]{6}$/.test(code.trim().toUpperCase());
+  // Operator model: no invite code at sign-in — your credentials ARE your
+  // access. The code is only for JOINING a crew, from the profile.
   const contactReady =
     contactMethod === 'email' ? email.includes('@') : isPhoneComplete(phone);
-  const canSubmit = codeShape && contactReady && password.length > 0;
+  const canSubmit = contactReady && password.length > 0;
 
   const submit = async () => {
     if (!supabaseConfigured) {
@@ -69,7 +66,6 @@ export default function PartnerSignIn() {
     // helper throws (network error, bad RLS, etc).
     try {
       const res = await loginPartner({
-        invite_code: code.trim().toUpperCase(),
         password,
         ...(contactMethod === 'email'
           ? { email: email.trim().toLowerCase() }
@@ -79,9 +75,12 @@ export default function PartnerSignIn() {
         setError(res.error ?? 'Could not sign in.');
         return;
       }
+      // Signed up but never finished creating their org → into onboarding.
+      if (res.data?.needsOnboarding) {
+        router.replace('/(company)/onboarding/operator' as any);
+        return;
+      }
       // Signed in but the owner hasn't approved them yet → waiting room.
-      // The pending-approval screen polls and forwards to the dashboard the
-      // moment they're approved.
       if (res.data?.status === 'pending_approval') {
         router.replace('/(auth)/pending-approval');
         return;
@@ -116,23 +115,8 @@ export default function PartnerSignIn() {
           <View className="flex-1 px-6">
             <Text className="text-3xl font-bold text-ink-900">Partner sign-in</Text>
             <Text className="mt-2 text-base text-silver-500">
-              Drivers, movers, and company members sign in with their team
-              code plus their normal credentials.
+              Sign in with the email or phone and password you signed up with.
             </Text>
-
-            {/* Invite code — primary gate */}
-            <View className="mt-6">
-              <Input
-                label="Team / company code"
-                placeholder="TM-XXXXXX or CO-XXXXXX"
-                autoCapitalize="characters"
-                autoCorrect={false}
-                value={code}
-                onChangeText={(t) => setCode(t.toUpperCase())}
-                hint="From your team owner / company dispatcher"
-                leftIcon={<Ionicons name="key-outline" size={18} color="#71717A" />}
-              />
-            </View>
 
             {/* Contact method toggle */}
             <Text className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-silver-500">
@@ -228,46 +212,13 @@ export default function PartnerSignIn() {
               />
             </View>
 
-            {/* Why the code? */}
-            <View className="mt-6 rounded-2xl bg-silver-50 p-4 flex-row">
-              <Ionicons name="shield-checkmark-outline" size={18} color="#71717A" />
-              <Text className="ml-2 flex-1 text-xs text-silver-500 leading-5">
-                The code proves you're still on the roster. If your team removes
-                you or rotates the code, this gate stops working — that's by
-                design.
-              </Text>
-            </View>
-
-            {/* Two ways in for someone WITHOUT an account yet:
-                  • Invited to an existing company → JOIN with the code (this is
-                    the path a new driver/crew takes — they set a password here
-                    for the first time, then wait for the admin to approve).
-                  • Starting their own company → onboard as a new org admin.
-                This block is the fix for "I got a code but there's nowhere to
-                create my login" — the join path was previously unreachable from
-                the sign-in screen. */}
-            <View className="mt-6 mb-4 gap-3">
-              <Pressable
-                onPress={() => router.push('/(auth)/partner-join')}
-                className="rounded-2xl border border-brand-200 bg-brand-50 p-4 flex-row items-center active:opacity-80"
-              >
-                <Ionicons name="people-outline" size={20} color="#047857" />
-                <View className="ml-3 flex-1">
-                  <Text className="text-sm font-bold text-ink-900">
-                    Invited to a company? Join here
-                  </Text>
-                  <Text className="text-xs text-silver-500 mt-0.5">
-                    New driver or crew — enter your invite code and set a password.
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color="#047857" />
+            {/* New here → sign up. Everyone signs up the same way and gets their
+                own code; joining someone's crew happens later from the profile. */}
+            <View className="mt-6 mb-4 flex-row items-center justify-center">
+              <Text className="text-sm text-silver-500">New to Movvy? </Text>
+              <Pressable onPress={() => router.push('/partner')}>
+                <Text className="text-sm font-semibold text-brand-700">Create your account →</Text>
               </Pressable>
-              <View className="flex-row items-center justify-center">
-                <Text className="text-sm text-silver-500">Starting your own company? </Text>
-                <Pressable onPress={() => router.push('/partner')}>
-                  <Text className="text-sm font-semibold text-brand-700">Sign up →</Text>
-                </Pressable>
-              </View>
             </View>
           </View>
         </ScrollView>
