@@ -25,6 +25,10 @@
         "applinks:movvy.ca"
       ],
       "infoPlist": {
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ],
         "LSApplicationQueriesSchemes": [
           "tel",
           "telprompt",
@@ -91,7 +95,11 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Movvy uses your location to center the map on where you are so you can book a move from there faster."
+          "locationAlwaysAndWhenInUsePermission": "Movvy shares your location with the customer during an active move — including in the background — so they can see the crew on the way.",
+          "locationWhenInUsePermission": "Movvy uses your location to center the map and to share the crew's location with the customer during a move.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [

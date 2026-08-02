@@ -9,6 +9,10 @@ import '@/lib/textDefaults';
 // dark-mode coverage is complete across every screen.
 import { colorScheme } from 'nativewind';
 colorScheme.set('light');
+// Register the background live-location TaskManager task at startup (side-effect
+// import) so iOS/Android can deliver location updates to it while the app is
+// backgrounded during a move.
+import '@/lib/bgTracking';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

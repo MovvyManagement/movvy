@@ -12,7 +12,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { mockBookings } from '@/data/mockBookings';
 import { useMyCurrentJob, useUpdateBookingStatus, useSubmitRating, useCancelBooking, useOpenDispute, useMyMembership, useMyTeamCurrentJob, useMyAssignedJobs, usePhoneProxy, placeProxyCall } from '@/lib/data';
 import { NotificationBell } from '@/components/NotificationBell';
-import { useTrackingHeartbeat } from '@/lib/useTrackingHeartbeat';
+import { useLiveTrackingBroadcast } from '@/lib/useLiveTrackingBroadcast';
 import { useToast } from '@/components/Toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase, useAuth } from '@/lib/supabase';
@@ -202,12 +202,13 @@ export default function MoverActive() {
   // with the truck. Without this hook the customer only sees the pin if the
   // driver opens the in-app Navigate screen.
   const toast = useToast();
-  useTrackingHeartbeat({
+  // Background live-location: ONLY the designated source broadcasts (so two crew
+  // never fight over the customer's pin), and it keeps pinging even when the app
+  // is backgrounded or closed for as long as the move is going.
+  useLiveTrackingBroadcast({
     bookingId: liveJob?.id,
     status: liveJob?.status as any,
-    // ONLY the designated live-location source broadcasts, so two crew on the
-    // same move never fight over the customer's pin.
-    enabled: isTrackingSource,
+    isSource: isTrackingSource,
   });
 
   // ── Phone proxy (Uber-style masked call) ───────────────────────────────────
