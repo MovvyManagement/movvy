@@ -4,6 +4,7 @@ import { View, ActivityIndicator } from 'react-native';
 import { useRequireAuth, supabaseConfigured } from '@/lib/supabase';
 import { useThemedColors } from '@/lib/theme';
 import { useSetMyPresence } from '@/lib/data';
+import { RoleSurfaceGuard } from '@/components/RoleSurfaceGuard';
 
 // =============================================================================
 // Driver (mover) route group — Stack on top of Tabs (mirrors the company side).
@@ -53,11 +54,14 @@ export default function MoverStack() {
   }
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        animation: 'slide_from_right',
-      }}
-    />
+    <>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          animation: 'slide_from_right',
+        }}
+      />
+      <RoleSurfaceGuard surface="mover" />
+    </>
   );
 }

@@ -3,6 +3,7 @@ import { Stack } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
 import { useRequireAuth, supabaseConfigured } from '@/lib/supabase';
 import { useThemedColors } from '@/lib/theme';
+import { RoleSurfaceGuard } from '@/components/RoleSurfaceGuard';
 
 // =============================================================================
 // Company route group — Stack on top of Tabs (mirrors the customer pattern).
@@ -35,11 +36,14 @@ export default function CompanyStack() {
   }
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        animation: 'slide_from_right',
-      }}
-    />
+    <>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          animation: 'slide_from_right',
+        }}
+      />
+      <RoleSurfaceGuard surface="company" />
+    </>
   );
 }

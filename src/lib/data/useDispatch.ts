@@ -86,6 +86,10 @@ export function useMyMembership() {
   return useQuery({
     queryKey: ['my-membership', user?.id],
     enabled: !!user?.id && supabaseConfigured,
+    // Poll so a role change (promote/demote by an admin) is picked up within a
+    // few seconds and the role-surface banner can react live.
+    refetchInterval: 8000,
+    refetchOnWindowFocus: true,
     queryFn: async (): Promise<Membership> => {
       const empty: Membership = {
         kind: null,
