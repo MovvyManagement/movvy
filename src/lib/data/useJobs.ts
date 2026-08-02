@@ -99,7 +99,10 @@ export function useMyAssignedJobs() {
       const { data, error } = await supabase
         .from('bookings')
         .select('*')
-        .eq('assigned_driver_profile_id', user!.id)
+        // The assigned performer OR whoever was picked as the live-location
+        // source ("We've left HQ" → whose location the customer follows) sees
+        // the active job, so the source's phone can broadcast.
+        .or(`assigned_driver_profile_id.eq.${user!.id},tracking_profile_id.eq.${user!.id}`)
         .in('status', ['assigned', 'confirmed', 'on_the_way', 'arrived', 'loading', 'in_transit', 'unloading'])
         .order('scheduled_for_window_starts_at', { ascending: true });
       if (error) throw error;

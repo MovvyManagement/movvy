@@ -14,8 +14,9 @@ import { useMyCurrentJob, useUpdateBookingStatus, useSubmitRating, useCancelBook
 import { NotificationBell } from '@/components/NotificationBell';
 import { useTrackingHeartbeat } from '@/lib/useTrackingHeartbeat';
 import { useToast } from '@/components/Toast';
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { supabase, useAuth } from '@/lib/supabase';
+import { useCompanyDriverRoster } from '@/lib/data';
 import { RatingStars } from '@/components/RatingStars';
 import { ChatSheet } from '@/components/ChatSheet';
 import { fmtDateShort, fmtTime } from '@/lib/format';
@@ -133,6 +134,31 @@ export default function MoverActive() {
   const liveJob = isPassengerMover ? teamJob.data : driverJob.data;
   const isLoading = isPassengerMover ? teamJob.isLoading : driverJob.isLoading;
   const update = useUpdateBookingStatus();
+  const { user } = useAuth();
+  const qc = useQueryClient();
+
+  // Live-location source: the ONE crew member whose phone feeds the customer's
+  // map. Chosen at "We've left HQ"; falls back to the assigned performer. Only
+  // the source's device broadcasts, so the customer's pin never jumps between
+  // two crew on the same move.
+  const trackingSourceId =
+    (liveJob as any)?.tracking_profile_id ?? liveJob?.assigned_driver_profile_id ?? null;
+  const isTrackingSource = !!user?.id && trackingSourceId === user.id;
+
+  // Candidates to be the source = everyone active on this crew. The picker only
+  // appears when there's a real choice (2+).
+  const companyId = membership?.kind === 'company' ? membership.company_id : null;
+  const { data: crewRoster } = useCompanyDriverRoster(companyId);
+  const sourceCandidates = React.useMemo(() => {
+    const map = new Map<string, string>();
+    if (user?.id) map.set(user.id, 'You');
+    for (const m of crewRoster ?? []) {
+      if (m.profile_id && !map.has(m.profile_id)) map.set(m.profile_id, m.full_name ?? 'Crew');
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [crewRoster, user?.id]);
+  const [showSourcePicker, setShowSourcePicker] = useState(false);
+  const [sourceChoice, setSourceChoice] = useState<string | null>(null);
 
   // Multi-job queue: the rest of the driver's assigned jobs (excluding the
   // one they're actively on). Company drivers usually have several queued up
@@ -179,7 +205,9 @@ export default function MoverActive() {
   useTrackingHeartbeat({
     bookingId: liveJob?.id,
     status: liveJob?.status as any,
-    enabled: !isPassengerMover,
+    // ONLY the designated live-location source broadcasts, so two crew on the
+    // same move never fight over the customer's pin.
+    enabled: isTrackingSource,
   });
 
   // ── Phone proxy (Uber-style masked call) ───────────────────────────────────
@@ -273,16 +301,45 @@ export default function MoverActive() {
       );
       return;
     }
+    // First step (We've left HQ): if the crew has 2+ people, ask whose location
+    // the customer should follow before we start broadcasting.
+    if (next.key === 'left_hq' && sourceCandidates.length >= 2) {
+      setSourceChoice(trackingSourceId ?? user?.id ?? null);
+      setShowSourcePicker(true);
+      return;
+    }
+    await doAdvance();
+  };
+
+  // The actual status transition (after the source picker, if any).
+  const doAdvance = async () => {
+    if (!next || !liveJob) return;
     try {
-      await update.mutateAsync({ booking_id: liveJob!.id, new_status: next.toStatus as any });
-      // After "arrived", auto-advance to 'loading' under the hood so the
-      // customer's status reads correctly. Driver UI still shows just 5 flags.
+      await update.mutateAsync({ booking_id: liveJob.id, new_status: next.toStatus as any });
       if (next.toStatus === 'arrived') {
-        setTimeout(() => update.mutate({ booking_id: liveJob!.id, new_status: 'loading' as any }), 600);
+        setTimeout(() => update.mutate({ booking_id: liveJob.id, new_status: 'loading' as any }), 600);
       }
     } catch (e: any) {
       Alert.alert('Could not update', e?.message ?? 'Try again.');
     }
+  };
+
+  // Confirm the picked live-location source, then start the move.
+  const confirmSourceAndStart = async () => {
+    if (sourceChoice && liveJob) {
+      try {
+        await supabase.rpc('set_tracking_source', {
+          p_booking_id: liveJob.id,
+          p_profile_id: sourceChoice,
+        });
+        qc.invalidateQueries({ queryKey: ['jobs', 'assigned'] });
+      } catch (e: any) {
+        // Non-fatal — the move still starts; tracking falls back to the driver.
+        console.warn('[active] set_tracking_source failed', e);
+      }
+    }
+    setShowSourcePicker(false);
+    await doAdvance();
   };
 
   if (isLoading && supabaseConfigured) {
@@ -664,6 +721,55 @@ export default function MoverActive() {
         peerName={customerName}
         onClose={() => setShowChat(false)}
       />
+
+      {/* Whose location does the customer follow? — asked when a 2+ crew starts */}
+      <Modal visible={showSourcePicker} transparent animationType="slide" onRequestClose={() => setShowSourcePicker(false)}>
+        <Pressable
+          onPress={() => setShowSourcePicker(false)}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }}
+        >
+          <Pressable onPress={(e) => e.stopPropagation()} className="rounded-t-3xl bg-white px-6 pt-5 pb-8">
+            <View className="self-center h-1.5 w-12 rounded-full bg-silver-200 mb-4" />
+            <Text className="text-xl font-bold text-ink-900">Whose location do we follow?</Text>
+            <Text className="mt-1 text-sm text-silver-500 leading-5">
+              Pick the phone the customer's live map should track for this move. Only
+              that phone shares its location.
+            </Text>
+            <View className="mt-4 gap-2">
+              {sourceCandidates.map((c) => {
+                const sel = sourceChoice === c.id;
+                return (
+                  <Pressable
+                    key={c.id}
+                    onPress={() => setSourceChoice(c.id)}
+                    className={`flex-row items-center rounded-2xl border p-4 ${
+                      sel ? 'border-brand-600 bg-brand-50' : 'border-silver-200 bg-white'
+                    }`}
+                  >
+                    <Avatar name={c.name === 'You' ? (user?.email ?? 'You') : c.name} size={36} />
+                    <Text className="ml-3 flex-1 text-base font-semibold text-ink-900">{c.name}</Text>
+                    <Ionicons
+                      name={sel ? 'radio-button-on' : 'radio-button-off'}
+                      size={22}
+                      color={sel ? '#16A34A' : '#A1A1AA'}
+                    />
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View className="mt-5">
+              <Button
+                label="Start move"
+                size="lg"
+                fullWidth
+                loading={update.isPending}
+                disabled={!sourceChoice}
+                onPress={confirmSourceAndStart}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
