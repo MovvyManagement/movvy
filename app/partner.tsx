@@ -289,9 +289,9 @@ export default function PartnerSignup() {
               />
             )}
             {step === 'form' ? (
-              <View className="mt-3 items-center gap-1.5">
+              <View className="mt-3 items-center">
                 <View className="flex-row items-center justify-center">
-                  <Text className="text-xs text-silver-500">Already a partner? </Text>
+                  <Text className="text-xs text-silver-500">Already have an account? </Text>
                   <Link
                     href="/(auth)/partner-signin"
                     className="text-xs font-semibold text-brand-700"
@@ -299,15 +299,9 @@ export default function PartnerSignup() {
                     Sign in →
                   </Link>
                 </View>
-                <View className="flex-row items-center justify-center">
-                  <Text className="text-xs text-silver-500">Got a company invite code? </Text>
-                  <Link
-                    href="/(auth)/partner-join"
-                    className="text-xs font-semibold text-brand-700"
-                  >
-                    Join here →
-                  </Link>
-                </View>
+                <Text className="mt-1 text-[11px] text-silver-400 text-center px-6">
+                  Joining a crew? Sign up first, then enter their code from your profile.
+                </Text>
               </View>
             ) : null}
           </View>

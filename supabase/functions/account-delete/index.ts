@@ -79,11 +79,16 @@ handle(async (req) => {
     });
     if (delErr) throw httpError(500, 'Could not delete account');
 
-    // Revoke all sessions — uses Auth admin API
+    // Revoke all sessions AND ban the auth user so a "deleted" account can't
+    // sign back in. We BAN rather than hard-delete the auth row on purpose:
+    // deleting it would break every booking/payout/audit FK that points at this
+    // user. The profile is already soft-deleted + PII-redacted above.
     try {
       await admin.auth.admin.signOut(user.id, 'global');
+      // ~100 years — effectively permanent, reversible by support if needed.
+      await admin.auth.admin.updateUserById(user.id, { ban_duration: '876000h' });
     } catch (e) {
-      console.warn('[account-delete] session revoke failed', e);
+      console.warn('[account-delete] session revoke / ban failed', e);
     }
 
     await audit({
