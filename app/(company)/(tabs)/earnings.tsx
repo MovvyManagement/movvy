@@ -41,7 +41,7 @@ export default function CompanyEarnings() {
     <SafeAreaView className="flex-1 bg-silver-50 dark:bg-night-900" edges={['top']}>
       <View className="bg-white dark:bg-night-100">
         <ScreenHeader
-          title="Company Earnings"
+          title="Earnings"
           showBack={false}
           right={
             <View className="flex-row items-center gap-2">

@@ -70,7 +70,7 @@ export default function CompanyDrivers() {
     <SafeAreaView className="flex-1 bg-silver-50 dark:bg-night-900" edges={['top']}>
       <View className="bg-white dark:bg-night-100">
         <ScreenHeader
-          title="Drivers"
+          title="Your crew"
           subtitle={membership?.company_name ?? undefined}
           showBack
           right={

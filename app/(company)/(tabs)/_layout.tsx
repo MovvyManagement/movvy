@@ -61,8 +61,8 @@ export default function CompanyTabs() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Company',
-          tabBarIcon: ({ color, size }) => <Ionicons name="business" color={color} size={size - 2} />,
+          title: 'Crew',
+          tabBarIcon: ({ color, size }) => <Ionicons name="people" color={color} size={size - 2} />,
         }}
       />
     </Tabs>
