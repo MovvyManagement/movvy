@@ -20,6 +20,7 @@ import {
   Platform,
   ActivityIndicator,
   ScrollView,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -105,6 +106,20 @@ export function AddDriverSheet({ visible, companyId, onClose }: Props) {
 
   const companyName = company?.display_name ?? 'your company';
   const inviteCode = company?.invite_code ?? null;
+  // Show the code without dashes (e.g. COR5AMHB). Join matching is dash-tolerant.
+  const codeNoDash = inviteCode ? inviteCode.replace(/-/g, '').toUpperCase() : null;
+
+  const shareInvite = async () => {
+    if (!codeNoDash) return;
+    Share.share({
+      message:
+        `You're invited to join ${companyName} on Movvy.\n\n` +
+        `1. Download Movvy (App Store / Google Play)\n` +
+        `2. Create your account\n` +
+        `3. In your profile, tap "Join a crew" and enter code ${codeNoDash}\n\n` +
+        `That's it — you'll be on the crew and can start taking moves.`,
+    }).catch(() => {});
+  };
 
   const body = (
     <ScrollView
@@ -134,12 +149,19 @@ export function AddDriverSheet({ visible, companyId, onClose }: Props) {
               <Text className="text-base font-bold text-ink-900" numberOfLines={1}>
                 {companyName}
               </Text>
-              <Text className="text-xs text-silver-600 mt-0.5">Code · {inviteCode}</Text>
+              <Text className="text-xs text-silver-600 mt-0.5">Code · {codeNoDash}</Text>
             </View>
-            <View className="h-10 w-10 rounded-2xl bg-brand-600 items-center justify-center">
+            <Pressable
+              onPress={shareInvite}
+              hitSlop={8}
+              className="h-10 w-10 rounded-2xl bg-brand-600 items-center justify-center active:opacity-80"
+            >
               <Ionicons name="paper-plane" size={18} color="#fff" />
-            </View>
+            </Pressable>
           </View>
+          <Text className="mt-2 text-[11px] text-silver-500">
+            Tap the arrow to share a ready-to-send invite with your code.
+          </Text>
         </View>
       ) : null}
 

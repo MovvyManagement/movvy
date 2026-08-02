@@ -18,8 +18,10 @@ import {
   Pressable,
   ActivityIndicator,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -32,8 +34,10 @@ import { BulkReassignSheet } from '@/components/BulkReassignSheet';
 import { AddDriverSheet } from '@/components/AddDriverSheet';
 import { PendingApprovals } from '@/components/PendingApprovals';
 import { useMyMembership, useCompanyDriverRoster, usePendingJoinRequests } from '@/lib/data';
-import { supabaseConfigured } from '@/lib/supabase';
+import { supabase, supabaseConfigured, useAuth } from '@/lib/supabase';
 import { NotificationBell } from '@/components/NotificationBell';
+import { useToast } from '@/components/Toast';
+import { haptic } from '@/lib/haptics';
 
 export default function CompanyDrivers() {
   const { data: membership } = useMyMembership();
@@ -42,6 +46,63 @@ export default function CompanyDrivers() {
     membership?.kind === 'company' &&
     membership.org_role === 'admin';
   const { data: roster, isLoading, refetch, isRefetching } = useCompanyDriverRoster(companyId);
+  const { user } = useAuth();
+  const toast = useToast();
+  const qc = useQueryClient();
+
+  // Each member's org_role so we can label promote/demote + show a role badge.
+  const { data: memberRoles } = useQuery({
+    queryKey: ['crew-roles', companyId],
+    enabled: !!companyId && supabaseConfigured,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('company_members')
+        .select('profile_id, org_role')
+        .eq('company_id', companyId!)
+        .is('removed_at', null);
+      const map: Record<string, string> = {};
+      for (const r of data ?? []) map[(r as any).profile_id] = (r as any).org_role;
+      return map;
+    },
+  });
+  const refreshCrew = () => {
+    qc.invalidateQueries({ queryKey: ['company-driver-roster'] });
+    qc.invalidateQueries({ queryKey: ['crew-roles'] });
+  };
+  // Admin sees pricing; crew never does. Promote/demote flips org_role.
+  const setMemberRole = async (profileId: string, org_role: 'admin' | 'crew') => {
+    const { error } = await supabase
+      .from('company_members')
+      .update({ org_role })
+      .eq('company_id', companyId!)
+      .eq('profile_id', profileId)
+      .is('removed_at', null);
+    if (error) { toast.error(error.message); return; }
+    haptic.success();
+    toast.success(org_role === 'admin' ? 'Now an admin' : 'Now crew');
+    refreshCrew();
+  };
+  const removeMember = (profileId: string, name: string) => {
+    Alert.alert('Remove from crew?', `${name} will lose access to your crew's jobs.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await supabase
+            .from('company_members')
+            .update({ removed_at: new Date().toISOString() })
+            .eq('company_id', companyId!)
+            .eq('profile_id', profileId)
+            .is('removed_at', null);
+          if (error) { toast.error(error.message); return; }
+          haptic.success();
+          toast.success(`Removed ${name}`);
+          refreshCrew();
+        },
+      },
+    ]);
+  };
 
   // Self-joiners who used the company code and are waiting to be let in. Pulled
   // at the screen level (not just inside <PendingApprovals>) so the "no drivers
@@ -180,6 +241,38 @@ export default function CompanyDrivers() {
                       </View>
                       <Badge label={label} tone={tone} />
                     </View>
+
+                    {/* Crew management — admins only, and not on themselves.
+                        Promote/demote flips who sees pricing; Remove drops them
+                        from the crew. */}
+                    {isDispatcher && d.profile_id !== user?.id ? (
+                      <View className="mt-3 flex-row items-center gap-2">
+                        <Badge
+                          label={memberRoles?.[d.profile_id] === 'admin' ? 'Admin' : 'Crew'}
+                          tone={memberRoles?.[d.profile_id] === 'admin' ? 'brand' : 'neutral'}
+                        />
+                        <View className="flex-1" />
+                        <Pressable
+                          onPress={() =>
+                            setMemberRole(
+                              d.profile_id,
+                              memberRoles?.[d.profile_id] === 'admin' ? 'crew' : 'admin',
+                            )
+                          }
+                          className="rounded-xl border border-silver-200 px-3 py-2 active:opacity-80"
+                        >
+                          <Text className="text-xs font-semibold text-ink-900">
+                            {memberRoles?.[d.profile_id] === 'admin' ? 'Make crew' : 'Make admin'}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => removeMember(d.profile_id, d.full_name ?? 'this member')}
+                          className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 active:opacity-80"
+                        >
+                          <Text className="text-xs font-semibold text-danger">Remove</Text>
+                        </Pressable>
+                      </View>
+                    ) : null}
 
                     {/* Reassign all — only shown when the driver actually
                         has in-flight bookings to move. Dispatchers + owners

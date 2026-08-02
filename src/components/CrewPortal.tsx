@@ -62,17 +62,24 @@ export function CrewPortal() {
     qc.invalidateQueries({ queryKey: ['company-driver-roster'] });
   };
 
+  // Show + share the code without dashes (COR5AMHB). Join is dash-tolerant.
+  const codeNoDash = myOrg.data?.code ? myOrg.data.code.replace(/-/g, '').toUpperCase() : null;
+
   const copyCode = async () => {
-    if (!myOrg.data?.code) return;
-    await Clipboard.setStringAsync(myOrg.data.code);
+    if (!codeNoDash) return;
+    await Clipboard.setStringAsync(codeNoDash);
     haptic.success();
     toast.success('Code copied');
   };
 
   const shareCode = async () => {
-    if (!myOrg.data?.code) return;
+    if (!codeNoDash) return;
     Share.share({
-      message: `Join my Movvy crew — download Movvy and enter my code ${myOrg.data.code}.`,
+      message:
+        `Join my Movvy crew.\n\n` +
+        `1. Download Movvy\n` +
+        `2. Create your account\n` +
+        `3. In your profile, tap "Join a crew" and enter code ${codeNoDash}`,
     }).catch(() => {});
   };
 
@@ -153,7 +160,7 @@ export function CrewPortal() {
         <>
           <View className="mt-2 flex-row items-center">
             <Text className="text-2xl font-bold tracking-widest text-ink-900">
-              {myOrg.data?.code ?? '—'}
+              {codeNoDash ?? '—'}
             </Text>
             <Pressable onPress={copyCode} hitSlop={8} className="ml-3 h-9 w-9 rounded-full bg-silver-100 items-center justify-center">
               <Ionicons name="copy-outline" size={16} color="#0A0A0A" />

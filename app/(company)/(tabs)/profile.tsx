@@ -240,7 +240,7 @@ export default function CompanyProfile() {
               <Text className="text-xl font-bold text-ink-900">{companyName}</Text>
               {company?.invite_code ? (
                 <View className="mt-1 self-start">
-                  <Badge label={`Code ${company.invite_code}`} tone="neutral" />
+                  <Badge label={`Code ${company.invite_code.replace(/-/g, '')}`} tone="neutral" />
                 </View>
               ) : null}
               {profile?.email ? (
