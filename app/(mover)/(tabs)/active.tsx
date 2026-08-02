@@ -241,21 +241,19 @@ export default function MoverActive() {
   const next = useMemo(() => nextFlag(status), [status]);
   const done = useMemo(() => completedFlags(status), [status]);
 
-  // Scheduled start + an early-start guard. A crew shouldn't be able to kick off
-  // billing hours before the customer's window — only the FIRST step ("We've
-  // left HQ") is gated, and only to 20 min before the scheduled start.
-  const EARLY_START_LEAD_MS = 20 * 60 * 1000;
-  const schedStartMs = !usingMock
-    ? ((booking as any).scheduled_for_window_starts_at
-        ? new Date((booking as any).scheduled_for_window_starts_at).getTime()
-        : (booking as any).scheduled_for_date
-        ? new Date(`${(booking as any).scheduled_for_date}T08:00:00`).getTime()
-        : null)
+  // Early-start guard: a crew can only kick off the move on the DAY OF the
+  // booking — not days early. Only the FIRST step ("We've left HQ") is gated;
+  // once started, the rest of the flow is open. Compared as LOCAL calendar
+  // dates so it flips exactly at local midnight, not UTC.
+  const schedDate: string | null = !usingMock
+    ? ((booking as any).scheduled_for_date ?? null)
     : null;
+  const now = new Date();
+  const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate(),
+  ).padStart(2, '0')}`;
   const isFirstStep = next?.key === 'left_hq';
-  const tooEarly =
-    isFirstStep && schedStartMs != null && Date.now() < schedStartMs - EARLY_START_LEAD_MS;
-  const unlockAt = schedStartMs != null ? new Date(schedStartMs - EARLY_START_LEAD_MS) : null;
+  const tooEarly = isFirstStep && !!schedDate && localToday < schedDate;
 
   const headedTo: 'pickup' | 'dropoff' | null =
     status === 'on_the_way' ? 'pickup' :
@@ -268,10 +266,10 @@ export default function MoverActive() {
     }
     if (tooEarly) {
       Alert.alert(
-        'Too early to start',
+        'Not the move day yet',
         `This move is scheduled for ${fmtDateShort((booking as any).scheduled_for_date)}${
           (booking as any).scheduled_for_window ? ` · ${(booking as any).scheduled_for_window}` : ''
-        }. You can start it 20 minutes before the window.`,
+        }. You can start it on the day of the move.`,
       );
       return;
     }
@@ -583,9 +581,7 @@ export default function MoverActive() {
                 {(booking as any).scheduled_for_window ? ` · ${(booking as any).scheduled_for_window}` : ''}
               </Text>
               <Text className="mt-1 text-xs text-silver-500 text-center leading-5">
-                You can start this move at{' '}
-                {unlockAt ? fmtTime(unlockAt.toISOString()) : 'the scheduled time'} — 20 minutes
-                before the window opens.
+                You can start this move on the day of — the button unlocks then.
               </Text>
             </View>
           ) : (
