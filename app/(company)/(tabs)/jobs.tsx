@@ -66,7 +66,7 @@ import { jobUrgency } from '@/lib/partnerJobs';
 import { supabase, supabaseConfigured, useAuth } from '@/lib/supabase';
 import { haptic } from '@/lib/haptics';
 
-const TABS = ['Requests', 'Needs Driver', 'In Progress', 'Completed'] as const;
+const TABS = ['Requests', 'Needs Driver', 'Upcoming', 'In Progress', 'Completed'] as const;
 type Tab = (typeof TABS)[number];
 
 const IN_FLIGHT = ['confirmed', 'on_the_way', 'arrived', 'loading', 'in_transit', 'unloading'];
@@ -76,6 +76,9 @@ export default function CompanyJobs() {
   const { data: membership, isLoading: memLoading } = useMyMembership();
   const { user } = useAuth();
   const companyId = membership?.kind === 'company' ? membership.company_id : null;
+  // Roster here (not just in the assign modal) so Upcoming cards can name who's
+  // assigned to each move.
+  const { data: roster } = useCompanyDriverRoster(companyId);
   const isDispatcher =
     membership?.kind === 'company' &&
     membership.org_role === 'admin';
@@ -144,6 +147,20 @@ export default function CompanyJobs() {
     () => (queue ?? []).filter((b) => b.bucket === 'needs_driver'),
     [queue],
   );
+  // Upcoming = accepted AND staffed, but the crew hasn't started yet. This is
+  // the "who's booked on what" view the dispatcher needs between assigning and
+  // move day.
+  const upcoming = useMemo(
+    () =>
+      (rows ?? [])
+        .filter((r) => r.status === 'assigned' && !!r.assigned_driver_profile_id)
+        .sort((a, b) =>
+          String(a.scheduled_for_window_starts_at ?? a.scheduled_for_date).localeCompare(
+            String(b.scheduled_for_window_starts_at ?? b.scheduled_for_date),
+          ),
+        ),
+    [rows],
+  );
   const inProgress = useMemo(
     () => (rows ?? []).filter((r) => IN_FLIGHT.includes(r.status)),
     [rows],
@@ -156,6 +173,7 @@ export default function CompanyJobs() {
   const counts: Record<Tab, number> = {
     Requests: newRequests.length,
     'Needs Driver': needsDriver.length,
+    Upcoming: upcoming.length,
     'In Progress': inProgress.length,
     Completed: completed.length,
   };
@@ -264,6 +282,29 @@ export default function CompanyJobs() {
               Alert.alert('Could not release', e?.message ?? 'Try again.');
             }
           }}
+        />
+      ));
+    }
+
+    if (tab === 'Upcoming') {
+      if (jobsLoading && !rows) return <CardSkeleton count={3} />;
+      if (upcoming.length === 0) {
+        return (
+          <EmptyState
+            icon="calendar-outline"
+            title="No upcoming moves"
+            body="Once you assign a crew member to an accepted move, it shows here with who's on it until move day."
+          />
+        );
+      }
+      return upcoming.map((j) => (
+        <SummaryCard
+          key={j.id}
+          row={j}
+          assigneeName={
+            roster?.find((d) => d.profile_id === j.assigned_driver_profile_id)?.full_name ??
+            (j.assigned_driver_profile_id === user?.id ? 'You' : 'Assigned')
+          }
         />
       ));
     }
@@ -523,7 +564,7 @@ function NeedsDriverCard({
   );
 }
 
-function SummaryCard({ row }: { row: any }) {
+function SummaryCard({ row, assigneeName }: { row: any; assigneeName?: string }) {
   const { user } = useAuth();
   // When the admin assigned the move to THEMSELVES, give them a way back into
   // the perform screen if they navigated away mid-move.
@@ -570,6 +611,14 @@ function SummaryCard({ row }: { row: any }) {
           </View>
           <Text className="text-xs text-silver-500">#{row.short_code}</Text>
         </View>
+
+        {assigneeName ? (
+          <View className="mt-3 flex-row items-center rounded-2xl bg-silver-50 px-3 py-2.5">
+            <Ionicons name="person-circle-outline" size={16} color="#047857" />
+            <Text className="ml-2 text-xs text-silver-600">Assigned to</Text>
+            <Text className="ml-1 text-xs font-bold text-ink-900">{assigneeName}</Text>
+          </View>
+        ) : null}
 
         {mineToPerform ? (
           <Pressable

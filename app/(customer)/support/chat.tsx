@@ -41,7 +41,6 @@ export default function SupportChatScreen() {
           peerName="Movvy Support"
           callNumber="+16134163426"
           onClose={() => router.back()}
-          onMore={() => router.push('/(customer)/support')}
         />
       ) : (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>

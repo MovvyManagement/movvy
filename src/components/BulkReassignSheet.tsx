@@ -23,7 +23,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
-import { supabase, supabaseConfigured } from '@/lib/supabase';
+import { supabase, supabaseConfigured, useAuth } from '@/lib/supabase';
 import {
   useCompanyDriverRoster,
   useDispatcherAssign,
@@ -64,6 +64,7 @@ export function BulkReassignSheet({
   sourceDriverName,
 }: Props) {
   const toast = useToast();
+  const { user } = useAuth();
   const assign = useDispatcherAssign();
   const [replacementId, setReplacementId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -91,15 +92,31 @@ export function BulkReassignSheet({
   const { data: roster, isLoading: rLoading } = useCompanyDriverRoster(companyId);
 
   // Eligible replacements — anyone in the roster except the source driver,
-  // sorted online → least busy → name.
+  // sorted online → least busy → name. The signed-in admin is included as
+  // "You" (pinned first) so they can take the jobs themselves, matching the
+  // "I'll drive this one" option in the single-job assign picker. Admins aren't
+  // on the driver roster, so without this they had no way to self-reassign.
   const candidates = useMemo<CompanyDriverRosterRow[]>(() => {
     const list = (roster ?? []).filter((d) => d.profile_id !== sourceDriverId);
-    return list.slice().sort((a, b) => {
+    const sorted = list.slice().sort((a, b) => {
       if (a.is_online !== b.is_online) return a.is_online ? -1 : 1;
       if (a.active_jobs !== b.active_jobs) return a.active_jobs - b.active_jobs;
       return (a.full_name ?? '').localeCompare(b.full_name ?? '');
     });
-  }, [roster, sourceDriverId]);
+    const meAlreadyListed = sorted.some((d) => d.profile_id === user?.id);
+    if (!user?.id || meAlreadyListed || user.id === sourceDriverId) return sorted;
+    const me = {
+      profile_id: user.id,
+      full_name: 'You',
+      email: null,
+      phone: null,
+      driver_license_number: null,
+      active_jobs: 0,
+      is_online: true,
+      last_online_at: null,
+    } as CompanyDriverRosterRow;
+    return [me, ...sorted];
+  }, [roster, sourceDriverId, user?.id]);
 
   const count = bookings?.length ?? 0;
 

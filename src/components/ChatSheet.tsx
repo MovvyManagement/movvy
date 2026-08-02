@@ -31,6 +31,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from './Avatar';
 import { MovvyMark } from './MovvyMark';
+import { useToast } from './Toast';
 import { fmtTime } from '@/lib/format';
 import {
   useEnsureBookingThread,
@@ -51,9 +52,6 @@ interface Props {
   onClose: () => void;
   /** Display name shown in the header (e.g. driver name or customer name). */
   peerName?: string;
-  /** When set, a "⋯" header button appears that opens more options — used by
-   *  the support chat to reach SOS / claims / disputes without a hub menu. */
-  onMore?: () => void;
   /** A real phone number (E.164, e.g. "+16134163426") the header call button
    *  should dial directly. Used by the support chat, where the Movvy support
    *  line is a real number the customer can just call. When omitted (crew↔
@@ -62,8 +60,9 @@ interface Props {
   callNumber?: string;
 }
 
-export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose, peerName, onMore, callNumber }: Props) {
+export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose, peerName, callNumber }: Props) {
   const { user } = useAuth();
+  const toast = useToast();
   const ensureThread = useEnsureBookingThread();
   const send = useSendChatMessage();
   const [threadId, setThreadId] = useState<string | null>(threadIdProp ?? null);
@@ -103,7 +102,12 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
     ensureThread
       .mutateAsync(bookingId)
       .then(setThreadId)
-      .catch(() => setThreadId(null));
+      .catch((e: any) => {
+        setThreadId(null);
+        // Don't fail silently — a null thread used to make Send look tappable
+        // while doing nothing at all.
+        toast.error(e?.message ?? "Couldn't open this chat. Pull down to retry.");
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, bookingId, threadIdProp]);
 
@@ -118,14 +122,32 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
   }, [messages.length, visible]);
 
   const onSend = async () => {
-    if (!text.trim() || !threadId) return;
+    if (!text.trim()) return;
     const body = text.trim();
+    // If the thread never bootstrapped (e.g. first message on a fresh booking),
+    // create it now instead of silently doing nothing.
+    let tid = threadId;
+    if (!tid) {
+      if (!bookingId) {
+        toast.error("This chat isn't ready yet. Close and reopen it.");
+        return;
+      }
+      try {
+        tid = await ensureThread.mutateAsync(bookingId);
+        setThreadId(tid);
+      } catch (e: any) {
+        toast.error(e?.message ?? "Couldn't start this chat. Try again.");
+        return;
+      }
+    }
     setText('');
     try {
-      await send.mutateAsync({ thread_id: threadId, body });
+      await send.mutateAsync({ thread_id: tid, body });
     } catch (e: any) {
       setText(body); // restore on failure
-      Alert.alert('Could not send', e?.message ?? 'Try again.');
+      // Toast, not Alert — a native Alert from inside this fullScreen Modal can
+      // freeze the sheet on iOS.
+      toast.error(e?.message ?? 'Could not send. Try again.');
     }
   };
 
@@ -179,31 +201,20 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
               </View>
             </View>
             <View className="flex-row items-center">
-              {onMore ? (
-                <Pressable
-                  onPress={onMore}
-                  hitSlop={8}
-                  className="h-10 w-10 rounded-full bg-silver-100 items-center justify-center mr-2"
-                >
-                  <Ionicons name="ellipsis-horizontal" size={18} color="#0A0A0A" />
-                </Pressable>
-              ) : null}
               <Pressable
                 onPress={() => {
-                  // Support chat → dial the real Movvy support line directly so
-                  // the customer lands in their phone dialer, number prefilled.
+                  // NEVER fire a native Alert from inside this fullScreen Modal —
+                  // on iOS that can leave the modal unresponsive (the "chat
+                  // freezes after tapping call, and X stops working" bug). Use a
+                  // toast for feedback instead, and just open the dialer when we
+                  // have a real number.
                   if (callNumber) {
-                    const tel = `tel:${callNumber}`;
-                    Linking.openURL(tel).catch(() =>
-                      Alert.alert('Call', `Dial ${callNumber} to reach Movvy support.`),
+                    Linking.openURL(`tel:${callNumber}`).catch(() =>
+                      toast.error(`Dial ${callNumber} to reach Movvy support.`),
                     );
                     return;
                   }
-                  // Crew↔customer chat → private proxy line (not live yet).
-                  Alert.alert(
-                    'Calling via Movvy line',
-                    "We'll connect you through a Movvy number so your real phone stays private. (Activates once Twilio is wired.)"
-                  );
+                  toast.info('Calls route through a Movvy line — activating soon.');
                 }}
                 className="h-10 w-10 rounded-full bg-brand-600 items-center justify-center"
               >
