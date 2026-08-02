@@ -20,6 +20,7 @@ import { useCompanyDriverRoster } from '@/lib/data';
 import { RatingStars } from '@/components/RatingStars';
 import { ChatSheet } from '@/components/ChatSheet';
 import { fmtDateShort, fmtTime } from '@/lib/format';
+import { moveSummary, moveWhen, moveExtras } from '@/lib/moveSummary';
 import { BillingTimer } from '@/components/BillingTimer';
 import { useRef, useEffect } from 'react';
 import { openInMaps } from '@/lib/maps';
@@ -391,6 +392,59 @@ export default function MoverActive() {
             (next?.currentMessage ?? 'Job complete')
           }
         />
+
+        {/* What the job actually IS — a crew arriving on site needs the move
+            type, when it's booked, the full addresses, and any extras (stairs,
+            packing, heavy items). The map + two pins alone told them nothing. */}
+        <View className="mt-3 rounded-3xl border border-silver-100 bg-white p-5">
+          <View className="flex-row items-center justify-between">
+            <Text className="text-base font-bold text-ink-900">{moveSummary(liveJob ?? booking)}</Text>
+            <Text className="text-xs text-silver-500">
+              #{(booking as any).short_code ?? ''}
+            </Text>
+          </View>
+          <View className="mt-1 flex-row items-center">
+            <Ionicons name="calendar-outline" size={14} color="#71717A" />
+            <Text className="ml-1.5 text-xs font-semibold text-brand-700">
+              {moveWhen(liveJob ?? booking)}
+            </Text>
+          </View>
+
+          <View className="mt-4 flex-row">
+            <View className="items-center mr-3">
+              <View className="h-3 w-3 rounded-full bg-ink-900" />
+              <View className="w-0.5 flex-1 my-1 bg-silver-300" style={{ minHeight: 20 }} />
+              <View className="h-3 w-3 rounded-full bg-brand-600" />
+            </View>
+            <View className="flex-1">
+              <Text className="text-sm font-semibold text-ink-900">{booking.pickup.line1}</Text>
+              <Text className="text-xs text-silver-500 mb-3">{booking.pickup.city}</Text>
+              <Text className="text-sm font-semibold text-ink-900">{booking.dropoff.line1}</Text>
+              <Text className="text-xs text-silver-500">{booking.dropoff.city}</Text>
+            </View>
+          </View>
+
+          {moveExtras(liveJob ?? booking).length > 0 ? (
+            <View className="mt-4 flex-row flex-wrap gap-1.5">
+              {moveExtras(liveJob ?? booking).map((c) => (
+                <View key={c} className="px-2.5 py-1 rounded-full bg-silver-100">
+                  <Text className="text-[11px] font-semibold text-ink-700">{c}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {(liveJob as any)?.customer_notes ? (
+            <View className="mt-4 rounded-2xl bg-silver-50 p-3">
+              <Text className="text-[11px] font-semibold uppercase tracking-wider text-silver-500">
+                Customer notes
+              </Text>
+              <Text className="mt-1 text-xs text-ink-900 leading-5">
+                {(liveJob as any).customer_notes}
+              </Text>
+            </View>
+          ) : null}
+        </View>
 
         {/* Billing timer — only relevant for the actual crew (not the
             company dispatcher viewing remotely). Shows the running clock

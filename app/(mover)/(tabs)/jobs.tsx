@@ -13,6 +13,7 @@ import { NewJobOfferHost } from '@/components/NewJobOfferHost';
 import { mockJobs } from '@/data/mockJobs';
 import { withMockFallback } from '@/lib/mocks';
 import { fmtCurrency, fmtDistance, fmtDuration, fmtTime, fmtDateShort } from '@/lib/format';
+import { moveSummary } from '@/lib/moveSummary';
 import { useAvailableJobs, useAcceptBooking, useMyMembership, useMyAssignedJobs, acceptOnBehalfOf } from '@/lib/data';
 import { estimatePartnerPayoutCents, jobEffort, distanceToPickupKm } from '@/lib/partnerJobs';
 import { useUserLocation } from '@/lib/useUserLocation';
@@ -244,10 +245,13 @@ export default function MoverJobs() {
                               <Text className="text-base font-bold text-ink-900">
                                 {b.scheduled_for_window_starts_at
                                   ? fmtTime(b.scheduled_for_window_starts_at)
-                                  : 'TBD'}
+                                  : b.scheduled_for_window ?? 'All day'}
                               </Text>
                               <Text className="text-[11px] text-silver-500 mt-0.5">
-                                {b.move_type.replace(/_/g, ' ')}
+                                {fmtDateShort(b.scheduled_for_date)}
+                              </Text>
+                              <Text className="text-[11px] font-semibold text-ink-700 mt-1">
+                                {moveSummary(b)}
                               </Text>
                             </View>
                             <View className="flex-1">

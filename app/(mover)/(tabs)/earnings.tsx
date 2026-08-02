@@ -10,6 +10,7 @@ import {
   useProfile,
   useMyMembership,
   useDriverEarningsSummary,
+  useHoursWorked,
 } from '@/lib/data';
 import { EarningsExportSheet } from '@/components/EarningsExportSheet';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -44,6 +45,9 @@ export default function MoverEarnings() {
   // per move. So this whole screen drops the dollar figures, payout history
   // and tax export, and shows the wage-model explainer + their rating instead.
   const isHourly = membership?.is_hourly ?? false;
+  // Hours-per-day for the last two weeks — what an hourly crew member needs
+  // instead of dollar figures.
+  const hours = useHoursWorked(14);
   const employerName = membership?.company_name ?? membership?.team_name ?? 'your crew';
 
   // Solo driver / partner team / company — passed through to the export
@@ -93,19 +97,62 @@ export default function MoverEarnings() {
         {isHourly ? (
           // Hourly workers don't earn per move — show the wage model instead
           // of any dollar figures, bars, or payout history.
-          <View className="rounded-3xl bg-ink-900 p-6">
-            <Text className="text-white/70 text-xs uppercase font-semibold tracking-wider">
-              How you're paid
+          // Hourly workers don't earn per move — they need their HOURS, not
+          // dollars: time worked per day over the last two weeks, so they can
+          // check it against the paycheque their crew admin issues.
+          <>
+            <View className="rounded-3xl bg-ink-900 p-6">
+              <Text className="text-white/70 text-xs uppercase font-semibold tracking-wider">
+                Last 2 weeks
+              </Text>
+              <Text className="text-white text-5xl font-bold mt-1">
+                {(hours.data?.totalHours ?? 0).toFixed(1)}
+                <Text className="text-2xl"> hrs</Text>
+              </Text>
+              <Text className="text-white/70 text-sm mt-3 leading-5">
+                {hours.data?.totalMoves ?? 0}{' '}
+                {(hours.data?.totalMoves ?? 0) === 1 ? 'move' : 'moves'} with {employerName}.
+                You're on a wage — {employerName} handles your pay, so job prices
+                don't apply to you. These are the hours Movvy recorded for you.
+              </Text>
+            </View>
+
+            <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500 mt-6 mb-2">
+              Hours by day
             </Text>
-            <Text className="text-white text-2xl font-bold mt-2 leading-7">
-              Hourly with {employerName}
-            </Text>
-            <Text className="text-white/70 text-sm mt-3 leading-5">
-              You're on a wage, so individual job prices and payouts don't apply
-              to you — {employerName} handles your pay directly. Focus on the
-              moves on your shift; the rating below is what Movvy tracks for you.
-            </Text>
-          </View>
+            {hours.isLoading ? (
+              <Skeleton width="100%" height={72} />
+            ) : (hours.data?.days.length ?? 0) === 0 ? (
+              <Card>
+                <Text className="text-sm font-semibold text-ink-900">No hours logged yet</Text>
+                <Text className="text-xs text-silver-500 mt-1 leading-4">
+                  Once you finish a move, the time you worked shows up here — day
+                  by day for the last two weeks.
+                </Text>
+              </Card>
+            ) : (
+              hours.data!.days.map((d) => (
+                <View key={d.date} className="mb-2">
+                  <Card>
+                    <View className="flex-row items-center justify-between">
+                      <View>
+                        <Text className="text-sm font-bold text-ink-900">
+                          {fmtDateShort(d.date)}
+                        </Text>
+                        <Text className="text-xs text-silver-500 mt-0.5">
+                          {d.moves} {d.moves === 1 ? 'move' : 'moves'}
+                        </Text>
+                      </View>
+                      <Text className="text-xl font-bold text-ink-900">
+                        {d.hours.toFixed(1)}
+                        <Text className="text-sm text-silver-500"> hrs</Text>
+                      </Text>
+                    </View>
+                  </Card>
+                </View>
+              ))
+            )}
+          </>
         ) : noEarnings ? (
           // Cold-state hero — keeps the friendly onboarding copy intact for
           // drivers who haven't completed a move yet. No fake bars.

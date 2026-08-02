@@ -29,3 +29,4 @@ export * from './useSupport';
 export * from './usePaymentMethods';
 export * from './usePhoneProxy';
 export * from './useCompany';
+export * from './useHoursWorked';

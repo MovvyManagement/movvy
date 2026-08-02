@@ -8,7 +8,8 @@ import { InviteAcceptHost } from '@/components/InviteAcceptHost';
 import { NewJobOfferHost } from '@/components/NewJobOfferHost';
 import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
-import { fmtCurrency, fmtTime, fmtDistance, fmtDuration } from '@/lib/format';
+import { fmtCurrency, fmtTime, fmtDistance, fmtDuration, fmtDateShort } from '@/lib/format';
+import { moveSummary, moveWhen } from '@/lib/moveSummary';
 import { estimatePartnerPayoutCents, jobEffort, distanceToPickupKm } from '@/lib/partnerJobs';
 import {
   useProfile,
@@ -218,15 +219,16 @@ export default function MoverDashboard() {
               </View>
               <View className="ml-3 flex-1">
                 <Text className="text-xs text-silver-500 uppercase font-semibold">Next up</Text>
+                {/* Date + what kind of move — a crew member needs to know WHEN
+                    and WHAT, not just two street names. */}
+                <Text className="text-xs font-semibold text-brand-700 mt-0.5">
+                  {moveWhen(nextScheduledJob)}
+                </Text>
                 <Text className="text-sm font-bold text-ink-900 mt-0.5" numberOfLines={1}>
                   {nextScheduledJob.pickup_line1} → {nextScheduledJob.dropoff_line1 ?? 'in-home'}
                 </Text>
                 <Text className="text-xs text-silver-500 mt-0.5">
-                  {nextScheduledJob.scheduled_for_window_starts_at
-                    ? fmtTime(nextScheduledJob.scheduled_for_window_starts_at)
-                    : nextScheduledJob.scheduled_for_window ?? 'Time TBD'}
-                  {' · '}
-                  {nextScheduledJob.pickup_city}
+                  {moveSummary(nextScheduledJob)} · {nextScheduledJob.pickup_city}
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color="#A1A1AA" />
@@ -301,11 +303,14 @@ export default function MoverDashboard() {
                 <Card onPress={() => router.push('/(mover)/(tabs)/active')}>
                   <View className="flex-row items-center">
                     {/* Time column — the spine of a shift view. */}
-                    <View className="items-center mr-3" style={{ width: 60 }}>
+                    <View className="items-center mr-3" style={{ width: 66 }}>
                       <Text className="text-sm font-bold text-ink-900">
                         {b.scheduled_for_window_starts_at
                           ? fmtTime(b.scheduled_for_window_starts_at)
-                          : 'TBD'}
+                          : b.scheduled_for_window ?? 'All day'}
+                      </Text>
+                      <Text className="text-[10px] text-silver-500 mt-0.5">
+                        {fmtDateShort(b.scheduled_for_date)}
                       </Text>
                     </View>
                     <View className="flex-1">
@@ -313,7 +318,7 @@ export default function MoverDashboard() {
                         {b.pickup_line1} → {b.dropoff_line1 ?? 'in-home'}
                       </Text>
                       <Text className="text-xs text-silver-500 mt-0.5" numberOfLines={1}>
-                        {b.pickup_city} · #{b.short_code}
+                        {moveSummary(b)} · {b.pickup_city} · #{b.short_code}
                       </Text>
                     </View>
                     <Badge label={b.status.replace(/_/g, ' ')} tone="brand" />
