@@ -65,6 +65,18 @@ export default async function RevenuePage() {
       .limit(60),
   ]);
 
+  // Late-release penalties — $100 charged when an org hands a move back with
+  // under 3 days' notice. Movvy-side income, and a partner-quality signal.
+  const { data: penaltyRows } = await supabase
+    .from('release_penalties')
+    .select(
+      'id, amount_cents, created_at, booking:bookings(short_code), company:companies(display_name)',
+    )
+    .order('created_at', { ascending: false })
+    .limit(50);
+  const penalties = (penaltyRows ?? []) as any[];
+  const penaltyTotal = penalties.reduce((s: number, p: any) => s + (p.amount_cents ?? 0), 0);
+
   const completed = allCompleted ?? [];
   const sum = (rows: any[], pick: (b: any) => number) => rows.reduce((s, b) => s + pick(b), 0);
   const thisMonth = completed.filter((b: any) => b.created_at >= monthStart.toISOString());
@@ -161,6 +173,55 @@ export default async function RevenuePage() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Late-release penalties — the $100 an org is charged for handing a move
+          back with under 3 days' notice. Money in for Movvy, and a partner
+          reliability signal worth watching. */}
+      <div className="mt-8">
+        <h2 className="text-sm font-semibold text-zinc-900 mb-1">Late-release penalties</h2>
+        <p className="text-xs text-zinc-500 mb-3">
+          {penalties.length} release{penalties.length === 1 ? '' : 's'} inside the 3-day window ·{' '}
+          <span className="font-semibold text-zinc-900">${(penaltyTotal / 100).toFixed(2)}</span>
+        </p>
+        {penalties.length === 0 ? (
+          <div className="text-xs text-zinc-400 border border-zinc-100 rounded-xl p-4">
+            No late releases yet.
+          </div>
+        ) : (
+          <div className="border border-zinc-100 rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-50 text-xs text-zinc-500">
+                <tr>
+                  <th className="text-left font-medium px-4 py-2">Move</th>
+                  <th className="text-left font-medium px-4 py-2">Crew</th>
+                  <th className="text-left font-medium px-4 py-2">When</th>
+                  <th className="text-right font-medium px-4 py-2">Penalty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {penalties.map((p: any) => {
+                  const bk = Array.isArray(p.booking) ? p.booking[0] : p.booking;
+                  const co = Array.isArray(p.company) ? p.company[0] : p.company;
+                  return (
+                    <tr key={p.id} className="border-b border-zinc-50 last:border-0">
+                      <td className="px-4 py-2 font-medium text-zinc-900">
+                        {bk?.short_code ? `#${bk.short_code}` : '—'}
+                      </td>
+                      <td className="px-4 py-2 text-zinc-600">{co?.display_name ?? '—'}</td>
+                      <td className="px-4 py-2 text-zinc-500">
+                        {new Date(p.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-2 text-right font-semibold text-red-600">
+                        ${((p.amount_cents ?? 0) / 100).toFixed(2)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -112,18 +112,39 @@ export default async function ApplicantDetailPage({ params }: PageProps) {
     subject = {
       id: company.id,
       name: company.display_name ?? company.legal_name,
-      subtitle: `Company · reg ${company.registration_number ?? '—'} · ${company.hq_city_name ?? ''}`,
+      subtitle: [
+        company.registration_number ? `Reg ${company.registration_number}` : 'Independent operator',
+        company.hq_city_name ?? '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
       onboarding_status: company.onboarding_status,
       created_at: company.created_at,
       invite_code: company.invite_code,
     };
 
+    // Operator onboarding uploads the driver's licence + government ID against
+    // the PERSON (subject_type 'profile'), not the org — so a company-only
+    // filter showed an empty doc list for every app signup and left admins with
+    // nothing to review. Include the org's members' personal docs too, the same
+    // way the team branch above does.
+    const { data: cMembers } = await supabase
+      .from('company_members')
+      .select('profile_id')
+      .eq('company_id', id)
+      .is('removed_at', null);
+    const cMemberIds = (cMembers ?? []).map((m: any) => m.profile_id).filter(Boolean);
+
     const { data: vd } = await supabase
       .from('verification_documents')
       .select(
-        'id, kind, storage_bucket, storage_path, status, mime_type, expires_at, created_at, company_id',
+        'id, kind, storage_bucket, storage_path, status, mime_type, expires_at, created_at, company_id, profile_id',
       )
-      .eq('company_id', id)
+      .or(
+        `company_id.eq.${id},profile_id.in.(${
+          cMemberIds.join(',') || '00000000-0000-0000-0000-000000000000'
+        })`,
+      )
       .order('created_at', { ascending: false });
     docs = vd ?? [];
   }
