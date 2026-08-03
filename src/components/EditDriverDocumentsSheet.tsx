@@ -43,6 +43,7 @@ type DocKind =
   | 'gov_id'
   | 'driver_license'
   | 'selfie_with_id'
+  | 'vehicle_registration'
   | 'insurance'
   | 'business_registration';
 
@@ -73,6 +74,15 @@ const DOCS: DocSpec[] = [
     kind: 'selfie_with_id',
     label: 'Selfie with ID',
     sub: 'You holding your government ID',
+    scope: 'profile',
+    required: true,
+  },
+  {
+    // Proof the truck is actually theirs. Required before ANY job can be
+    // accepted — org_can_take_booking() blocks accepts without it.
+    kind: 'vehicle_registration',
+    label: 'Truck registration',
+    sub: 'Proof the truck is registered to you or your company',
     scope: 'profile',
     required: true,
   },

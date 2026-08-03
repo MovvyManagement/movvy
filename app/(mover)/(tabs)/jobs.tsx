@@ -143,6 +143,9 @@ export default function MoverJobs() {
         pickupLat: b.pickup_lat,
         pickupLng: b.pickup_lng,
         effortChips: jobEffort(b).chips,
+        requiredTruckFt: (b as any).required_truck_ft ?? 0,
+        requiredCrew: (b as any).required_crew ?? 2,
+        myMaxTruckFt: (b as any).my_max_truck_ft ?? 0,
         itemsSummary:
           b.move_type === 'home_move'
             ? `${(b.details as any)?.bedrooms ?? 0}-bed ${(b.details as any)?.dwelling ?? 'home'}`
@@ -460,17 +463,40 @@ export default function MoverJobs() {
                       </View>
                     ) : null}
 
-                    {/* 4.3 One-tap Accept */}
-                    <Pressable
-                      onPress={() => onAccept(j.id)}
-                      disabled={accept.isPending}
-                      className={`mt-3 h-12 rounded-2xl items-center justify-center flex-row ${
-                        accept.isPending ? 'bg-silver-200' : 'bg-brand-600 active:opacity-90'
-                      }`}
-                    >
-                      <Ionicons name="checkmark" size={18} color="#fff" />
-                      <Text className="ml-2 text-sm font-bold text-white">Accept this job</Text>
-                    </Pressable>
+                    {/* What this move needs — truck size + crew. Shown BEFORE
+                        the Accept so nobody claims a job their truck can't
+                        carry and finds out on move day. */}
+                    <View className="mt-3 flex-row items-center">
+                      <Ionicons name="cube-outline" size={14} color="#71717A" />
+                      <Text className="ml-1.5 text-xs text-silver-600">
+                        {j.requiredTruckFt > 0
+                          ? `Needs ${j.requiredTruckFt} ft truck · ${j.requiredCrew} crew`
+                          : `Needs ${j.requiredCrew} crew`}
+                      </Text>
+                    </View>
+
+                    {/* 4.3 One-tap Accept — blocked when the truck won't fit. */}
+                    {j.requiredTruckFt > 0 && j.myMaxTruckFt < j.requiredTruckFt ? (
+                      <View className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 flex-row items-center">
+                        <Ionicons name="alert-circle-outline" size={16} color="#B45309" />
+                        <Text className="ml-2 flex-1 text-[11px] text-ink-900 leading-4">
+                          {j.myMaxTruckFt > 0
+                            ? `Your largest truck is ${j.myMaxTruckFt} ft — this move needs ${j.requiredTruckFt} ft.`
+                            : 'Add your truck (with its registration) before accepting jobs.'}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Pressable
+                        onPress={() => onAccept(j.id)}
+                        disabled={accept.isPending}
+                        className={`mt-3 h-12 rounded-2xl items-center justify-center flex-row ${
+                          accept.isPending ? 'bg-silver-200' : 'bg-brand-600 active:opacity-90'
+                        }`}
+                      >
+                        <Ionicons name="checkmark" size={18} color="#fff" />
+                        <Text className="ml-2 text-sm font-bold text-white">Accept this job</Text>
+                      </Pressable>
+                    )}
                   </Card>
                 </View>
               ))}

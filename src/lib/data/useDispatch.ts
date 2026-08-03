@@ -259,6 +259,12 @@ export interface OrgOpenJob {
   /** Null for crew — the pricing gate lives in the RPC, not the UI. */
   price_total_cents: number | null;
   driver_total_cents: number | null;
+  /** Capacity: what this move needs vs the biggest truck this org has. */
+  required_truck_ft: number;
+  required_crew: number;
+  my_max_truck_ft: number;
+  bedrooms: number;
+  dwelling: string;
 }
 
 export function useOrgOpenJobs(radiusKm = 60) {

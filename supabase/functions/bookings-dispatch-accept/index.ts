@@ -64,6 +64,19 @@ handle(async (req) => {
       .maybeSingle();
     if (!membership) throw httpError(403, 'You are not a member of this org');
 
+    // Capacity gate. Enforced HERE, not just in the UI — otherwise a crew with
+    // a 16 ft van could still claim a 4-bedroom house through a stale screen or
+    // a direct API call, and the customer finds out on move day. Checks, in
+    // order: the org has a truck at all, its registration has been submitted,
+    // and the biggest truck on file actually fits this move.
+    const { data: verdict } = await admin.rpc('org_can_take_booking', {
+      p_company_id: company_id,
+      p_booking_id: booking_id,
+    });
+    if (verdict && (verdict as any).ok !== true) {
+      throw httpError(400, (verdict as any).reason ?? 'Your truck cannot take this move.');
+    }
+
     // Atomic claim — only succeeds if the booking is still searching.
     const { data, error } = await admin
       .from('bookings')

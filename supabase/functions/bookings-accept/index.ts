@@ -97,6 +97,16 @@ handle(async (req) => {
         .is('removed_at', null)
         .maybeSingle();
       if (!m) throw httpError(403, 'You are not a member of this company');
+
+      // Same capacity gate as bookings-dispatch-accept — a crew can't claim a
+      // move their truck can't carry, whichever accept path they came through.
+      const { data: verdict } = await admin.rpc('org_can_take_booking', {
+        p_company_id: company_id,
+        p_booking_id: booking_id,
+      });
+      if (verdict && (verdict as any).ok !== true) {
+        throw httpError(400, (verdict as any).reason ?? 'Your truck cannot take this move.');
+      }
     }
 
     // Atomic accept — only succeeds if status is still 'searching'.

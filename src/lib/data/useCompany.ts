@@ -88,6 +88,7 @@ export interface VehicleRow {
   plate: string;
   province: string;
   capacity_cu_ft: number | null;
+  length_ft: number | null;
   created_at: string;
 }
 
@@ -118,6 +119,7 @@ export function useAddCompanyVehicle(companyId: string | null | undefined) {
       plate: string;
       province: string;
       capacity_cu_ft?: number | null;
+      length_ft?: number | null;
     }) => {
       if (!companyId) throw new Error('No company id');
       const { data, error } = await supabase
@@ -131,6 +133,7 @@ export function useAddCompanyVehicle(companyId: string | null | undefined) {
           plate: input.plate.toUpperCase().trim(),
           province: input.province.toUpperCase().trim(),
           capacity_cu_ft: input.capacity_cu_ft ?? null,
+          length_ft: input.length_ft ?? null,
         })
         .select('*')
         .single();

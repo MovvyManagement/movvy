@@ -32,13 +32,21 @@ interface Props {
 
 const IS_IOS = Platform.OS === 'ios';
 
-const TYPES: { key: VehicleRow['type']; label: string; sub: string }[] = [
-  { key: 'cargo_van', label: 'Cargo van', sub: 'Studio + 1-bed apt' },
-  { key: 'cube_van_16', label: '16 ft cube', sub: '2-bed apt or condo' },
-  { key: 'box_truck_24', label: '24 ft box', sub: '3-bed home' },
-  { key: 'box_truck_26', label: '26 ft box', sub: '4-bed home' },
-  { key: 'pickup_truck', label: 'Pickup', sub: 'Single items / labor only' },
-  { key: 'other', label: 'Other', sub: 'Trailer, etc.' },
+// Box length in FEET is what decides which moves the org can accept (see
+// src/lib/truckFit.ts + migration 0082). The legacy `type` enum is kept in step
+// for back-compat but is too coarse to express the 20/22 ft bands.
+const TYPES: {
+  key: VehicleRow['type'];
+  ft: number;
+  label: string;
+  sub: string;
+}[] = [
+  { key: 'cargo_van', ft: 10, label: 'Cargo van', sub: 'Single items / labour' },
+  { key: 'cube_van_16', ft: 16, label: '16 ft', sub: 'Up to 1-bed apartment' },
+  { key: 'cube_van_16', ft: 20, label: '20 ft', sub: '2-bed apt · 2-bed house' },
+  { key: 'box_truck_24', ft: 22, label: '22 ft', sub: '3-bed apartment' },
+  { key: 'box_truck_24', ft: 24, label: '24 ft', sub: '3-bed house' },
+  { key: 'box_truck_26', ft: 26, label: '26 ft', sub: '4-bed house' },
 ];
 
 export function AddTruckSheet({ visible, companyId, onClose }: Props) {
@@ -46,6 +54,7 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
   const toast = useToast();
 
   const [type, setType] = useState<VehicleRow['type']>('cube_van_16');
+  const [lengthFt, setLengthFt] = useState<number>(16);
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
   const [year, setYear] = useState('');
@@ -57,6 +66,7 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
   useEffect(() => {
     if (!visible) return;
     setType('cube_van_16');
+    setLengthFt(16);
     setMake('');
     setModel('');
     setYear('');
@@ -85,6 +95,7 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
         plate: plate.trim(),
         province: province.trim().toUpperCase(),
         capacity_cu_ft: capacity ? Number(capacity) : null,
+        length_ft: lengthFt,
       });
       haptic.success();
       toast.success('Truck added');
@@ -116,11 +127,14 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
       </Text>
       <View className="flex-row flex-wrap gap-2">
         {TYPES.map((t) => {
-          const active = t.key === type;
+          const active = t.ft === lengthFt;
           return (
             <Pressable
-              key={t.key}
-              onPress={() => setType(t.key)}
+              key={t.ft}
+              onPress={() => {
+                setLengthFt(t.ft);
+                setType(t.key);
+              }}
               className={`px-3 py-2 rounded-2xl border ${
                 active ? 'border-brand-600 bg-brand-50' : 'border-silver-200 bg-white'
               }`}

@@ -25,19 +25,24 @@ import { haptic } from '@/lib/haptics';
 import { supabase, useAuth } from '@/lib/supabase';
 import { useCities, useUploadDocument } from '@/lib/data';
 
-type DocKey = 'driver_license' | 'gov_id';
+type DocKey = 'driver_license' | 'gov_id' | 'vehicle_registration';
 const DOCS: { key: DocKey; label: string; hint: string }[] = [
   { key: 'driver_license', label: "Driver's license", hint: 'Front, clear and readable' },
   { key: 'gov_id', label: 'Government ID', hint: 'Passport or provincial ID' },
+  // Proof the truck is actually theirs — required before any job can be
+  // accepted (enforced server-side in org_can_take_booking).
+  { key: 'vehicle_registration', label: 'Truck registration', hint: 'Shows the truck is registered to you or your company' },
 ];
 
-const TRUCK_SIZES: { value: string; label: string }[] = [
-  { value: 'cargo_van', label: 'Cargo van' },
-  { value: 'cube_van_16', label: '16 ft cube van' },
-  { value: 'box_truck_24', label: '24 ft box truck' },
-  { value: 'box_truck_26', label: '26 ft box truck' },
-  { value: 'pickup_truck', label: 'Pickup truck' },
-  { value: 'other', label: 'Other' },
+// Length in FEET decides which moves you can accept (src/lib/truckFit.ts).
+// The legacy enum is carried along for back-compat.
+const TRUCK_SIZES: { value: string; ft: number; label: string; sub: string }[] = [
+  { value: 'cargo_van', ft: 10, label: 'Cargo van', sub: 'Single items / labour' },
+  { value: 'cube_van_16', ft: 16, label: '16 ft', sub: 'Up to 1-bed apartment' },
+  { value: 'cube_van_16', ft: 20, label: '20 ft', sub: '2-bed apt · 2-bed house' },
+  { value: 'box_truck_24', ft: 22, label: '22 ft', sub: '3-bed apartment' },
+  { value: 'box_truck_24', ft: 24, label: '24 ft', sub: '3-bed house' },
+  { value: 'box_truck_26', ft: 26, label: '26 ft', sub: '4-bed house' },
 ];
 
 export default function OperatorOnboarding() {
@@ -49,10 +54,12 @@ export default function OperatorOnboarding() {
   const [uploaded, setUploaded] = useState<Record<DocKey, boolean>>({
     driver_license: false,
     gov_id: false,
+    vehicle_registration: false,
   });
   const [busyDoc, setBusyDoc] = useState<DocKey | null>(null);
   const [cityId, setCityId] = useState<string | null>(null);
   const [truckSize, setTruckSize] = useState<string | null>(null);
+  const [truckFt, setTruckFt] = useState<number | null>(null);
   const [plate, setPlate] = useState('');
   const [province, setProvince] = useState('AB');
   const [submitting, setSubmitting] = useState(false);
@@ -92,6 +99,7 @@ export default function OperatorOnboarding() {
   const canFinish =
     uploaded.driver_license &&
     uploaded.gov_id &&
+    uploaded.vehicle_registration &&
     !!cityId &&
     !!truckSize &&
     plate.trim().length >= 2 &&
@@ -123,6 +131,7 @@ export default function OperatorOnboarding() {
       const { error: truckErr } = await supabase.from('vehicles').insert({
         company_id: companyId,
         type: truckSize,
+        length_ft: truckFt,
         plate: plate.trim().toUpperCase(),
         province: province.trim().toUpperCase(),
       });
@@ -228,8 +237,11 @@ export default function OperatorOnboarding() {
             const active = truckSize === t.value;
             return (
               <Pressable
-                key={t.value}
-                onPress={() => setTruckSize(t.value)}
+                key={t.ft}
+                onPress={() => {
+                  setTruckFt(t.ft);
+                  setTruckSize(t.value);
+                }}
                 className={`rounded-full border px-4 py-2.5 ${
                   active ? 'border-brand-600 bg-brand-600' : 'border-silver-200 bg-white'
                 }`}
