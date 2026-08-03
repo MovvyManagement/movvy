@@ -64,6 +64,7 @@ import { openInMaps } from '@/lib/maps';
 import { fmtCurrency, fmtDateShort, fmtRelativeAgo } from '@/lib/format';
 import { jobUrgency } from '@/lib/partnerJobs';
 import { supabase, supabaseConfigured, useAuth } from '@/lib/supabase';
+import { MoveDetailSheet } from '@/components/MoveDetailSheet';
 import { haptic } from '@/lib/haptics';
 
 const TABS = ['Requests', 'Scheduled', 'In Progress', 'Completed'] as const;
@@ -136,6 +137,8 @@ export default function CompanyJobs() {
   }, [companyId, qc]);
 
   const [assignTarget, setAssignTarget] = useState<DispatchQueueRow | null>(null);
+  // Tapping a Scheduled card opens the full move detail sheet (reassign/release).
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   // Split the queue into the two action buckets up front so the counts on
   // the chips are correct even when a tab isn't visible.
@@ -279,6 +282,7 @@ export default function CompanyJobs() {
             key={entry.id}
             row={entry.row}
             busy={decline.isPending}
+            onPress={() => setDetailId(entry.id)}
             onAssign={() => setAssignTarget(entry.row)}
             onRelease={async () => {
               try {
@@ -296,6 +300,7 @@ export default function CompanyJobs() {
           <SummaryCard
             key={entry.id}
             row={entry.row}
+            onPress={() => setDetailId(entry.id)}
             assigneeName={
               entry.row.assigned_driver_profile_id === user?.id
                 ? 'You'
@@ -385,6 +390,15 @@ export default function CompanyJobs() {
 
       {/* Assign-driver modal — same component the old Dispatch screen
           used. Opens from any Needs Driver card. */}
+      {/* Full move detail — the one place an admin reassigns or releases. */}
+      {companyId ? (
+        <MoveDetailSheet
+          bookingId={detailId}
+          companyId={companyId}
+          onClose={() => setDetailId(null)}
+        />
+      ) : null}
+
       <AssignDriverModal
         target={assignTarget}
         companyId={companyId!}
@@ -472,11 +486,13 @@ function NewRequestCard({
 function NeedsDriverCard({
   row,
   busy,
+  onPress,
   onAssign,
   onRelease,
 }: {
   row: DispatchQueueRow;
   busy: boolean;
+  onPress?: () => void;
   onAssign: () => void;
   onRelease: () => void;
 }) {
@@ -498,7 +514,7 @@ function NeedsDriverCard({
 
   return (
     <View className="mb-3">
-      <Card className="border-amber-200 bg-amber-50/40">
+      <Card className="border-amber-200 bg-amber-50/40" onPress={onPress}>
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center flex-wrap gap-2">
             <Badge label="Needs driver" tone="warning" />
@@ -562,7 +578,7 @@ function NeedsDriverCard({
   );
 }
 
-function SummaryCard({ row, assigneeName }: { row: any; assigneeName?: string }) {
+function SummaryCard({ row, assigneeName, onPress }: { row: any; assigneeName?: string; onPress?: () => void }) {
   const { user } = useAuth();
   // When the admin assigned the move to THEMSELVES, give them a way back into
   // the perform screen if they navigated away mid-move.
@@ -573,7 +589,7 @@ function SummaryCard({ row, assigneeName }: { row: any; assigneeName?: string })
     row.status !== 'cancelled';
   return (
     <View className="mb-3">
-      <Card>
+      <Card onPress={onPress}>
         <View className="flex-row items-center justify-between">
           <Badge label={row.status.replace(/_/g, ' ')} tone={statusTone(row.status)} />
           <Text className="text-lg font-bold text-ink-900">

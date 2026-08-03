@@ -93,7 +93,14 @@ handle(async (req) => {
       );
     }
 
-    // 3. Atomic assign — booking must still be in the "needs driver" state.
+    // 3. Assign (or REASSIGN) the performer. This used to require
+    //    assigned_driver_profile_id IS NULL, which meant a job that already had
+    //    someone on it could never be moved to a different crew member — every
+    //    reassign (including the bulk "driver is out" flow) failed with a 409.
+    //    An admin swapping the performer on their own not-yet-started booking is
+    //    exactly what reassign means, so we allow it. Still gated to: caller is
+    //    an org admin (step 1), target is an active member (step 2), the booking
+    //    belongs to this org, and it hasn't started yet (status='assigned').
     const { data, error } = await admin
       .from('bookings')
       .update({
@@ -103,14 +110,13 @@ handle(async (req) => {
       .eq('id', booking_id)
       .eq('assigned_company_id', company_id)
       .eq('status', 'assigned')
-      .is('assigned_driver_profile_id', null)
       .select('id, short_code, status, assigned_driver_profile_id')
       .single();
 
     if (error || !data) {
       throw httpError(
         409,
-        'Booking is no longer pending dispatch (may have been assigned already).',
+        'This move can no longer be assigned — it may have started or been cancelled.',
       );
     }
 

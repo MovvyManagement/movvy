@@ -30,7 +30,6 @@ import { Avatar } from '@/components/Avatar';
 import { Badge } from '@/components/Badge';
 import { EmptyState } from '@/components/EmptyState';
 import { CardSkeleton } from '@/components/Skeleton';
-import { BulkReassignSheet } from '@/components/BulkReassignSheet';
 import { AddDriverSheet } from '@/components/AddDriverSheet';
 import { PendingApprovals } from '@/components/PendingApprovals';
 import { useMyMembership, useCompanyDriverRoster, usePendingJoinRequests } from '@/lib/data';
@@ -82,7 +81,18 @@ export default function CompanyDrivers() {
     toast.success(org_role === 'admin' ? 'Now an admin' : 'Now crew');
     refreshCrew();
   };
-  const removeMember = (profileId: string, name: string) => {
+  const removeMember = (profileId: string, name: string, activeJobs = 0) => {
+    // Job actions live in Jobs → Scheduled now, so removing someone here can't
+    // silently strand the moves they're on. Send the admin there first.
+    if (activeJobs > 0) {
+      Alert.alert(
+        'Move their jobs first',
+        `${name} is still on ${activeJobs} active ${activeJobs === 1 ? 'move' : 'moves'}. Reassign ${
+          activeJobs === 1 ? 'it' : 'them'
+        } from Jobs → Scheduled, then remove them.`,
+      );
+      return;
+    }
     Alert.alert('Remove from crew?', `${name} will lose access to your crew's jobs.`, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -113,13 +123,6 @@ export default function CompanyDrivers() {
 
   const total = roster?.length ?? 0;
   const online = roster?.filter((d) => d.is_online).length ?? 0;
-
-  // Bulk reassign — when a driver is out, dispatcher taps "Reassign" on
-  // their row to move every in-flight booking to another driver.
-  const [reassignTarget, setReassignTarget] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
 
   // Post-onboarding single-driver invite. The "+" button used to dump the
   // dispatcher back into the onboarding wizard, which is wrong UX — they
@@ -266,7 +269,7 @@ export default function CompanyDrivers() {
                           </Text>
                         </Pressable>
                         <Pressable
-                          onPress={() => removeMember(d.profile_id, d.full_name ?? 'this member')}
+                          onPress={() => removeMember(d.profile_id, d.full_name ?? 'this member', d.active_jobs)}
                           className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 active:opacity-80"
                         >
                           <Text className="text-xs font-semibold text-danger">Remove</Text>
@@ -274,35 +277,10 @@ export default function CompanyDrivers() {
                       </View>
                     ) : null}
 
-                    {/* Reassign all — only shown when the driver actually
-                        has in-flight bookings to move. Dispatchers + owners
-                        only. */}
-                    {isDispatcher && d.active_jobs > 0 ? (
-                      <Pressable
-                        onPress={() =>
-                          setReassignTarget({
-                            id: d.profile_id,
-                            name: d.full_name ?? 'this driver',
-                          })
-                        }
-                        className="mt-3 rounded-2xl bg-amber-50 border border-amber-100 p-3 flex-row items-center active:opacity-80"
-                      >
-                        <View className="h-8 w-8 rounded-full bg-amber-500 items-center justify-center">
-                          <Ionicons name="swap-horizontal" size={16} color="#fff" />
-                        </View>
-                        <View className="ml-3 flex-1">
-                          <Text className="text-sm font-bold text-ink-900">
-                            Reassign {d.active_jobs}{' '}
-                            {d.active_jobs === 1 ? 'job' : 'jobs'}
-                          </Text>
-                          <Text className="text-[11px] text-silver-600 mt-0.5">
-                            Driver out? Move every active booking to another
-                            driver
-                          </Text>
-                        </View>
-                        <Ionicons name="chevron-forward" size={16} color="#B45309" />
-                      </Pressable>
-                    ) : null}
+                    {/* Job actions (reassign / release) deliberately do NOT live
+                        here. Crew management is make-admin / make-crew / remove;
+                        anything to do with a booking happens in Jobs → Scheduled,
+                        so there's exactly one place to touch a move. */}
                   </Card>
                 </View>
               );
@@ -314,18 +292,6 @@ export default function CompanyDrivers() {
           <PendingApprovals kind="company" subjectId={companyId} />
         </ScrollView>
       )}
-
-      {/* Bulk-reassign sheet — pulls the source driver's active bookings +
-          the rest of the roster, runs bookings-dispatch-assign per booking. */}
-      {reassignTarget && companyId ? (
-        <BulkReassignSheet
-          visible
-          onClose={() => setReassignTarget(null)}
-          companyId={companyId}
-          sourceDriverId={reassignTarget.id}
-          sourceDriverName={reassignTarget.name}
-        />
-      ) : null}
 
       {/* Add-driver sheet — collects name + email (and optional phone),
           fires partners-invite-send → branded HTML email + optional SMS
