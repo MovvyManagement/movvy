@@ -66,7 +66,7 @@ import { jobUrgency } from '@/lib/partnerJobs';
 import { supabase, supabaseConfigured, useAuth } from '@/lib/supabase';
 import { haptic } from '@/lib/haptics';
 
-const TABS = ['Requests', 'Needs Driver', 'Upcoming', 'In Progress', 'Completed'] as const;
+const TABS = ['Requests', 'Scheduled', 'In Progress', 'Completed'] as const;
 type Tab = (typeof TABS)[number];
 
 const IN_FLIGHT = ['confirmed', 'on_the_way', 'arrived', 'loading', 'in_transit', 'unloading'];
@@ -147,20 +147,24 @@ export default function CompanyJobs() {
     () => (queue ?? []).filter((b) => b.bucket === 'needs_driver'),
     [queue],
   );
-  // Upcoming = accepted AND staffed, but the crew hasn't started yet. This is
-  // the "who's booked on what" view the dispatcher needs between assigning and
-  // move day.
-  const upcoming = useMemo(
-    () =>
-      (rows ?? [])
-        .filter((r) => r.status === 'assigned' && !!r.assigned_driver_profile_id)
-        .sort((a, b) =>
-          String(a.scheduled_for_window_starts_at ?? a.scheduled_for_date).localeCompare(
-            String(b.scheduled_for_window_starts_at ?? b.scheduled_for_date),
-          ),
-        ),
-    [rows],
-  );
+  // Scheduled = every accepted move that hasn't started yet, staffed or not, in
+  // date order. Replaces the old separate "Needs Driver" tab: the assignment
+  // state now lives on each CARD ("Needs driver" / "Assigned to X" / "You")
+  // instead of splitting the same day's work across two tabs. Unstaffed entries
+  // come from the dispatch queue (they carry the Assign/Release actions);
+  // staffed ones come from the company jobs list.
+  const scheduled = useMemo(() => {
+    const staffed = (rows ?? [])
+      .filter((r) => r.status === 'assigned' && !!r.assigned_driver_profile_id)
+      .map((r) => ({ kind: 'staffed' as const, id: r.id, row: r, when: String(r.scheduled_for_window_starts_at ?? r.scheduled_for_date) }));
+    const unstaffed = needsDriver.map((b) => ({
+      kind: 'unstaffed' as const,
+      id: b.id,
+      row: b,
+      when: String(b.scheduled_for_window_starts_at ?? b.scheduled_for_date),
+    }));
+    return [...unstaffed, ...staffed].sort((a, b) => a.when.localeCompare(b.when));
+  }, [rows, needsDriver]);
   const inProgress = useMemo(
     () => (rows ?? []).filter((r) => IN_FLIGHT.includes(r.status)),
     [rows],
@@ -172,8 +176,7 @@ export default function CompanyJobs() {
 
   const counts: Record<Tab, number> = {
     Requests: newRequests.length,
-    'Needs Driver': needsDriver.length,
-    Upcoming: upcoming.length,
+    Scheduled: scheduled.length,
     'In Progress': inProgress.length,
     Completed: completed.length,
   };
@@ -257,56 +260,51 @@ export default function CompanyJobs() {
       ));
     }
 
-    if (tab === 'Needs Driver') {
-      if (queueLoading && !queue) return <CardSkeleton count={3} />;
-      if (needsDriver.length === 0) {
-        return (
-          <EmptyState
-            icon="people-outline"
-            title="Nothing awaiting a driver"
-            body="Bookings you accept above show up here until you pick a driver from your roster."
-          />
-        );
-      }
-      return needsDriver.map((b) => (
-        <NeedsDriverCard
-          key={b.id}
-          row={b}
-          busy={decline.isPending}
-          onAssign={() => setAssignTarget(b)}
-          onRelease={async () => {
-            try {
-              const res = await decline.mutateAsync({ booking_id: b.id, company_id: companyId! });
-              if (res.action === 'released') haptic.warning();
-            } catch (e: any) {
-              Alert.alert('Could not release', e?.message ?? 'Try again.');
-            }
-          }}
-        />
-      ));
-    }
-
-    if (tab === 'Upcoming') {
-      if (jobsLoading && !rows) return <CardSkeleton count={3} />;
-      if (upcoming.length === 0) {
+    if (tab === 'Scheduled') {
+      if ((queueLoading && !queue) || (jobsLoading && !rows)) return <CardSkeleton count={3} />;
+      if (scheduled.length === 0) {
         return (
           <EmptyState
             icon="calendar-outline"
-            title="No upcoming moves"
-            body="Once you assign a crew member to an accepted move, it shows here with who's on it until move day."
+            title="Nothing scheduled yet"
+            body="Moves you accept land here — first as 'needs driver', then showing who's on them once you assign."
           />
         );
       }
-      return upcoming.map((j) => (
-        <SummaryCard
-          key={j.id}
-          row={j}
-          assigneeName={
-            roster?.find((d) => d.profile_id === j.assigned_driver_profile_id)?.full_name ??
-            (j.assigned_driver_profile_id === user?.id ? 'You' : 'Assigned')
-          }
-        />
-      ));
+      // One list, two card types: unstaffed moves keep the Assign/Release
+      // actions, staffed ones show who's driving.
+      return scheduled.map((entry) =>
+        entry.kind === 'unstaffed' ? (
+          <NeedsDriverCard
+            key={entry.id}
+            row={entry.row}
+            busy={decline.isPending}
+            onAssign={() => setAssignTarget(entry.row)}
+            onRelease={async () => {
+              try {
+                const res = await decline.mutateAsync({
+                  booking_id: entry.row.id,
+                  company_id: companyId!,
+                });
+                if (res.action === 'released') haptic.warning();
+              } catch (e: any) {
+                Alert.alert('Could not release', e?.message ?? 'Try again.');
+              }
+            }}
+          />
+        ) : (
+          <SummaryCard
+            key={entry.id}
+            row={entry.row}
+            assigneeName={
+              entry.row.assigned_driver_profile_id === user?.id
+                ? 'You'
+                : roster?.find((d) => d.profile_id === entry.row.assigned_driver_profile_id)
+                    ?.full_name ?? 'Assigned'
+            }
+          />
+        ),
+      );
     }
 
     if (tab === 'In Progress') {
@@ -340,7 +338,7 @@ export default function CompanyJobs() {
   // Either source can drive refresh — pulling refreshes both so chip
   // counts and visible cards stay in sync.
   const isRefetching =
-    tab === 'Requests' || tab === 'Needs Driver' ? queueRefetching : jobsRefetching;
+    tab === 'Requests' || tab === 'Scheduled' ? queueRefetching : jobsRefetching;
   const onRefresh = async () => {
     await Promise.all([refetchQueue(), refetchJobs()]);
   };
@@ -503,7 +501,7 @@ function NeedsDriverCard({
       <Card className="border-amber-200 bg-amber-50/40">
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center flex-wrap gap-2">
-            <Badge label="Awaiting driver" tone="warning" />
+            <Badge label="Needs driver" tone="warning" />
             <UrgencyPill urgency={urgency} />
           </View>
           <Text className="text-sm font-bold text-ink-900">
