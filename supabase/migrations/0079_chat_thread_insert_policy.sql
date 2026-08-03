@@ -11,6 +11,8 @@
 -- that booking (the customer, the named partner, or assigned crew).
 -- =============================================================================
 
+drop policy if exists chat_threads_participant_insert on chat_threads;
+
 create policy chat_threads_participant_insert on chat_threads for insert
   with check (
     kind = 'booking'

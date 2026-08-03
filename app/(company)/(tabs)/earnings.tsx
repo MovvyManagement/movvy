@@ -4,8 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Card } from '@/components/Card';
-import { fmtCurrency } from '@/lib/format';
-import { useMyMembership, useCompanyEarningsSummary } from '@/lib/data';
+import { fmtCurrency, fmtDateShort } from '@/lib/format';
+import { useMyMembership, useCompanyEarningsSummary, useReleasePenalties } from '@/lib/data';
 import { EarningsExportSheet } from '@/components/EarningsExportSheet';
 import { NotificationBell } from '@/components/NotificationBell';
 import { Skeleton } from '@/components/Skeleton';
@@ -24,6 +24,8 @@ export default function CompanyEarnings() {
   const { data: membership } = useMyMembership();
   const companyId = membership?.kind === 'company' ? membership.company_id : null;
   const { data: earnings, isLoading } = useCompanyEarningsSummary(companyId);
+  const { data: penalties } = useReleasePenalties(companyId);
+  const penaltyTotalCents = (penalties ?? []).reduce((sum, p) => sum + (p.amount_cents ?? 0), 0);
   const [exportOpen, setExportOpen] = useState(false);
 
   // Month-over-month delta — hidden when last month was $0 so we don't show
@@ -98,6 +100,44 @@ export default function CompanyEarnings() {
             </Text>
           )}
         </View>
+
+        {/* Late-release penalties — $100 each time a move was handed back with
+            under 3 days' notice. Shown as negative lines tied to the booking so
+            the cost of a late release is never a mystery on the statement. */}
+        {(penalties?.length ?? 0) > 0 ? (
+          <View className="mt-4 rounded-3xl border border-red-100 bg-red-50 p-5">
+            <View className="flex-row items-center justify-between">
+              <View className="flex-1 pr-3">
+                <Text className="text-xs font-semibold uppercase tracking-wider text-danger">
+                  Late-release penalties
+                </Text>
+                <Text className="mt-1 text-xs text-silver-600 leading-4">
+                  Released a move less than 3 days before the customer's date.
+                </Text>
+              </View>
+              <Text className="text-2xl font-bold text-danger">
+                −{fmtCurrency(penaltyTotalCents / 100)}
+              </Text>
+            </View>
+
+            <View className="mt-3 h-px bg-red-100" />
+            {(penalties ?? []).map((p) => (
+              <View key={p.id} className="mt-3 flex-row items-center justify-between">
+                <View className="flex-1 pr-3">
+                  <Text className="text-sm font-semibold text-ink-900">
+                    {p.short_code ? `#${p.short_code}` : 'Released move'}
+                  </Text>
+                  <Text className="text-[11px] text-silver-500 mt-0.5">
+                    {fmtDateShort(p.created_at)}
+                  </Text>
+                </View>
+                <Text className="text-sm font-bold text-danger">
+                  −{fmtCurrency((p.amount_cents ?? 0) / 100)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <View className="mt-4 flex-row gap-3">
           <Card className="flex-1">

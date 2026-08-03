@@ -227,3 +227,43 @@ export function useCompanyEarningsSummary(companyId: string | null) {
     },
   });
 }
+
+// ─── Late-release penalties ──────────────────────────────────────────────────
+// $100 charged when an org releases a move less than 3 days out. Surfaced on the
+// company Earnings screen as negative lines so the admin sees exactly what a
+// late release cost them (and can tie it back to a booking).
+
+export interface ReleasePenalty {
+  id: string;
+  booking_id: string;
+  amount_cents: number;
+  reason: string | null;
+  created_at: string;
+  short_code: string | null;
+}
+
+export function useReleasePenalties(companyId: string | null, daysBack = 60) {
+  return useQuery({
+    queryKey: ['release-penalties', companyId, daysBack],
+    enabled: !!companyId && supabaseConfigured,
+    queryFn: async (): Promise<ReleasePenalty[]> => {
+      const since = new Date();
+      since.setDate(since.getDate() - daysBack);
+      const { data, error } = await supabase
+        .from('release_penalties')
+        .select('id, booking_id, amount_cents, reason, created_at, booking:bookings(short_code)')
+        .eq('company_id', companyId!)
+        .gte('created_at', since.toISOString())
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return ((data ?? []) as any[]).map((r) => ({
+        id: r.id,
+        booking_id: r.booking_id,
+        amount_cents: r.amount_cents,
+        reason: r.reason,
+        created_at: r.created_at,
+        short_code: Array.isArray(r.booking) ? r.booking[0]?.short_code ?? null : r.booking?.short_code ?? null,
+      }));
+    },
+  });
+}

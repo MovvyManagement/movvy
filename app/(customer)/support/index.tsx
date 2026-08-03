@@ -226,6 +226,13 @@ export default function SupportHub() {
         threadId={chatThreadId}
         peerName="Movvy support"
         callNumber="+16134163426"
+        quickReplies={[
+          "I need help with my move",
+          "My crew hasn't arrived",
+          "I need to change my booking date",
+          "Something was damaged",
+          "I have a billing question",
+        ]}
         onClose={() => setChatThreadId(null)}
       />
 

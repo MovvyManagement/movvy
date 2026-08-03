@@ -834,6 +834,14 @@ export default function MoverActive() {
 
       {/* Chat with customer — slide-up sheet (replaces the deleted /chat route) */}
       <ChatSheet
+        quickReplies={[
+          "On our way now",
+          "Running about 15 min late",
+          "We're outside",
+          "All loaded — heading to the drop-off",
+          "Where should we park?",
+          "Which unit / buzzer code?",
+        ]}
         visible={showChat}
         bookingId={(liveJob?.id) ?? booking.id}
         peerName={customerName}

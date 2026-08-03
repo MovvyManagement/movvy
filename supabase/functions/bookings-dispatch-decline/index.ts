@@ -32,6 +32,13 @@ const Body = z.object({
   reason: z.string().max(200).optional(),
 });
 
+// Releasing is free while there's still time to re-staff the move. Inside this
+// window the customer's move day is already locked in, so it costs the org a
+// flat fee — the release still goes through (a no-show hurts the customer far
+// more than a re-listing), it just isn't free.
+const FREE_RELEASE_DAYS = 3;
+const LATE_RELEASE_PENALTY_CENTS = 10_000; // $100
+
 handle(async (req) => {
   const cors = corsHeaders(req);
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
@@ -69,7 +76,7 @@ handle(async (req) => {
     // Read the current state
     const { data: booking, error: bErr } = await admin
       .from('bookings')
-      .select('id, status, assigned_company_id, assigned_driver_profile_id, dispatch_accepted_at')
+      .select('id, short_code, status, assigned_company_id, assigned_driver_profile_id, dispatch_accepted_at, scheduled_for_date, scheduled_for_window_starts_at')
       .eq('id', booking_id)
       .maybeSingle();
     if (bErr || !booking) throw httpError(404, 'Booking not found');
@@ -89,19 +96,17 @@ handle(async (req) => {
       return jsonResponse({ ok: true, action: 'noted' }, { status: 200 }, cors);
     }
 
-    if (
-      booking.status === 'assigned'
-      && booking.assigned_company_id === company_id
-      && booking.assigned_driver_profile_id === null
-    ) {
-      // (b) A company that accepted a job but can't staff it releases it back to
-      // the open pool. We used to cap this at 5 minutes after accepting, but that
-      // stranded jobs an operator genuinely couldn't cover — a no-show is far
-      // worse than a re-listing. Release is still only reachable while NO driver
-      // is assigned (checked above), so it can't yank a job out from under a
-      // crew that's already rolling.
-
-      // Push it back to searching
+    if (booking.status === 'assigned' && booking.assigned_company_id === company_id) {
+      // (b) An org gives an accepted move back to the open pool.
+      //
+      // This used to require assigned_driver_profile_id IS NULL, so once an
+      // admin had staffed the move (including self-assigning) Release ALWAYS
+      // failed with a 409 — exactly the case where you most want it, because
+      // the person you put on it can't make it any more. Releasing clears the
+      // performer along with the org, and status='assigned' still means the
+      // move hasn't started, so nothing is yanked out from under a rolling
+      // crew (in-flight moves are past 'assigned' and fall through to the 409
+      // below).
       const { data, error: uErr } = await admin
         .from('bookings')
         .update({
@@ -109,12 +114,12 @@ handle(async (req) => {
           assigned_company_id: null,
           assigned_team_id: null,
           assigned_driver_profile_id: null,
+          tracking_profile_id: null,
           dispatch_accepted_at: null,
         })
         .eq('id', booking_id)
         .eq('status', 'assigned')
         .eq('assigned_company_id', company_id)
-        .is('assigned_driver_profile_id', null)
         .select('id, short_code, status')
         .single();
       if (uErr || !data) throw httpError(409, 'Booking state changed — refresh and try again');
@@ -130,7 +135,41 @@ handle(async (req) => {
         payload: { company_id, reason },
       });
 
-      return jsonResponse({ ok: true, action: 'released', booking: data }, { status: 200 }, cors);
+      // ─── Late-release penalty ───────────────────────────────────────────
+      // Measured from the move's window start (falling back to 08:00 on the
+      // scheduled date, same as the cancel policy).
+      const scheduled = (booking as any).scheduled_for_window_starts_at
+        ? new Date((booking as any).scheduled_for_window_starts_at)
+        : (booking as any).scheduled_for_date
+        ? new Date(`${(booking as any).scheduled_for_date}T08:00:00Z`)
+        : null;
+      const hoursBefore = scheduled
+        ? (scheduled.getTime() - Date.now()) / 3_600_000
+        : null;
+      let penaltyCents = 0;
+      if (hoursBefore != null && hoursBefore < FREE_RELEASE_DAYS * 24) {
+        penaltyCents = LATE_RELEASE_PENALTY_CENTS;
+        // Fire-and-forget: a ledger hiccup must never block the release itself,
+        // otherwise the crew is stuck holding a move they can't do.
+        try {
+          await admin.from('release_penalties').insert({
+            booking_id,
+            company_id,
+            profile_id: user.id,
+            amount_cents: penaltyCents,
+            reason: reason ?? 'Released within 3 days of the move',
+            hours_before_move: Math.round((hoursBefore ?? 0) * 100) / 100,
+          });
+        } catch (penErr) {
+          console.error('[bookings-dispatch-decline] penalty write failed', penErr);
+        }
+      }
+
+      return jsonResponse(
+        { ok: true, action: 'released', booking: data, penalty_cents: penaltyCents },
+        { status: 200 },
+        cors,
+      );
     }
 
     throw httpError(409, 'Booking is not in a state your company can decline.');

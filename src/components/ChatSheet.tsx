@@ -58,9 +58,13 @@ interface Props {
    *  customer chat) the button explains that calls route through a Movvy proxy
    *  line, which isn't live yet. */
   callNumber?: string;
+  /** Tap-to-send suggestions shown above the composer while it's empty. Saves a
+   *  mover typing the same three sentences with gloves on, one-handed, in a
+   *  stairwell — and keeps the customer informed with one tap. */
+  quickReplies?: string[];
 }
 
-export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose, peerName, callNumber }: Props) {
+export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose, peerName, callNumber, quickReplies }: Props) {
   const { user } = useAuth();
   const toast = useToast();
   const ensureThread = useEnsureBookingThread();
@@ -121,9 +125,9 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
     }
   }, [messages.length, visible]);
 
-  const onSend = async () => {
-    if (!text.trim()) return;
-    const body = text.trim();
+  const onSend = async (override?: string) => {
+    const body = (override ?? text).trim();
+    if (!body) return;
     // If the thread never bootstrapped (e.g. first message on a fresh booking),
     // create it now instead of silently doing nothing.
     let tid = threadId;
@@ -140,11 +144,11 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
         return;
       }
     }
-    setText('');
+    if (!override) setText('');
     try {
       await send.mutateAsync({ thread_id: tid, body });
     } catch (e: any) {
-      setText(body); // restore on failure
+      if (!override) setText(body); // restore on failure
       // Toast, not Alert — a native Alert from inside this fullScreen Modal can
       // freeze the sheet on iOS.
       toast.error(e?.message ?? 'Could not send. Try again.');
@@ -278,6 +282,29 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
             </ScrollView>
           )}
 
+          {/* Quick replies — only while the input is empty, so they never fight
+              with something being typed. Tapping sends immediately. */}
+          {quickReplies && quickReplies.length > 0 && !text.trim() ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, gap: 8 }}
+              style={{ maxHeight: 52 }}
+            >
+              {quickReplies.map((q) => (
+                <Pressable
+                  key={q}
+                  onPress={() => onSend(q)}
+                  disabled={send.isPending}
+                  className="rounded-full border border-brand-200 bg-brand-50 px-4 py-2 active:opacity-70"
+                >
+                  <Text className="text-xs font-semibold text-brand-700">{q}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : null}
+
           {/* Composer — owns the bottom safe-area inset, but drops it while the
               keyboard is up (the keyboard already clears the home indicator). */}
           <View
@@ -296,7 +323,7 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
               />
             </View>
             <Pressable
-              onPress={onSend}
+              onPress={() => onSend()}
               disabled={!text.trim() || send.isPending}
               className={`h-11 w-11 rounded-full items-center justify-center ${
                 text.trim() && !send.isPending ? 'bg-brand-600' : 'bg-silver-200'

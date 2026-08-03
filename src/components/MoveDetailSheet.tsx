@@ -106,11 +106,28 @@ export function MoveDetailSheet({ bookingId, companyId, onClose }: Props) {
     }
   };
 
+  // useBooking selects '*', so the row carries FLAT columns (pickup_line1,
+  // pickup_lat, …) — not the nested pickup/dropoff objects some screens build.
+  const b = booking as any;
+
+  // Releasing is free while there's still time to re-staff (3+ days out).
+  // Inside that window it strands a customer whose move day is locked in, so
+  // it costs a flat $100 — charged server-side and shown on Earnings.
+  const schedMs = b?.scheduled_for_window_starts_at
+    ? new Date(b.scheduled_for_window_starts_at).getTime()
+    : b?.scheduled_for_date
+    ? new Date(`${b.scheduled_for_date}T08:00:00`).getTime()
+    : null;
+  const hoursOut = schedMs != null ? (schedMs - Date.now()) / 3_600_000 : null;
+  const lateRelease = hoursOut != null && hoursOut < 72;
+
   const doRelease = () => {
     if (!bookingId) return;
     Alert.alert(
-      'Release this move?',
-      'It goes back to the open pool for other crews to accept. You can’t undo this.',
+      lateRelease ? 'Release — $100 penalty' : 'Release this move?',
+      lateRelease
+        ? `This move is less than 3 days away, so releasing it now charges your crew a $100 penalty. It goes back to the open pool for other crews. You can’t undo this.`
+        : 'It goes back to the open pool for other crews to accept. You can’t undo this.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -118,9 +135,16 @@ export function MoveDetailSheet({ bookingId, companyId, onClose }: Props) {
           style: 'destructive',
           onPress: async () => {
             try {
-              await release.mutateAsync({ booking_id: bookingId, company_id: companyId });
+              const res: any = await release.mutateAsync({
+                booking_id: bookingId,
+                company_id: companyId,
+              });
               haptic.warning();
-              toast.success('Move released back to the pool');
+              toast.success(
+                res?.penalty_cents
+                  ? `Released · $${(res.penalty_cents / 100).toFixed(0)} late-release penalty applied`
+                  : 'Move released back to the pool',
+              );
               onClose();
             } catch (e: any) {
               toast.error(e?.message ?? 'Could not release this move.');
@@ -131,9 +155,6 @@ export function MoveDetailSheet({ bookingId, companyId, onClose }: Props) {
     );
   };
 
-  // useBooking selects '*', so the row carries FLAT columns (pickup_line1,
-  // pickup_lat, …) — not the nested pickup/dropoff objects some screens build.
-  const b = booking as any;
   const pickup =
     b?.pickup_lat != null
       ? { lat: Number(b.pickup_lat), lng: Number(b.pickup_lng), label: b.pickup_line1 }
@@ -318,7 +339,7 @@ export function MoveDetailSheet({ bookingId, companyId, onClose }: Props) {
               className="flex-1 h-12 rounded-2xl bg-silver-100 items-center justify-center active:opacity-80"
             >
               <Text className="text-sm font-bold text-danger">
-                {release.isPending ? 'Releasing…' : 'Release'}
+                {release.isPending ? 'Releasing…' : lateRelease ? 'Release · −$100' : 'Release'}
               </Text>
             </Pressable>
             <Pressable

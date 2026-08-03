@@ -612,6 +612,14 @@ export default function LiveMove() {
       {/* Chat with crew — slide-up sheet (replaces the deleted /chat route).
           Same crewName-not-moverName rule as the review modal above. */}
       <ChatSheet
+        quickReplies={[
+          "Thanks!",
+          "How far away are you?",
+          "I'm here — come on up",
+          "Buzz me when you arrive",
+          "Parking is out back",
+          "Running a few minutes behind",
+        ]}
         visible={showChat}
         bookingId={booking.id}
         peerName={crewName ?? 'Movvy Crew'}
