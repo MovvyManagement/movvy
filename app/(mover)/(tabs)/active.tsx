@@ -13,6 +13,7 @@ import { mockBookings } from '@/data/mockBookings';
 import { useMyCurrentJob, useUpdateBookingStatus, useSubmitRating, useCancelBooking, useOpenDispute, useMyMembership, useMyTeamCurrentJob, useMyAssignedJobs, usePhoneProxy, placeProxyCall } from '@/lib/data';
 import { NotificationBell } from '@/components/NotificationBell';
 import { useLiveTrackingBroadcast } from '@/lib/useLiveTrackingBroadcast';
+import { usePendingStatusSync } from '@/lib/usePendingStatusSync';
 import { useToast } from '@/components/Toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase, useAuth } from '@/lib/supabase';
@@ -203,6 +204,8 @@ export default function MoverActive() {
   // with the truck. Without this hook the customer only sees the pin if the
   // driver opens the in-app Navigate screen.
   const toast = useToast();
+  // Status taps made in a dead zone queue locally and replay when signal returns.
+  const pendingSync = usePendingStatusSync();
   // Background live-location: ONLY the designated source broadcasts (so two crew
   // never fight over the customer's pin), and it keeps pinging even when the app
   // is backgrounded or closed for as long as the move is going.
@@ -423,6 +426,56 @@ export default function MoverActive() {
               <Text className="text-xs text-silver-500">{booking.dropoff.city}</Text>
             </View>
           </View>
+
+
+          {/* Access details — the stuff that decides whether the crew walks
+              straight in or wastes 20 minutes circling + buzzing. Shown right
+              under the route because they need it BEFORE they pull up. */}
+          {(() => {
+            const acc = ((liveJob as any)?.details ?? (booking as any)?.details ?? {})?.access;
+            if (!acc) return null;
+            const rows: { icon: any; label: string; value: string }[] = [];
+            if (acc.pickupFloor != null || acc.pickupElevator) {
+              rows.push({
+                icon: 'arrow-up-circle-outline',
+                label: 'Pick-up',
+                value: [
+                  acc.pickupFloor != null ? `Floor ${acc.pickupFloor}` : null,
+                  acc.pickupElevator ? 'elevator' : acc.pickupFloor ? 'no elevator' : null,
+                ].filter(Boolean).join(' · '),
+              });
+            }
+            if (acc.dropoffFloor != null || acc.dropoffElevator) {
+              rows.push({
+                icon: 'arrow-down-circle-outline',
+                label: 'Drop-off',
+                value: [
+                  acc.dropoffFloor != null ? `Floor ${acc.dropoffFloor}` : null,
+                  acc.dropoffElevator ? 'elevator' : acc.dropoffFloor ? 'no elevator' : null,
+                ].filter(Boolean).join(' · '),
+              });
+            }
+            if (acc.parking) rows.push({ icon: 'car-outline', label: 'Parking', value: String(acc.parking) });
+            if (acc.entryCode) rows.push({ icon: 'keypad-outline', label: 'Entry code', value: String(acc.entryCode) });
+            if (acc.notes) rows.push({ icon: 'information-circle-outline', label: 'Heads up', value: String(acc.notes) });
+            if (rows.length === 0) return null;
+            return (
+              <View className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <Text className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+                  Access details
+                </Text>
+                {rows.map((r) => (
+                  <View key={r.label} className="mt-2 flex-row items-start">
+                    <Ionicons name={r.icon} size={16} color="#B45309" />
+                    <Text className="ml-2 text-xs font-semibold text-ink-900" style={{ minWidth: 68 }}>
+                      {r.label}
+                    </Text>
+                    <Text className="ml-1 flex-1 text-xs text-ink-900 leading-5">{r.value}</Text>
+                  </View>
+                ))}
+              </View>
+            );
+          })()}
 
           {moveExtras(liveJob ?? booking).length > 0 ? (
             <View className="mt-4 flex-row flex-wrap gap-1.5">
@@ -670,6 +723,16 @@ export default function MoverActive() {
         className="absolute bottom-0 left-0 right-0 border-t border-silver-100 bg-white px-5 pt-3"
         style={{ paddingBottom: 28 }}
       >
+        {pendingSync > 0 ? (
+          <View className="mb-3 rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3 flex-row items-center">
+            <Ionicons name="cloud-offline-outline" size={18} color="#B45309" />
+            <Text className="ml-2 flex-1 text-xs text-ink-900 leading-4">
+              {pendingSync} update{pendingSync === 1 ? '' : 's'} saved offline — {"we'll"} send{' '}
+              {pendingSync === 1 ? 'it' : 'them'} automatically when you have signal.
+            </Text>
+          </View>
+        ) : null}
+
         {/* Action buttons:
             • Passenger mover: read-only banner + chat (chat handled above)
             • Company driver: flag stops but no cancel

@@ -77,6 +77,27 @@ export interface MoveDetails {
 
   notes?: string;
   photoUris?: string[];
+
+  /** Access details — what the crew needs to know BEFORE they pull up, so they
+   *  aren't circling the block or stuck at a locked lobby door. Optional; the
+   *  fast preset booking path skips it and the crew screen just hides what
+   *  wasn't provided. */
+  access?: MoveAccess;
+}
+
+export interface MoveAccess {
+  /** Floor the stuff is on at each end (0/undefined = ground). */
+  pickupFloor?: number;
+  dropoffFloor?: number;
+  /** Is there a usable elevator at that end? */
+  pickupElevator?: boolean;
+  dropoffElevator?: boolean;
+  /** "Loading dock out back", "alley only, no street parking", … */
+  parking?: string;
+  /** Buzzer / gate / lockbox code so the crew isn't calling from the curb. */
+  entryCode?: string;
+  /** Anything else the crew should know on arrival. */
+  notes?: string;
 }
 
 export interface BookingDraft {

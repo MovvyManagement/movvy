@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import type { BookingStatus } from '@/types';
+import { enqueue, isNetworkError } from '@/lib/offlineStatusQueue';
 
 // ─── Customer-side booking modification ─────────────────────────────────────
 //
@@ -50,16 +51,56 @@ interface UpdateStatusArgs {
   reason?: string;
 }
 
+/** Patch every cached copy of a booking so the crew's UI advances immediately —
+ *  used for the optimistic offline path. Walks single objects AND arrays. */
+function patchCachedStatus(qc: ReturnType<typeof useQueryClient>, bookingId: string, status: string) {
+  qc.setQueriesData({ type: 'active' }, (old: any) => {
+    if (!old) return old;
+    if (Array.isArray(old)) {
+      let touched = false;
+      const next = old.map((row: any) => {
+        if (row && typeof row === 'object' && row.id === bookingId) {
+          touched = true;
+          return { ...row, status };
+        }
+        return row;
+      });
+      return touched ? next : old;
+    }
+    if (typeof old === 'object' && (old as any).id === bookingId) {
+      return { ...(old as any), status };
+    }
+    return old;
+  });
+}
+
 export function useUpdateBookingStatus() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: UpdateStatusArgs) => {
-      const { data, error } = await supabase.functions.invoke('bookings-update-status', { body: args });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      return data?.booking;
+      try {
+        const { data, error } = await supabase.functions.invoke('bookings-update-status', { body: args });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        return data?.booking;
+      } catch (e) {
+        // Dead zone (basement, freight elevator): keep the tap instead of
+        // losing it. Queued updates replay in order once signal returns.
+        // A real server rejection still throws so the crew sees the reason.
+        if (isNetworkError(e)) {
+          await enqueue(args.booking_id, args.new_status);
+          return { __queuedOffline: true } as any;
+        }
+        throw e;
+      }
     },
-    onSuccess: (_, vars) => {
+    onSuccess: (res: any, vars) => {
+      if (res?.__queuedOffline) {
+        // No server round-trip happened — advance the UI ourselves so the crew
+        // isn't stuck tapping a button that looks like it did nothing.
+        patchCachedStatus(qc, vars.booking_id, vars.new_status);
+        return;
+      }
       qc.invalidateQueries({ queryKey: ['booking', vars.booking_id] });
       qc.invalidateQueries({ queryKey: ['bookings'] });
     },

@@ -117,6 +117,28 @@ export default function MoverEarnings() {
               </Text>
             </View>
 
+            {/* Tips ARE the crew's money, so unlike job pricing they're shown.
+                Paid out by the crew admin along with wages — labelled that way
+                so nobody expects a separate Movvy deposit. */}
+            {(hours.data?.totalTipCents ?? 0) > 0 ? (
+              <View className="mt-3 rounded-3xl border border-brand-200 bg-brand-50 p-5">
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-1 pr-3">
+                    <Text className="text-xs font-semibold uppercase tracking-wider text-brand-700">
+                      Tips on your moves
+                    </Text>
+                    <Text className="mt-1 text-xs text-silver-600 leading-4">
+                      Left by customers over the last two weeks · paid out by{' '}
+                      {employerName} with your wages.
+                    </Text>
+                  </View>
+                  <Text className="text-3xl font-bold text-ink-900">
+                    {fmtCurrency((hours.data?.totalTipCents ?? 0) / 100)}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
             <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500 mt-6 mb-2">
               Hours by day
             </Text>
@@ -141,6 +163,7 @@ export default function MoverEarnings() {
                         </Text>
                         <Text className="text-xs text-silver-500 mt-0.5">
                           {d.moves} {d.moves === 1 ? 'move' : 'moves'}
+                          {d.tipCents > 0 ? ` · ${fmtCurrency(d.tipCents / 100)} tips` : ''}
                         </Text>
                       </View>
                       <Text className="text-xl font-bold text-ink-900">

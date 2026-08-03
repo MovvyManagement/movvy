@@ -17,12 +17,15 @@ export interface WorkedDay {
   date: string;
   hours: number;
   moves: number;
+  /** Customer tips on the moves this person performed that day. */
+  tipCents: number;
 }
 
 export interface HoursWorked {
   days: WorkedDay[];
   totalHours: number;
   totalMoves: number;
+  totalTipCents: number;
 }
 
 export function useHoursWorked(daysBack = 14) {
@@ -37,7 +40,7 @@ export function useHoursWorked(daysBack = 14) {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('id, started_at, completed_at, tracking_profile_id, assigned_driver_profile_id')
+        .select('id, started_at, completed_at, tip_cents, tracking_profile_id, assigned_driver_profile_id')
         .or(
           `assigned_driver_profile_id.eq.${user!.id},tracking_profile_id.eq.${user!.id}`,
         )
@@ -49,6 +52,7 @@ export function useHoursWorked(daysBack = 14) {
       const byDay = new Map<string, WorkedDay>();
       let totalHours = 0;
       let totalMoves = 0;
+      let totalTipCents = 0;
 
       for (const b of data ?? []) {
         const start = (b as any).started_at ? new Date((b as any).started_at) : null;
@@ -59,19 +63,22 @@ export function useHoursWorked(daysBack = 14) {
         const d = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(
           end.getDate(),
         ).padStart(2, '0')}`;
-        const row = byDay.get(d) ?? { date: d, hours: 0, moves: 0 };
+        const tip = Number((b as any).tip_cents ?? 0) || 0;
+        const row = byDay.get(d) ?? { date: d, hours: 0, moves: 0, tipCents: 0 };
         row.hours += hrs;
         row.moves += 1;
+        row.tipCents += tip;
         byDay.set(d, row);
         totalHours += hrs;
         totalMoves += 1;
+        totalTipCents += tip;
       }
 
       const days = Array.from(byDay.values())
         .map((r) => ({ ...r, hours: Math.round(r.hours * 10) / 10 }))
         .sort((a, b) => b.date.localeCompare(a.date));
 
-      return { days, totalHours: Math.round(totalHours * 10) / 10, totalMoves };
+      return { days, totalHours: Math.round(totalHours * 10) / 10, totalMoves, totalTipCents };
     },
   });
 }

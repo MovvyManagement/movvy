@@ -9,6 +9,7 @@ import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import { useBookingStore } from '@/store/bookingStore';
+import type { MoveAccess } from '@/types';
 import { estimatePrice, MOVE_TYPE_LABELS } from '@/lib/pricing';
 import { fmtCurrency, fmtDateShort } from '@/lib/format';
 import { useCreateBooking } from '@/lib/data';
@@ -38,6 +39,7 @@ export default function ConfirmStep() {
   const draft = useBookingStore((s) => s.draft);
   const reset = useBookingStore((s) => s.reset);
   const setPromoCode = useBookingStore((s) => s.setPromoCode);
+  const setDetails = useBookingStore((s) => s.setDetails);
   const price = useMemo(() => estimatePrice(draft), [draft]);
   const createBooking = useCreateBooking();
 
@@ -45,6 +47,15 @@ export default function ConfirmStep() {
   // recompute price client-side; the server applies the discount when the
   // booking is created (promo_code is included in the createBooking body).
   // The UI just shows the "X% off" / "$Y off" preview.
+  // Access details — optional, but the single biggest time-waster on move day
+  // is a crew circling for parking or stuck at a locked lobby. Collapsed by
+  // default so the fast preset path stays fast.
+  const [accessOpen, setAccessOpen] = useState(false);
+  const [access, setAccess] = useState<MoveAccess>(draft.details?.access ?? {});
+  const saveAccess = (next: MoveAccess) => {
+    setAccess(next);
+    setDetails({ ...(draft.details ?? {}), access: next });
+  };
   const [promoInput, setPromoInput] = useState(draft.promoCode ?? '');
   const [promoDiscountCents, setPromoDiscountCents] = useState<number | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
@@ -318,6 +329,108 @@ export default function ConfirmStep() {
             {draft.details?.heavyItems ? <Badge label="Heavy items" tone="brand" /> : null}
             {draft.details?.fragileItems ? <Badge label="Fragile" tone="brand" /> : null}
           </View>
+        </Card>
+
+
+        {/* ─── Access details (optional) ────────────────────────────────────
+            Floor / elevator / parking / entry code. The crew sees this on their
+            Active screen before they pull up, which is what stops the "circling
+            the block, then stuck at the lobby door" 20 minutes. */}
+        <Card className="mt-3">
+          <Pressable
+            onPress={() => setAccessOpen((o) => !o)}
+            className="flex-row items-center active:opacity-80"
+            accessibilityRole="button"
+            accessibilityLabel="Add access details"
+          >
+            <View className="h-10 w-10 rounded-2xl bg-brand-50 items-center justify-center">
+              <Ionicons name="key-outline" size={20} color="#047857" />
+            </View>
+            <View className="ml-3 flex-1">
+              <Text className="text-sm font-bold text-ink-900">Access details</Text>
+              <Text className="text-xs text-silver-500 mt-0.5">
+                Optional · parking, floor, buzzer code — helps your crew arrive ready
+              </Text>
+            </View>
+            <Ionicons name={accessOpen ? 'chevron-up' : 'chevron-down'} size={18} color="#A1A1AA" />
+          </Pressable>
+
+          {accessOpen ? (
+            <View className="mt-4 gap-3">
+              <View className="flex-row gap-3">
+                <View className="flex-1">
+                  <Input
+                    label="Pick-up floor"
+                    placeholder="e.g. 3"
+                    keyboardType="number-pad"
+                    value={access.pickupFloor != null ? String(access.pickupFloor) : ''}
+                    onChangeText={(t) =>
+                      saveAccess({ ...access, pickupFloor: t ? Number(t.replace(/\D/g, '')) : undefined })
+                    }
+                  />
+                </View>
+                <View className="flex-1">
+                  <Input
+                    label="Drop-off floor"
+                    placeholder="e.g. 1"
+                    keyboardType="number-pad"
+                    value={access.dropoffFloor != null ? String(access.dropoffFloor) : ''}
+                    onChangeText={(t) =>
+                      saveAccess({ ...access, dropoffFloor: t ? Number(t.replace(/\D/g, '')) : undefined })
+                    }
+                  />
+                </View>
+              </View>
+
+              <View className="flex-row gap-2">
+                <Pressable
+                  onPress={() => saveAccess({ ...access, pickupElevator: !access.pickupElevator })}
+                  className={`flex-1 rounded-2xl border px-3 py-3 flex-row items-center active:opacity-80 ${
+                    access.pickupElevator ? 'border-brand-600 bg-brand-50' : 'border-silver-200 bg-white'
+                  }`}
+                >
+                  <Ionicons
+                    name={access.pickupElevator ? 'checkbox' : 'square-outline'}
+                    size={18}
+                    color={access.pickupElevator ? '#047857' : '#A1A1AA'}
+                  />
+                  <Text className="ml-2 text-xs font-semibold text-ink-900">Elevator at pick-up</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => saveAccess({ ...access, dropoffElevator: !access.dropoffElevator })}
+                  className={`flex-1 rounded-2xl border px-3 py-3 flex-row items-center active:opacity-80 ${
+                    access.dropoffElevator ? 'border-brand-600 bg-brand-50' : 'border-silver-200 bg-white'
+                  }`}
+                >
+                  <Ionicons
+                    name={access.dropoffElevator ? 'checkbox' : 'square-outline'}
+                    size={18}
+                    color={access.dropoffElevator ? '#047857' : '#A1A1AA'}
+                  />
+                  <Text className="ml-2 text-xs font-semibold text-ink-900">Elevator at drop-off</Text>
+                </Pressable>
+              </View>
+
+              <Input
+                label="Parking"
+                placeholder="Loading dock out back / alley only / street"
+                value={access.parking ?? ''}
+                onChangeText={(t) => saveAccess({ ...access, parking: t })}
+              />
+              <Input
+                label="Buzzer / gate code"
+                placeholder="e.g. #4021"
+                value={access.entryCode ?? ''}
+                onChangeText={(t) => saveAccess({ ...access, entryCode: t })}
+              />
+              <Input
+                label="Anything else for the crew"
+                placeholder="Dog in the yard, narrow staircase…"
+                value={access.notes ?? ''}
+                onChangeText={(t) => saveAccess({ ...access, notes: t })}
+              />
+            </View>
+          ) : null}
         </Card>
 
         {/* How-payment-works banner — 20% deposit now, remainder billed on
