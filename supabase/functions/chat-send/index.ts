@@ -4,7 +4,7 @@
 
 import { z } from 'https://esm.sh/zod@3.23.8';
 import {
-  checkRateLimit, httpError, HttpError, jsonResponse, requireAuth, userClient,
+  adminClient, checkRateLimit, httpError, HttpError, jsonResponse, requireAuth, userClient,
 } from '../_shared/security.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { handle } from '../_shared/serve.ts';
@@ -47,6 +47,65 @@ handle(async (req) => {
       .single();
 
     if (error) throw httpError(403, 'Not authorized to post to this thread');
+
+    // ─── Notify the other side ─────────────────────────────────────────────
+    // Chat used to be silent: a customer could message the crew (or vice-versa)
+    // and nobody was told, so messages sat unread until someone happened to open
+    // the thread. Fan out an in-app notification to every participant except the
+    // sender. Fire-and-forget — a notification hiccup must never fail the send.
+    try {
+      const admin = adminClient();
+      const { data: t } = await admin
+        .from('chat_threads')
+        .select('kind, booking_id, customer_profile_id, partner_profile_id')
+        .eq('id', thread_id)
+        .maybeSingle();
+
+      const recipients = new Set<string>();
+      if (t?.customer_profile_id) recipients.add(t.customer_profile_id as string);
+      if (t?.partner_profile_id) recipients.add(t.partner_profile_id as string);
+
+      // Booking threads: also tell whoever is actually working the move — the
+      // assigned performer, the live-location source, and the org's admins.
+      if (t?.booking_id) {
+        const { data: bk } = await admin
+          .from('bookings')
+          .select('short_code, customer_id, assigned_driver_profile_id, tracking_profile_id, assigned_company_id')
+          .eq('id', t.booking_id)
+          .maybeSingle();
+        if (bk?.customer_id) recipients.add(bk.customer_id as string);
+        if (bk?.assigned_driver_profile_id) recipients.add(bk.assigned_driver_profile_id as string);
+        if (bk?.tracking_profile_id) recipients.add(bk.tracking_profile_id as string);
+        if (bk?.assigned_company_id) {
+          const { data: admins } = await admin
+            .from('company_members')
+            .select('profile_id')
+            .eq('company_id', bk.assigned_company_id)
+            .eq('org_role', 'admin')
+            .eq('status', 'active')
+            .is('removed_at', null);
+          for (const m of admins ?? []) recipients.add((m as any).profile_id);
+        }
+      }
+
+      recipients.delete(user.id); // never notify the sender
+
+      if (recipients.size > 0) {
+        const preview = body.length > 90 ? `${body.slice(0, 90)}…` : body;
+        await admin.from('notifications').insert(
+          Array.from(recipients).map((profile_id) => ({
+            profile_id,
+            channel: 'in_app' as const,
+            category: 'chat.message',
+            title: 'New message',
+            body: preview,
+            data: { thread_id, booking_id: t?.booking_id ?? null },
+          })),
+        );
+      }
+    } catch (notifyErr) {
+      console.warn('[chat-send] notify failed (non-fatal)', notifyErr);
+    }
 
     // Bump thread last_message_at so the inbox sorts correctly, and read back
     // the flags that decide whether the AI assistant should reply.

@@ -65,6 +65,7 @@ import { fmtCurrency, fmtDateShort, fmtRelativeAgo } from '@/lib/format';
 import { jobUrgency } from '@/lib/partnerJobs';
 import { supabase, supabaseConfigured, useAuth } from '@/lib/supabase';
 import { MoveDetailSheet } from '@/components/MoveDetailSheet';
+import { ChatSheet } from '@/components/ChatSheet';
 import { haptic } from '@/lib/haptics';
 
 const TABS = ['Requests', 'Scheduled', 'In Progress', 'Completed'] as const;
@@ -139,6 +140,10 @@ export default function CompanyJobs() {
   const [assignTarget, setAssignTarget] = useState<DispatchQueueRow | null>(null);
   // Tapping a Scheduled card opens the full move detail sheet (reassign/release).
   const [detailId, setDetailId] = useState<string | null>(null);
+  // Booking chat, opened FROM the detail sheet. Held here (not inside the sheet)
+  // so we close one modal before opening the other — nested native modals are
+  // unreliable on iOS.
+  const [chatBookingId, setChatBookingId] = useState<string | null>(null);
 
   // Split the queue into the two action buckets up front so the counts on
   // the chips are correct even when a tab isn't visible.
@@ -396,8 +401,26 @@ export default function CompanyJobs() {
           bookingId={detailId}
           companyId={companyId}
           onClose={() => setDetailId(null)}
+          onOpenChat={(id) => {
+            setDetailId(null);
+            setTimeout(() => setChatBookingId(id), 300);
+          }}
         />
       ) : null}
+
+      <ChatSheet
+        visible={!!chatBookingId}
+        bookingId={chatBookingId ?? undefined}
+        peerName="Customer"
+        quickReplies={[
+          "Hi — we're confirmed for your move",
+          'Just checking the details for your move day',
+          'Can you confirm the parking situation?',
+          'Which floor / unit are we going to?',
+          'Any large or fragile items we should plan for?',
+        ]}
+        onClose={() => setChatBookingId(null)}
+      />
 
       <AssignDriverModal
         target={assignTarget}

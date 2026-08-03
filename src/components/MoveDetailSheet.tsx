@@ -43,9 +43,13 @@ interface Props {
   bookingId: string | null;
   companyId: string;
   onClose: () => void;
+  /** Opens the booking chat. Handled by the PARENT screen (which closes this
+   *  sheet first) rather than nesting a Modal inside a Modal — stacked native
+   *  modals are unreliable on iOS. */
+  onOpenChat?: (bookingId: string) => void;
 }
 
-export function MoveDetailSheet({ bookingId, companyId, onClose }: Props) {
+export function MoveDetailSheet({ bookingId, companyId, onClose, onOpenChat }: Props) {
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const { user } = useAuth();
@@ -226,6 +230,21 @@ export function MoveDetailSheet({ bookingId, companyId, onClose }: Props) {
                   <Text className="ml-1 text-sm font-bold text-ink-900">{assigneeName}</Text>
                 ) : null}
               </View>
+
+              {/* Talk to the customer — available from the moment the move is
+                  scheduled, not just once it's in flight. */}
+              {onOpenChat && bookingId ? (
+                <Pressable
+                  onPress={() => onOpenChat(bookingId)}
+                  className="mt-3 flex-row items-center rounded-2xl border border-brand-200 bg-brand-50 px-3 py-3 active:opacity-80"
+                >
+                  <Ionicons name="chatbubble-ellipses" size={18} color="#047857" />
+                  <Text className="ml-2 flex-1 text-sm font-bold text-ink-900">
+                    Message customer
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color="#047857" />
+                </Pressable>
+              ) : null}
 
               {/* Route */}
               <Text className="mt-5 text-xs font-semibold uppercase tracking-wider text-silver-500">

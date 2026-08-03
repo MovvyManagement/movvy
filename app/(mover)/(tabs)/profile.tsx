@@ -28,6 +28,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { CrewPortal } from '@/components/CrewPortal';
+import { DeleteAccountSheet } from '@/components/DeleteAccountSheet';
 import { Card } from '@/components/Card';
 import { Avatar } from '@/components/Avatar';
 import { Badge } from '@/components/Badge';
@@ -97,6 +98,7 @@ export default function MoverProfile() {
   const { data: docs } = useMyDriverDocuments(teamId);
 
   // ─── Sheet visibility ────────────────────────────────────────────────────
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [nameOpen, setNameOpen] = useState(false);
   const [phoneOpen, setPhoneOpen] = useState(false);
   const [vehicleOpen, setVehicleOpen] = useState(false);
@@ -490,6 +492,16 @@ export default function MoverProfile() {
           <Text className="text-base font-semibold text-danger">Log out</Text>
         </Pressable>
 
+        {/* Same anonymize-on-delete flow the customer side uses: PII is nulled
+            and sign-in is blocked, but the row survives so bookings, payouts and
+            audit history stay intact. Partners had no way to do this at all. */}
+        <Pressable
+          onPress={() => setDeleteOpen(true)}
+          className="mt-3 h-14 items-center justify-center rounded-2xl active:opacity-70"
+        >
+          <Text className="text-sm font-semibold text-silver-500">Delete my account</Text>
+        </Pressable>
+
         <Text className="text-center text-xs text-silver-400 mt-6">Movvy v0.1.0 · Alberta-wide</Text>
       </ScrollView>
 
@@ -523,6 +535,8 @@ export default function MoverProfile() {
         teamId={teamId}
         onClose={() => setTaxOpen(false)}
       />
+      <DeleteAccountSheet visible={deleteOpen} onClose={() => setDeleteOpen(false)} />
+
     </SafeAreaView>
   );
 }

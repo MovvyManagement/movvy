@@ -62,14 +62,34 @@ handle(async (req) => {
       throw httpError(400, 'Confirmation does not match your email or phone');
     }
 
+    const LIVE_STATUSES = [
+      'pending','searching','assigned','confirmed','on_the_way','arrived','loading','in_transit','unloading',
+    ];
+
     // Block deletion while a booking is in flight — refund / dispute first
     const { data: openBookings } = await admin
       .from('bookings')
       .select('id', { count: 'exact', head: false })
       .eq('customer_id', user.id)
-      .in('status', ['pending','searching','assigned','confirmed','on_the_way','arrived','loading','in_transit','unloading']);
+      .in('status', LIVE_STATUSES);
     if ((openBookings?.length ?? 0) > 0) {
       throw httpError(400, 'Finish or cancel your active moves before deleting your account.');
+    }
+
+    // Same guard from the PARTNER side: a crew member who is the assigned
+    // performer (or the live-location source) on a move that hasn't finished
+    // can't delete themselves out from under the customer. The org admin has to
+    // reassign or release those moves first.
+    const { data: assignedMoves } = await admin
+      .from('bookings')
+      .select('id')
+      .or(`assigned_driver_profile_id.eq.${user.id},tracking_profile_id.eq.${user.id}`)
+      .in('status', LIVE_STATUSES);
+    if ((assignedMoves?.length ?? 0) > 0) {
+      throw httpError(
+        400,
+        "You're still assigned to an active move. Ask your crew admin to reassign or release it first.",
+      );
     }
 
     // Do the soft-delete via the helper RPC

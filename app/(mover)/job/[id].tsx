@@ -13,7 +13,7 @@
 // edge function with an Alert confirmation matching the Jobs-feed flow.
 // =============================================================================
 
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -33,6 +33,7 @@ import {
   fmtDuration,
   fmtTime,
 } from '@/lib/format';
+import { ChatSheet } from '@/components/ChatSheet';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { useAcceptBooking, useMyMembership, acceptOnBehalfOf } from '@/lib/data';
 import { estimatePartnerPayoutCents } from '@/lib/partnerJobs';
@@ -71,6 +72,7 @@ export default function JobDetail() {
   // They shouldn't normally reach this screen (their feed routes to the shift
   // view), but gate it defensively in case of a deep link / stale nav.
   const isHourly = membership?.is_hourly ?? false;
+  const [showChat, setShowChat] = useState(false);
 
   // Pull the real booking row by id. RLS limits this to bookings the driver
   // is eligible to accept (open in their city) or already assigned to —
@@ -291,10 +293,24 @@ export default function JobDetail() {
       >
         {isHourly ? (
           // Hourly workers can't accept — their dispatcher assigns the move.
-          // Offer a single way back instead of a Pass/Accept pair.
-          <View className="flex-1">
-            <Button label="Back" variant="secondary" size="lg" fullWidth onPress={() => router.back()} />
-          </View>
+          // They CAN message the customer about a move they're on, though, which
+          // used to be impossible before the move went in-flight.
+          <>
+            {booking && booking.status !== 'searching' ? (
+              <View className="flex-1">
+                <Button
+                  label="Message"
+                  variant="secondary"
+                  size="lg"
+                  fullWidth
+                  onPress={() => setShowChat(true)}
+                />
+              </View>
+            ) : null}
+            <View className="flex-1">
+              <Button label="Back" variant="secondary" size="lg" fullWidth onPress={() => router.back()} />
+            </View>
+          </>
         ) : (
           <>
             <View className="flex-1">
@@ -318,6 +334,21 @@ export default function JobDetail() {
           </>
         )}
       </View>
+
+      {/* Booking chat — reachable from a SCHEDULED move, not just an in-flight
+          one. RLS scopes the thread to the assigned crew / their org admin. */}
+      <ChatSheet
+        visible={showChat}
+        bookingId={id}
+        peerName="Customer"
+        quickReplies={[
+          "Hi — I'm on your move",
+          'Just confirming the details for move day',
+          'Where should we park?',
+          'Which floor / unit are we going to?',
+        ]}
+        onClose={() => setShowChat(false)}
+      />
     </SafeAreaView>
   );
 }
