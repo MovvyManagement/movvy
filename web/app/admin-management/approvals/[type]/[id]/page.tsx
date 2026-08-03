@@ -18,6 +18,7 @@ import Link from 'next/link';
 import { supabaseServer } from '@/lib/supabase/server';
 import { fmtDateTime, fmtStatus } from '@/lib/format';
 import { DecisionPanel } from './DecisionPanel';
+import { DocReviewActions } from './DocReviewActions';
 import { BackgroundCheckPanel } from './BackgroundCheckPanel';
 
 export const dynamic = 'force-dynamic';
@@ -94,7 +95,7 @@ export default async function ApplicantDetailPage({ params }: PageProps) {
     const { data: vd } = await supabase
       .from('verification_documents')
       .select(
-        'id, kind, storage_bucket, storage_path, status, mime_type, expires_at, created_at, profile_id, team_id',
+        'id, kind, storage_bucket, storage_path, status, rejection_reason, mime_type, expires_at, created_at, profile_id, team_id',
       )
       .or(`team_id.eq.${id},profile_id.in.(${memberIds.join(',') || '00000000-0000-0000-0000-000000000000'})`)
       .order('created_at', { ascending: false });
@@ -138,7 +139,7 @@ export default async function ApplicantDetailPage({ params }: PageProps) {
     const { data: vd } = await supabase
       .from('verification_documents')
       .select(
-        'id, kind, storage_bucket, storage_path, status, mime_type, expires_at, created_at, company_id, profile_id',
+        'id, kind, storage_bucket, storage_path, status, rejection_reason, mime_type, expires_at, created_at, company_id, profile_id',
       )
       .or(
         `company_id.eq.${id},profile_id.in.(${
@@ -341,6 +342,11 @@ function DocumentCard({ doc }: { doc: any }) {
             {doc.status}
           </span>
         </div>
+        <DocReviewActions
+          docId={doc.id}
+          status={doc.status}
+          rejectionReason={doc.rejection_reason ?? null}
+        />
         {doc.signed_url ? (
           <a
             href={doc.signed_url}
