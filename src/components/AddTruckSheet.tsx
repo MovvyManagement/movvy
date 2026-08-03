@@ -1,8 +1,13 @@
 // =============================================================================
 // AddTruckSheet
 //
-// Adds a row to the `vehicles` table tied to the current company. Used
-// from the Trucks screen.
+// Adds a row to the `vehicles` table tied to the current company, together with
+// the two documents Movvy has to see before that truck can take work:
+// the REGISTRATION and the INSURANCE. Both upload to verification_documents and
+// land in the admin approvals queue — and org_can_take_booking() (migration
+// 0084) refuses every job until the registration comes back APPROVED. Collecting
+// them here, at the moment the truck is created, is the only way a partner ends
+// up with a complete truck instead of one that silently can't accept anything.
 // =============================================================================
 
 import React, { useEffect, useState } from 'react';
@@ -18,8 +23,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import { useQueryClient } from '@tanstack/react-query';
 import { Input } from './Input';
-import { useAddCompanyVehicle } from '@/lib/data';
+import { useAddCompanyVehicle, useUploadDocument } from '@/lib/data';
 import type { VehicleRow } from '@/lib/data';
 import { useToast } from './Toast';
 import { haptic } from '@/lib/haptics';
@@ -41,7 +48,6 @@ const TYPES: {
   label: string;
   sub: string;
 }[] = [
-  { key: 'cargo_van', ft: 10, label: 'Cargo van', sub: 'Single items / labour' },
   { key: 'cube_van_16', ft: 16, label: '16 ft', sub: 'Up to 1-bed apartment' },
   { key: 'cube_van_16', ft: 20, label: '20 ft', sub: '2-bed apt · 2-bed house' },
   { key: 'box_truck_24', ft: 22, label: '22 ft', sub: '3-bed apartment' },
@@ -49,9 +55,32 @@ const TYPES: {
   { key: 'box_truck_26', ft: 26, label: '26 ft', sub: '4-bed house' },
 ];
 
+// The two documents a truck can't work without.
+const DOCS: { key: 'vehicle_registration' | 'insurance'; label: string; sub: string }[] = [
+  {
+    key: 'vehicle_registration',
+    label: 'Truck registration',
+    sub: 'Must show the plate. Jobs unlock once Movvy approves it.',
+  },
+  {
+    key: 'insurance',
+    label: 'Insurance',
+    sub: 'Commercial auto policy covering this truck.',
+  },
+];
+
+/** A picked-but-not-yet-uploaded file. */
+interface PickedDoc {
+  uri: string;
+  name: string;
+  mime: string;
+}
+
 export function AddTruckSheet({ visible, companyId, onClose }: Props) {
   const add = useAddCompanyVehicle(companyId);
+  const upload = useUploadDocument();
   const toast = useToast();
+  const qc = useQueryClient();
 
   const [type, setType] = useState<VehicleRow['type']>('cube_van_16');
   const [lengthFt, setLengthFt] = useState<number>(16);
@@ -61,7 +90,9 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
   const [plate, setPlate] = useState('');
   const [province, setProvince] = useState('AB');
   const [capacity, setCapacity] = useState('');
+  const [docs, setDocs] = useState<Record<string, PickedDoc | undefined>>({});
   const [saving, setSaving] = useState(false);
+  const [step, setStep] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -73,7 +104,32 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
     setPlate('');
     setProvince('AB');
     setCapacity('');
+    setDocs({});
+    setStep(null);
   }, [visible]);
+
+  const pick = async (kind: 'vehicle_registration' | 'insurance') => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      toast.error('Photo library permission denied');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.85,
+    });
+    if (result.canceled || result.assets.length === 0) return;
+    const asset = result.assets[0];
+    haptic.light();
+    setDocs((d) => ({
+      ...d,
+      [kind]: {
+        uri: asset.uri,
+        name: asset.fileName ?? `${kind}-${Date.now()}.jpg`,
+        mime: asset.mimeType ?? 'image/jpeg',
+      },
+    }));
+  };
 
   const valid =
     !saving &&
@@ -81,12 +137,17 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
     model.trim().length >= 1 &&
     plate.trim().length >= 2 &&
     /^[A-Z]{2}$/.test(province.trim().toUpperCase()) &&
-    (year === '' || /^[0-9]{4}$/.test(year));
+    (year === '' || /^[0-9]{4}$/.test(year)) &&
+    // Both documents are mandatory — a truck without them can't take a job, so
+    // there's no point letting one be created half-formed.
+    !!docs.vehicle_registration &&
+    !!docs.insurance;
 
   const save = async () => {
     if (!valid || !companyId) return;
     setSaving(true);
     try {
+      setStep('Saving truck…');
       await add.mutateAsync({
         type,
         make: make.trim(),
@@ -97,13 +158,36 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
         capacity_cu_ft: capacity ? Number(capacity) : null,
         length_ft: lengthFt,
       });
+
+      // Documents go up after the truck exists so a failed upload never leaves
+      // paperwork pointing at a truck that was never created.
+      for (const d of DOCS) {
+        const file = docs[d.key];
+        if (!file) continue;
+        setStep(`Uploading ${d.label.toLowerCase()}…`);
+        await upload.mutateAsync({
+          bucket: 'verifications',
+          kind: d.key,
+          subject_type: 'company',
+          subject_id: companyId,
+          fileUri: file.uri,
+          fileName: file.name,
+          mimeType: file.mime,
+        });
+      }
+
+      qc.invalidateQueries({ queryKey: ['company-documents', companyId] });
+      qc.invalidateQueries({ queryKey: ['fleet-readiness'] });
+      qc.invalidateQueries({ queryKey: ['truck-registration-status'] });
       haptic.success();
-      toast.success('Truck added');
+      toast.success('Sent to Movvy for approval');
       onClose();
     } catch (e: any) {
+      haptic.error();
       toast.error(e?.message ?? "Couldn't add truck.");
     } finally {
       setSaving(false);
+      setStep(null);
     }
   };
 
@@ -118,8 +202,8 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
 
       <Text className="text-2xl font-bold text-ink-900">Add a truck</Text>
       <Text className="mt-1 text-sm text-silver-500">
-        Trucks are matched to bookings based on size. The dispatcher can
-        assign any approved truck when picking a driver.
+        Jobs are matched to your box size. Movvy reviews the registration
+        before this truck can take work — usually within one business day.
       </Text>
 
       <Text className="mt-5 text-xs font-semibold uppercase tracking-wider text-silver-500 mb-2">
@@ -216,6 +300,43 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
         </View>
       </View>
 
+      <Text className="mt-6 text-xs font-semibold uppercase tracking-wider text-silver-500 mb-2">
+        Documents · required
+      </Text>
+      <View className="gap-3">
+        {DOCS.map((d) => {
+          const file = docs[d.key];
+          return (
+            <Pressable
+              key={d.key}
+              onPress={() => pick(d.key)}
+              disabled={saving}
+              className={`rounded-2xl border p-4 flex-row items-center ${
+                file ? 'border-brand-600 bg-brand-50' : 'border-silver-200 bg-white'
+              }`}
+            >
+              <View
+                className={`h-11 w-11 rounded-2xl items-center justify-center ${
+                  file ? 'bg-brand-600' : 'bg-silver-100'
+                }`}
+              >
+                <Ionicons
+                  name={file ? 'checkmark' : 'cloud-upload-outline'}
+                  size={20}
+                  color={file ? '#fff' : '#0A0A0A'}
+                />
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="text-base font-bold text-ink-900">{d.label}</Text>
+                <Text className="text-xs text-silver-500 mt-0.5">
+                  {file ? 'Ready to send · tap to change photo' : d.sub}
+                </Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+
       <Pressable
         onPress={save}
         disabled={!valid}
@@ -228,10 +349,19 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
         ) : (
           <>
             <Ionicons name="add" size={18} color="#fff" />
-            <Text className="ml-2 text-base font-bold text-white">Add truck</Text>
+            <Text className="ml-2 text-base font-bold text-white">
+              Add truck & send for approval
+            </Text>
           </>
         )}
       </Pressable>
+      {saving && step ? (
+        <Text className="mt-2 text-center text-xs text-silver-500">{step}</Text>
+      ) : !valid && !saving && (!docs.vehicle_registration || !docs.insurance) ? (
+        <Text className="mt-2 text-center text-xs text-silver-500">
+          Add a photo of the registration and the insurance to continue.
+        </Text>
+      ) : null}
 
       <Pressable onPress={onClose} className="mt-2 h-12 items-center justify-center">
         <Text className="text-sm font-semibold text-silver-500">Cancel</Text>

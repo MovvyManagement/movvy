@@ -23,6 +23,7 @@ import { Badge } from '@/components/Badge';
 import { EmptyState } from '@/components/EmptyState';
 import { CardSkeleton } from '@/components/Skeleton';
 import { AddTruckSheet } from '@/components/AddTruckSheet';
+import { TruckDocsCard } from '@/components/TruckDocsCard';
 import {
   useMyMembership,
   useCompanyVehicles,
@@ -134,6 +135,10 @@ export default function CompanyTrucks() {
             />
           }
         >
+          {/* Registration + insurance review state — the gate on accepting any
+              job, and the only place to re-upload after a rejection. */}
+          {isDispatcher ? <TruckDocsCard companyId={companyId} /> : null}
+
           <View className="flex-row gap-3 mb-4">
             <Card className="flex-1">
               <Text className="text-xs text-silver-500 uppercase font-semibold">Fleet size</Text>

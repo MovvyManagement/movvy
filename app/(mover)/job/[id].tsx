@@ -35,7 +35,8 @@ import {
 } from '@/lib/format';
 import { ChatSheet } from '@/components/ChatSheet';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
-import { useAcceptBooking, useMyMembership, acceptOnBehalfOf } from '@/lib/data';
+import { useAcceptBooking, useMyMembership, acceptOnBehalfOf, useFleetReadiness } from '@/lib/data';
+import { acceptBlock } from '@/lib/truckFit';
 import { estimatePartnerPayoutCents } from '@/lib/partnerJobs';
 import { haptic } from '@/lib/haptics';
 
@@ -66,6 +67,7 @@ interface BookingDetail {
 export default function JobDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const accept = useAcceptBooking();
+  const { data: fleet } = useFleetReadiness();
   const { data: membership } = useMyMembership();
   // Hourly laborers (company drivers + team movers) don't accept jobs and
   // aren't paid per move — so they never see the payout hero or Accept button.
@@ -149,6 +151,23 @@ export default function JobDetail() {
     booking.scheduled_for_window_starts_at ?? `${booking.scheduled_for_date}T08:00:00Z`;
 
   const onAccept = () => {
+    // Truck / registration / size gate — the server refuses these too, but a
+    // sentence beats a raw 400. Same helper the jobs feed uses.
+    const blocked = acceptBlock(fleet, booking);
+    if (blocked) {
+      haptic.warning();
+      Alert.alert(
+        blocked.title,
+        blocked.body,
+        blocked.fix === 'fleet'
+          ? [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Open Trucks', onPress: () => router.push('/(company)/trucks') },
+            ]
+          : undefined,
+      );
+      return;
+    }
     // bookings-accept needs the team/company you're accepting on behalf of —
     // see acceptOnBehalfOf. Without it the edge function rejects the call (400).
     const onBehalfOf = acceptOnBehalfOf(membership);

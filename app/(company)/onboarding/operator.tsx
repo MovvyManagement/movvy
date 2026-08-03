@@ -25,19 +25,19 @@ import { haptic } from '@/lib/haptics';
 import { supabase, useAuth } from '@/lib/supabase';
 import { useCities, useUploadDocument } from '@/lib/data';
 
-type DocKey = 'driver_license' | 'gov_id' | 'vehicle_registration';
+type DocKey = 'driver_license' | 'gov_id' | 'vehicle_registration' | 'insurance';
 const DOCS: { key: DocKey; label: string; hint: string }[] = [
   { key: 'driver_license', label: "Driver's license", hint: 'Front, clear and readable' },
   { key: 'gov_id', label: 'Government ID', hint: 'Passport or provincial ID' },
   // Proof the truck is actually theirs — required before any job can be
   // accepted (enforced server-side in org_can_take_booking).
   { key: 'vehicle_registration', label: 'Truck registration', hint: 'Shows the truck is registered to you or your company' },
+  { key: 'insurance', label: 'Truck insurance', hint: 'Commercial auto policy covering the truck' },
 ];
 
 // Length in FEET decides which moves you can accept (src/lib/truckFit.ts).
 // The legacy enum is carried along for back-compat.
 const TRUCK_SIZES: { value: string; ft: number; label: string; sub: string }[] = [
-  { value: 'cargo_van', ft: 10, label: 'Cargo van', sub: 'Single items / labour' },
   { value: 'cube_van_16', ft: 16, label: '16 ft', sub: 'Up to 1-bed apartment' },
   { value: 'cube_van_16', ft: 20, label: '20 ft', sub: '2-bed apt · 2-bed house' },
   { value: 'box_truck_24', ft: 22, label: '22 ft', sub: '3-bed apartment' },
@@ -55,6 +55,7 @@ export default function OperatorOnboarding() {
     driver_license: false,
     gov_id: false,
     vehicle_registration: false,
+    insurance: false,
   });
   const [busyDoc, setBusyDoc] = useState<DocKey | null>(null);
   const [cityId, setCityId] = useState<string | null>(null);
@@ -100,6 +101,7 @@ export default function OperatorOnboarding() {
     uploaded.driver_license &&
     uploaded.gov_id &&
     uploaded.vehicle_registration &&
+    uploaded.insurance &&
     !!cityId &&
     !!truckSize &&
     plate.trim().length >= 2 &&
@@ -107,7 +109,7 @@ export default function OperatorOnboarding() {
 
   const finish = async () => {
     if (!canFinish) {
-      toast.error('Upload both documents, pick your city, and add your truck first.');
+      toast.error('Upload all four documents, pick your city, and add your truck first.');
       return;
     }
     setSubmitting(true);

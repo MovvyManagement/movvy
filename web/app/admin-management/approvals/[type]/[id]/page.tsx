@@ -27,6 +27,9 @@ const DOC_LABELS: Record<string, string> = {
   gov_id: 'Government ID',
   driver_license: 'Driver license',
   insurance: 'Vehicle insurance',
+  vehicle_registration: 'Truck registration',
+  fleet_insurance: 'Fleet insurance',
+  wcb: 'WCB coverage',
   business_registration: 'Business registration',
   selfie_with_id: 'Selfie with ID',
 };

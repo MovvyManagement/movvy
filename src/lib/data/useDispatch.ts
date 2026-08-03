@@ -12,6 +12,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase, useAuth, supabaseConfigured } from '@/lib/supabase';
+import { edgeError } from '@/lib/edgeError';
 
 export type MembershipKind = 'company' | 'team' | null;
 export type MembershipRole =
@@ -214,6 +215,11 @@ export interface DispatchQueueRow {
   dispatch_accepted_at: string | null;
   created_at: string;
   bucket: DispatchBucket;
+  /** Capacity signal (migration 0085) — what the move needs on site. */
+  required_truck_ft: number;
+  required_crew: number;
+  bedrooms: number;
+  dwelling: string;
 }
 
 export function useDispatchQueue(companyId: string | null | undefined) {
@@ -381,7 +387,8 @@ export function useDispatcherAccept() {
       const { data, error } = await supabase.functions.invoke('bookings-dispatch-accept', {
         body: args,
       });
-      if (error) throw error;
+      // The real reason lives in the response body, not error.message.
+      if (error) throw await edgeError(error, 'Could not accept this job.');
       if (data?.error) throw new Error(data.error);
       return data as { ok: true; booking: { id: string; short_code: string; status: string } };
     },
@@ -403,7 +410,8 @@ export function useDispatcherAssign() {
       const { data, error } = await supabase.functions.invoke('bookings-dispatch-assign', {
         body: args,
       });
-      if (error) throw error;
+      // The real reason lives in the response body, not error.message.
+      if (error) throw await edgeError(error, 'Could not assign this move.');
       if (data?.error) throw new Error(data.error);
       return data as { ok: true; booking: any };
     },
@@ -507,7 +515,8 @@ export function useDispatcherDecline() {
       const { data, error } = await supabase.functions.invoke('bookings-dispatch-decline', {
         body: args,
       });
-      if (error) throw error;
+      // The real reason lives in the response body, not error.message.
+      if (error) throw await edgeError(error, 'Could not release this move.');
       if (data?.error) throw new Error(data.error);
       return data as { ok: true; action: 'noted' | 'released'; booking?: any };
     },
@@ -611,7 +620,8 @@ export function useResolveJoinRequest() {
       const { data, error } = await supabase.functions.invoke('partners-approve-join', {
         body: args,
       });
-      if (error) throw error;
+      // The real reason lives in the response body, not error.message.
+      if (error) throw await edgeError(error, 'Could not update that request.');
       if (data?.error) throw new Error(data.error);
       return data as {
         ok: true;

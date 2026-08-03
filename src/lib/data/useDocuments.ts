@@ -86,3 +86,40 @@ export function useTruckRegistrationStatus() {
     },
   });
 }
+
+// ─── Fleet readiness ─────────────────────────────────────────────────────────
+// Everything the app needs to answer "can this crew accept ANY job?" before the
+// tap: do they own a truck, how big is the biggest one, and where do the
+// registration + insurance stand with Movvy review (migration 0085).
+
+export interface FleetReadiness {
+  company_id: string | null;
+  truck_count: number;
+  max_truck_ft: number;
+  registration: TruckRegistrationStatus;
+  insurance: TruckRegistrationStatus;
+}
+
+const EMPTY_FLEET: FleetReadiness = {
+  company_id: null,
+  truck_count: 0,
+  max_truck_ft: 0,
+  registration: { status: 'missing' },
+  insurance: { status: 'missing' },
+};
+
+export function useFleetReadiness() {
+  return useQuery({
+    queryKey: ['fleet-readiness'],
+    enabled: supabaseConfigured,
+    // The crew is blocked from every job until this clears review, so keep it
+    // fresh — an approval landing while they're staring at the feed should
+    // unlock it without a restart.
+    refetchInterval: 60_000,
+    queryFn: async (): Promise<FleetReadiness> => {
+      const { data, error } = await supabase.rpc('my_fleet_readiness');
+      if (error) throw error;
+      return { ...EMPTY_FLEET, ...((data ?? {}) as Partial<FleetReadiness>) };
+    },
+  });
+}

@@ -59,6 +59,9 @@ import {
   type CompanyDriverRosterRow,
   type OrgOpenJob,
 } from '@/lib/data';
+import { useFleetReadiness } from '@/lib/data';
+import { acceptBlock, requiredCrew } from '@/lib/truckFit';
+import { FleetGateBanner } from '@/components/FleetGateBanner';
 import { LiveMap } from '@/components/LiveMap';
 import { openInMaps } from '@/lib/maps';
 import { fmtCurrency, fmtDateShort, fmtRelativeAgo } from '@/lib/format';
@@ -105,6 +108,9 @@ export default function CompanyJobs() {
   const accept = useDispatcherAccept();
   const decline = useDispatcherDecline();
   const assign = useDispatcherAssign();
+  // Truck + registration state. Accepting ANY job is gated on it server-side,
+  // so the UI checks it before the tap and explains what's missing.
+  const { data: fleet } = useFleetReadiness();
 
   // Realtime hook for the dispatch queue — when a new searching booking
   // lands or one of our accepted bookings changes (driver assigned,
@@ -257,6 +263,23 @@ export default function CompanyJobs() {
           row={b}
           busy={accept.isPending}
           onAccept={async () => {
+            // Same checks the server runs — surfaced as a sentence instead of
+            // a 400. The job deliberately stays in the feed either way.
+            const blocked = acceptBlock(fleet, b);
+            if (blocked) {
+              haptic.warning();
+              Alert.alert(
+                blocked.title,
+                blocked.body,
+                blocked.fix === 'fleet'
+                  ? [
+                      { text: 'Not now', style: 'cancel' },
+                      { text: 'Open Trucks', onPress: () => router.push('/(company)/trucks') },
+                    ]
+                  : undefined,
+              );
+              return;
+            }
             try {
               await accept.mutateAsync({ booking_id: b.id, company_id: companyId! });
               haptic.success();
@@ -390,6 +413,7 @@ export default function CompanyJobs() {
           />
         }
       >
+        {tab === 'Requests' ? <FleetGateBanner fleet={fleet} /> : null}
         {renderList()}
       </ScrollView>
 
@@ -476,7 +500,16 @@ function NewRequestCard({
           </Text>
         </View>
         <RouteBlock row={row} />
-        <View className="mt-3 flex-row items-center justify-between">
+        {/* What the move needs on site — same language the customer saw when
+            they booked ("3-person crew"), plus the truck it has to fit in. */}
+        <View className="mt-3 flex-row items-center">
+          <Ionicons name="people-outline" size={14} color="#71717A" />
+          <Text className="ml-1 text-xs font-semibold text-ink-700">
+            {row.required_crew ?? requiredCrew(row)}-person crew
+            {row.required_truck_ft > 0 ? ` · ${row.required_truck_ft} ft truck` : ''}
+          </Text>
+        </View>
+        <View className="mt-2 flex-row items-center justify-between">
           <View className="flex-row items-center">
             <Ionicons name="calendar-outline" size={14} color="#71717A" />
             <Text className="ml-1 text-xs text-silver-500">
@@ -944,11 +977,28 @@ function DriverPickRow({
 function CrewOpenJobs({ companyId }: { companyId: string | null }) {
   const qc = useQueryClient();
   const { data: jobs, isLoading, refetch, isRefetching } = useOrgOpenJobs();
+  const { data: fleet } = useFleetReadiness();
   const accept = useDispatcherAccept();
   const [claimingId, setClaimingId] = useState<string | null>(null);
 
   const onClaim = async (job: OrgOpenJob) => {
     if (!companyId) return;
+    // Truck / registration / size — explained here rather than as a raw 400.
+    const blocked = acceptBlock(fleet, job);
+    if (blocked) {
+      haptic.warning();
+      Alert.alert(
+        blocked.title,
+        blocked.body,
+        blocked.fix === 'fleet'
+          ? [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Open Trucks', onPress: () => router.push('/(company)/trucks') },
+            ]
+          : undefined,
+      );
+      return;
+    }
     setClaimingId(job.id);
     try {
       await accept.mutateAsync({ booking_id: job.id, company_id: companyId });
@@ -989,6 +1039,7 @@ function CrewOpenJobs({ companyId }: { companyId: string | null }) {
             <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor="#16A34A" />
           }
         >
+          <FleetGateBanner fleet={fleet} />
           {jobs.map((job) => (
             <View
               key={job.id}
@@ -1014,6 +1065,14 @@ function CrewOpenJobs({ companyId }: { companyId: string | null }) {
                 <View className="h-2.5 w-2.5 rounded-sm bg-brand-600" />
                 <Text className="ml-2 flex-1 text-[13px] text-ink-800 dark:text-silver-200" numberOfLines={1}>
                   {job.dropoff_city ?? job.dropoff_line1 ?? 'In-home job'}
+                </Text>
+              </View>
+
+              <View className="mt-2 flex-row items-center">
+                <Ionicons name="people-outline" size={14} color="#71717A" />
+                <Text className="ml-1 text-xs font-semibold text-ink-700">
+                  {job.required_crew ?? 2}-person crew
+                  {job.required_truck_ft > 0 ? ` · ${job.required_truck_ft} ft truck` : ''}
                 </Text>
               </View>
 

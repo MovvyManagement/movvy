@@ -14,7 +14,9 @@ import { mockJobs } from '@/data/mockJobs';
 import { withMockFallback } from '@/lib/mocks';
 import { fmtCurrency, fmtDistance, fmtDuration, fmtTime, fmtDateShort } from '@/lib/format';
 import { moveSummary } from '@/lib/moveSummary';
-import { useAvailableJobs, useAcceptBooking, useMyMembership, useMyAssignedJobs, acceptOnBehalfOf, useTruckRegistrationStatus } from '@/lib/data';
+import { useAvailableJobs, useAcceptBooking, useMyMembership, useMyAssignedJobs, acceptOnBehalfOf, useFleetReadiness } from '@/lib/data';
+import { acceptBlock, requiredCrew, requiredTruckFt } from '@/lib/truckFit';
+import { FleetGateBanner } from '@/components/FleetGateBanner';
 import { estimatePartnerPayoutCents, jobEffort, distanceToPickupKm } from '@/lib/partnerJobs';
 import { useUserLocation } from '@/lib/useUserLocation';
 import { supabase, supabaseConfigured, useAuth } from '@/lib/supabase';
@@ -61,9 +63,9 @@ export default function MoverJobs() {
   } = useMyAssignedJobs();
   const { user } = useAuth();
   const accept = useAcceptBooking();
-  // Job acceptance is gated on an APPROVED truck registration — show exactly
-  // where theirs stands (and the reviewer's comment) instead of failing at tap.
-  const reg = useTruckRegistrationStatus();
+  // Job acceptance is gated on owning a truck with an APPROVED registration —
+  // show exactly where they stand instead of failing at tap.
+  const { data: fleet } = useFleetReadiness();
   const prevCount = useRef(0);
 
   // Driver's GPS — powers the "X km away" (distance-to-pickup) signal on
@@ -96,17 +98,23 @@ export default function MoverJobs() {
     if (live) prevCount.current = live.length;
   }, [live?.length]);
 
-  const onAccept = async (jobId: string, requiredFt = 0, myMaxFt = 0) => {
-    // Truck too small? Explain and stop here — the job stays in the feed for a
-    // crew that can actually carry it. (The server enforces this too; this is
-    // just so the crew gets a clear reason instead of a raw 400.)
-    if (requiredFt > 0 && myMaxFt < requiredFt) {
+  const onAccept = async (jobId: string, booking?: any) => {
+    // No truck / registration not approved / truck too small — explain and stop
+    // here. The job stays in the feed for a crew that can actually carry it.
+    // (The server enforces the same rules; this is so the crew gets a sentence
+    // instead of a raw 400.)
+    const blocked = acceptBlock(fleet, booking);
+    if (blocked) {
       haptic.warning();
       Alert.alert(
-        'Your truck is too small for this move',
-        myMaxFt > 0
-          ? `This move needs a ${requiredFt} ft truck and your largest is ${myMaxFt} ft. Leave it for a crew with a bigger truck — you'll still see everything you can carry.`
-          : `This move needs a ${requiredFt} ft truck. Add your truck (and its registration) in your profile, then you can accept jobs it fits.`,
+        blocked.title,
+        blocked.body,
+        blocked.fix === 'fleet'
+          ? [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Open Trucks', onPress: () => router.push('/(company)/trucks') },
+            ]
+          : undefined,
       );
       return;
     }
@@ -159,9 +167,11 @@ export default function MoverJobs() {
         pickupLat: b.pickup_lat,
         pickupLng: b.pickup_lng,
         effortChips: jobEffort(b).chips,
-        requiredTruckFt: (b as any).required_truck_ft ?? 0,
-        requiredCrew: (b as any).required_crew ?? 2,
-        myMaxTruckFt: (b as any).my_max_truck_ft ?? 0,
+        // open_jobs_for_me returns raw bookings, so the capacity requirement is
+        // derived here from the move's own details (same matrix as the server).
+        raw: b,
+        requiredTruckFt: requiredTruckFt(b),
+        requiredCrew: requiredCrew(b),
         itemsSummary:
           b.move_type === 'home_move'
             ? `${(b.details as any)?.bedrooms ?? 0}-bed ${(b.details as any)?.dwelling ?? 'home'}`
@@ -345,44 +355,10 @@ export default function MoverJobs() {
             <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor="#16A34A" />
           }
         >
-          {/* Truck registration gate — job acceptance needs an APPROVED
-              registration, so surface the state (and the reviewer's comment)
-              here rather than letting them find out when Accept fails. */}
-          {reg.data && reg.data.status !== 'approved' ? (
-            <Pressable
-              onPress={() => router.push('/(mover)/(tabs)/profile')}
-              className={`mb-3 rounded-2xl border p-4 active:opacity-80 ${
-                reg.data.status === 'pending'
-                  ? 'border-amber-200 bg-amber-50'
-                  : 'border-red-200 bg-red-50'
-              }`}
-            >
-              <View className="flex-row items-center">
-                <Ionicons
-                  name={reg.data.status === 'pending' ? 'hourglass-outline' : 'alert-circle-outline'}
-                  size={18}
-                  color={reg.data.status === 'pending' ? '#B45309' : '#DC2626'}
-                />
-                <Text className="ml-2 flex-1 text-sm font-bold text-ink-900">
-                  {reg.data.status === 'pending'
-                    ? 'Truck registration — pending approval'
-                    : reg.data.status === 'rejected'
-                    ? 'Truck registration — changes requested'
-                    : 'Truck registration required'}
-                </Text>
-              </View>
-              <Text className="mt-1 text-xs text-silver-600 leading-5">
-                {reg.data.status === 'pending'
-                  ? "Movvy is reviewing it. You can accept jobs as soon as it's approved."
-                  : reg.data.status === 'rejected'
-                  ? reg.data.rejection_reason ?? 'Re-upload your registration from your profile.'
-                  : 'Upload your truck registration in your profile to start accepting jobs.'}
-              </Text>
-              <Text className="mt-2 text-xs font-semibold text-brand-700">
-                Open profile →
-              </Text>
-            </Pressable>
-          ) : null}
+          {/* Truck + registration gate — job acceptance needs a truck whose
+              registration Movvy has APPROVED, so surface the state (and the
+              reviewer's comment) rather than letting Accept fail. */}
+          <FleetGateBanner fleet={fleet} />
 
           {jobs.length === 0 ? (
             <EmptyState
@@ -525,7 +501,7 @@ export default function MoverJobs() {
                       <Ionicons name="cube-outline" size={14} color="#71717A" />
                       <Text className="ml-1.5 text-xs text-silver-600">
                         <Text className="font-semibold text-ink-900">
-                          {j.requiredCrew}-person crew
+                          {j.requiredCrew ?? 2}-person crew
                         </Text>
                         {j.requiredTruckFt > 0 ? ` · ${j.requiredTruckFt} ft truck` : ''}
                       </Text>
@@ -536,7 +512,7 @@ export default function MoverJobs() {
                         the crew can see what's out there and it stays visible
                         for someone with the right truck. */}
                     <Pressable
-                      onPress={() => onAccept(j.id, j.requiredTruckFt, j.myMaxTruckFt)}
+                      onPress={() => onAccept(j.id, j.raw)}
                       disabled={accept.isPending}
                       className={`mt-3 h-12 rounded-2xl items-center justify-center flex-row ${
                         accept.isPending ? 'bg-silver-200' : 'bg-brand-600 active:opacity-90'

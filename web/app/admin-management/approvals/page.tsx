@@ -21,7 +21,8 @@ const REVIEW_STATUSES = ['in_review', 'docs_uploaded', 'in_progress'];
 export default async function ApprovalsPage() {
   const supabase = await supabaseServer();
 
-  const [{ data: teams }, { data: companies }, { data: docCounts }] = await Promise.all([
+  const [{ data: teams }, { data: companies }, { data: docCounts }, { data: truckDocs }] =
+    await Promise.all([
     supabase
       .from('partner_teams')
       .select('id, display_name, primary_city_id, onboarding_status, created_at, invite_code')
@@ -32,21 +33,55 @@ export default async function ApprovalsPage() {
       .select('id, legal_name, display_name, primary_city_id, onboarding_status, created_at, invite_code, registration_number')
       .in('onboarding_status', REVIEW_STATUSES)
       .order('created_at', { ascending: false }),
-    // Verification document counts per entity
+    // Verification document counts per subject. The subject is whichever of
+    // the three id columns is set (see the vd_one_subject constraint) — there
+    // is no `entity_id` column, which is why these counts used to be blank.
     supabase
       .from('verification_documents')
-      .select('entity_id, status')
+      .select('company_id, team_id, profile_id, status')
       .in('status', ['pending', 'approved', 'rejected']),
+    // Truck paperwork awaiting review. This is its OWN queue because a truck
+    // gets added long after the org itself was approved — those orgs are no
+    // longer in the applicant list above, so without this the registration sits
+    // 'pending' forever and the crew can never accept a job.
+    supabase
+      .from('verification_documents')
+      .select('id, kind, status, created_at, company_id, companies(display_name, legal_name)')
+      .in('kind', ['vehicle_registration', 'insurance'])
+      .eq('status', 'pending')
+      .not('company_id', 'is', null)
+      .order('created_at', { ascending: true }),
   ]);
 
-  // Build doc count map: entity_id → { pending, approved, total }
+  // Build doc count map: subject id → { pending, approved, total }
   const docMap: Record<string, { pending: number; approved: number; total: number }> = {};
   (docCounts ?? []).forEach((d: any) => {
-    if (!docMap[d.entity_id]) docMap[d.entity_id] = { pending: 0, approved: 0, total: 0 };
-    docMap[d.entity_id].total++;
-    if (d.status === 'pending') docMap[d.entity_id].pending++;
-    if (d.status === 'approved') docMap[d.entity_id].approved++;
+    const key = d.company_id ?? d.team_id ?? d.profile_id;
+    if (!key) return;
+    if (!docMap[key]) docMap[key] = { pending: 0, approved: 0, total: 0 };
+    docMap[key].total++;
+    if (d.status === 'pending') docMap[key].pending++;
+    if (d.status === 'approved') docMap[key].approved++;
   });
+
+  // One row per org with pending truck paperwork.
+  const truckQueue = Object.values(
+    (truckDocs ?? []).reduce((acc: Record<string, any>, d: any) => {
+      const cid = d.company_id as string;
+      const co = Array.isArray(d.companies) ? d.companies[0] : d.companies;
+      if (!acc[cid]) {
+        acc[cid] = {
+          company_id: cid,
+          name: co?.display_name ?? co?.legal_name ?? 'Partner',
+          kinds: [] as string[],
+          created_at: d.created_at,
+        };
+      }
+      acc[cid].kinds.push(d.kind);
+      if (d.created_at < acc[cid].created_at) acc[cid].created_at = d.created_at;
+      return acc;
+    }, {}),
+  ) as { company_id: string; name: string; kinds: string[]; created_at: string }[];
 
   const total = (teams?.length ?? 0) + (companies?.length ?? 0);
 
@@ -63,9 +98,18 @@ export default async function ApprovalsPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-zinc-900">Approvals</h1>
         <p className="text-sm text-zinc-500 mt-0.5">
-          {total > 0
-            ? `${total} applicant${total !== 1 ? 's' : ''} awaiting review — ${teams?.length ?? 0} crews · ${companies?.length ?? 0} companies`
-            : 'No applicants in the queue. New applications appear here automatically.'}
+          {total > 0 || truckQueue.length > 0
+            ? [
+                total > 0
+                  ? `${total} applicant${total !== 1 ? 's' : ''} awaiting review`
+                  : null,
+                truckQueue.length > 0
+                  ? `${truckQueue.length} truck${truckQueue.length !== 1 ? 's' : ''} waiting on paperwork`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')
+            : 'Nothing in the queue. New applications and truck paperwork appear here automatically.'}
         </p>
       </div>
 
@@ -86,6 +130,51 @@ export default async function ApprovalsPage() {
           </div>
         ) : null;
       })()}
+
+      {/* Trucks — blocks the partner from accepting ANY job until approved. */}
+      <Section
+        title="Truck paperwork"
+        count={truckQueue.length}
+        empty="No truck registrations or insurance waiting on review."
+      >
+        {truckQueue.map((t) => (
+          <Link
+            key={t.company_id}
+            href={`/admin-management/approvals/company/${t.company_id}`}
+            className="flex items-center px-5 py-4 hover:bg-zinc-50 transition-colors gap-4"
+          >
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 bg-amber-100 text-amber-700 text-sm font-bold">
+              🚚
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                <span className="text-sm font-bold text-zinc-900 truncate">{t.name}</span>
+                <span className="px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-xs font-semibold">
+                  Blocking job acceptance
+                </span>
+              </div>
+              <div className="text-xs text-zinc-500">
+                {t.kinds
+                  .map((k) => (k === 'vehicle_registration' ? 'Registration' : 'Insurance'))
+                  .join(' · ')}{' '}
+                · uploaded {fmtDate(t.created_at)}
+              </div>
+            </div>
+            <div className="text-xs text-zinc-400 whitespace-nowrap shrink-0">
+              {fmtRelative(t.created_at)}
+            </div>
+            <svg
+              className="h-4 w-4 text-zinc-300 shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </Link>
+        ))}
+      </Section>
 
       {/* Teams */}
       <Section title="Two-person crews" count={teams?.length ?? 0} empty="No crew applications pending.">
