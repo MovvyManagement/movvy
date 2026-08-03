@@ -32,6 +32,7 @@ import { initSentry } from '@/lib/sentry';
 import { useEffect, useState } from 'react';
 import { useThemeScheme, themedColors } from '@/lib/theme';
 import { AppSplash } from '@/components/AppSplash';
+import { NotificationBannerHost } from '@/components/NotificationBannerHost';
 import * as SplashScreen from 'expo-splash-screen';
 
 // Init Sentry as a module-level side effect so it's up before any
@@ -95,6 +96,7 @@ export default function RootLayout() {
                 >
                 <>
                 <PushTokenWatcher />
+                <NotificationBannerHost />
                 <AnalyticsBootstrap />
                 <StatusBar style={palette.statusBar} />
                 <Stack
