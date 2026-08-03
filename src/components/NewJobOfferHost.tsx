@@ -48,10 +48,12 @@ import {
   useDispatchQueue,
   useAcceptBooking,
   useDispatcherAccept,
+  useFleetReadiness,
   useDispatcherDecline,
 } from '@/lib/data';
 import { useToast } from './Toast';
 import { haptic } from '@/lib/haptics';
+import { acceptBlock, requiredCrew, requiredTruckFt } from '@/lib/truckFit';
 import { fmtCurrency, fmtDateShort } from '@/lib/format';
 
 interface JobOffer {
@@ -65,6 +67,9 @@ interface JobOffer {
   scheduled_for_date: string;
   scheduled_for_window: string | null;
   price_total_cents: number;
+  /** Capacity, so the popup can refuse with a reason instead of a 400. */
+  required_truck_ft?: number;
+  required_crew?: number;
 }
 
 export function NewJobOfferHost() {
@@ -96,6 +101,7 @@ function SoloTeamOfferHost({ citySlug }: { citySlug: string }) {
   // while membership is loading.
   const { data: jobs } = useAvailableJobs(citySlug);
   const accept = useAcceptBooking();
+  const { data: fleet } = useFleetReadiness();
   const toast = useToast();
 
   const [offer, setOffer] = useState<JobOffer | null>(null);
@@ -127,12 +133,20 @@ function SoloTeamOfferHost({ citySlug }: { citySlug: string }) {
         scheduled_for_date: next.scheduled_for_date,
         scheduled_for_window: next.scheduled_for_window,
         price_total_cents: next.price_total_cents,
+        required_truck_ft: requiredTruckFt(next),
+        required_crew: requiredCrew(next),
       });
     }
   }, [jobs, offer]);
 
   const onAccept = async () => {
     if (!offer) return;
+    const blocked = acceptBlock(fleet, offer);
+    if (blocked) {
+      haptic.warning();
+      toast.error(blocked.body);
+      return;
+    }
     try {
       await accept.mutateAsync({ booking_id: offer.id });
       haptic.success();
@@ -166,6 +180,7 @@ function SoloTeamOfferHost({ citySlug }: { citySlug: string }) {
 
 function CompanyDispatcherOfferHost({ companyId }: { companyId: string }) {
   const { data: queue } = useDispatchQueue(companyId);
+  const { data: fleet } = useFleetReadiness();
   const accept = useDispatcherAccept();
   const decline = useDispatcherDecline();
   const toast = useToast();
@@ -206,6 +221,14 @@ function CompanyDispatcherOfferHost({ companyId }: { companyId: string }) {
 
   const onAccept = async () => {
     if (!offer) return;
+    // Same gate as the Jobs board — no truck / unapproved registration / too
+    // small says so plainly, and the job stays in the pool.
+    const blocked = acceptBlock(fleet, offer);
+    if (blocked) {
+      haptic.warning();
+      toast.error(blocked.body);
+      return;
+    }
     try {
       await accept.mutateAsync({ booking_id: offer.id, company_id: companyId });
       haptic.success();
