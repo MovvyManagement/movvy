@@ -34,7 +34,6 @@ import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { PhoneInput, isPhoneComplete, toE164 } from '@/components/PhoneInput';
 import { registerOtherSide, supabase, supabaseConfigured } from '@/lib/supabase';
-import { signInWithApple, useGoogleSignIn } from '@/lib/oauth';
 import { useToast } from '@/components/Toast';
 import { TERMS_VERSION } from '@/lib/brand';
 import { haptic } from '@/lib/haptics';
@@ -46,7 +45,6 @@ const RESEND_COOLDOWN_SECONDS = 30;
 
 export default function Signup() {
   const toast = useToast();
-  const google = useGoogleSignIn();
 
   // ─── Form state (Step 1) ─────────────────────────────────────────────────
   const [step, setStep] = useState<Step>('form');
@@ -109,18 +107,6 @@ export default function Signup() {
       if (cooldownRef.current) clearInterval(cooldownRef.current);
     };
   }, [resendIn]);
-
-  // ─── OAuth (unchanged — customer-only) ──────────────────────────────────
-  const onApple = async () => {
-    const res = await signInWithApple();
-    if (!res.ok) return toast.error(res.error ?? 'Apple sign-in failed.');
-    router.replace('/(customer)/(tabs)/home');
-  };
-  const onGoogle = async () => {
-    const res = await google.signIn();
-    if (!res.ok) return toast.error(res.error ?? 'Google sign-in failed.');
-    router.replace('/(customer)/(tabs)/home');
-  };
 
   // ─── Step 1 → Step 2: create the pending auth user + send SMS OTP ───────
   const submitForm = async () => {
@@ -477,39 +463,6 @@ export default function Signup() {
             onPress={submitForm}
           />
         </View>
-
-        <View className="my-6 flex-row items-center">
-          <View className="h-px flex-1 bg-silver-200" />
-          <Text className="mx-3 text-xs uppercase text-silver-400">or sign up with</Text>
-          <View className="h-px flex-1 bg-silver-200" />
-        </View>
-
-        <View className="flex-row gap-3">
-          {Platform.OS === 'ios' ? (
-            <Pressable
-              onPress={onApple}
-              className="h-12 flex-1 flex-row items-center justify-center rounded-2xl border border-silver-300 bg-white active:opacity-70"
-            >
-              <Ionicons name="logo-apple" size={20} color="#0A0A0A" />
-              <Text className="ml-2 text-sm font-semibold text-ink-900">Apple</Text>
-            </Pressable>
-          ) : null}
-          <Pressable
-            onPress={onGoogle}
-            className="h-12 flex-1 flex-row items-center justify-center rounded-2xl border border-silver-300 bg-white active:opacity-70"
-          >
-            <Ionicons name="logo-google" size={20} color="#0A0A0A" />
-            <Text className="ml-2 text-sm font-semibold text-ink-900">Google</Text>
-          </Pressable>
-        </View>
-
-        {/* OAuth note — when Apple/Google sign-in is used, we still need a
-            phone before the customer can book. The first-launch gate handles
-            collection via Profile → Phone. */}
-        <Text className="mt-3 text-[11px] text-silver-400 leading-4">
-          Apple / Google sign-in skips the form, but we'll still ask for your
-          phone before your first booking.
-        </Text>
 
         <View className="mt-6 mb-4 flex-row items-center justify-center">
           <Text className="text-sm text-silver-500">Already have an account? </Text>

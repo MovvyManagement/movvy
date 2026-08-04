@@ -289,6 +289,84 @@ export async function logout(): Promise<AuthResult> {
   return { ok: true };
 }
 
+// =============================================================================
+// PASSWORD RESET — a 6-digit code, not a link.
+//
+// The old flow emailed a magic link pointing at movvy://reset-password, a route
+// that never existed: the link opened the app onto nothing and anyone who
+// forgot their password was simply locked out. Links are also the fragile part
+// of a mobile reset — they break when the mail app opens its own browser, and
+// they can't be delivered by SMS at all.
+//
+// So: send a code, type the code, choose a password. Same three steps for
+// customers and partners, by email or by phone.
+//
+// Mechanically this is Supabase's one-time-password sign-in. Verifying the code
+// yields a real session, and a session is what lets updateUser() set a new
+// password. shouldCreateUser:false is essential — without it, entering an
+// unknown address would silently CREATE an account instead of resetting one.
+// =============================================================================
+
+/** Step 1 — send the code. */
+export async function sendPasswordResetCode(
+  contact: { email?: string; phone?: string },
+): Promise<AuthResult> {
+  const email = contact.email?.trim().toLowerCase();
+  const phone = contact.phone?.trim();
+  if (!email && !phone) return { ok: false, error: 'Enter your email or phone number.' };
+
+  const { error } = await supabase.auth.signInWithOtp(
+    email
+      ? { email, options: { shouldCreateUser: false } }
+      : { phone: phone!, options: { shouldCreateUser: false } },
+  );
+  if (error) {
+    const m = error.message.toLowerCase();
+    // Supabase says "signups not allowed for otp" when the contact has no
+    // account. Don't confirm or deny it — that would let anyone test which
+    // emails and numbers are registered.
+    if (m.includes('signups not allowed') || m.includes('not found')) return { ok: true };
+    return { ok: false, error: friendly(error.message) };
+  }
+  return { ok: true };
+}
+
+/** Step 2 — check the code. A correct one leaves us signed in. */
+export async function verifyPasswordResetCode(
+  contact: { email?: string; phone?: string },
+  code: string,
+): Promise<AuthResult> {
+  const email = contact.email?.trim().toLowerCase();
+  const phone = contact.phone?.trim();
+  const token = code.replace(/\D/g, '');
+  if (token.length < 6) return { ok: false, error: 'Enter the 6-digit code.' };
+
+  const { error } = await supabase.auth.verifyOtp(
+    email
+      ? { email, token, type: 'email' }
+      : { phone: phone!, token, type: 'sms' },
+  );
+  if (error) {
+    const m = error.message.toLowerCase();
+    if (m.includes('expired')) {
+      return { ok: false, error: 'That code expired. Send a new one.' };
+    }
+    return { ok: false, error: "That code didn't match. Check it and try again." };
+  }
+  return { ok: true };
+}
+
+/** Step 3 — set the new password on the session the code just created. */
+export async function setNewPassword(password: string): Promise<AuthResult> {
+  if (password.length < 8) {
+    return { ok: false, error: 'Password must be at least 8 characters.' };
+  }
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) return { ok: false, error: friendly(error.message) };
+  return { ok: true };
+}
+
+/** @deprecated Link-based reset — kept only for the web console's own flow. */
 export async function resetPassword(input: unknown): Promise<AuthResult> {
   const parsed = ForgotPasswordInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };

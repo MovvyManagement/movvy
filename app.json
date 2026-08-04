@@ -38,8 +38,7 @@
           "https",
           "http"
         ]
-      },
-      "usesAppleSignIn": true
+      }
     },
     "android": {
       "package": "com.movvy.app",

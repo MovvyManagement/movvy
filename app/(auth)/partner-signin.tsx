@@ -212,6 +212,17 @@ export default function PartnerSignIn() {
               />
             </View>
 
+            {/* Same code-based reset as the customer side — ?side=partner just
+                decides where they land once the new password is saved. */}
+            <Pressable
+              onPress={() => router.push('/(auth)/forgot-password?side=partner' as any)}
+              className="mt-4 items-center"
+            >
+              <Text className="text-sm font-semibold text-brand-700">
+                Forgot your password?
+              </Text>
+            </Pressable>
+
             {/* New here → sign up. Everyone signs up the same way and gets their
                 own code; joining someone's crew happens later from the profile. */}
             <View className="mt-6 mb-4 flex-row items-center justify-center">

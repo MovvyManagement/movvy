@@ -7,8 +7,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { PhoneInput, isPhoneComplete, toE164 } from '@/components/PhoneInput';
-import { enforceCustomerOnly, login, supabaseConfigured } from '@/lib/supabase';
-import { signInWithApple, useGoogleSignIn } from '@/lib/oauth';
+import { login, supabaseConfigured } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
 
 // =============================================================================
@@ -41,38 +40,6 @@ export default function Login() {
   const canSubmit = contactReady && password.length > 0;
 
   const toast = useToast();
-  const google = useGoogleSignIn();
-
-  // OAuth — customer-only. The helpers gracefully degrade if the native
-  // SDK / client IDs aren't wired yet; the toast surfaces the setup note.
-  const onApple = async () => {
-    const res = await signInWithApple();
-    if (!res.ok) {
-      toast.error(res.error ?? 'Apple sign-in failed.');
-      return;
-    }
-    // Same door check as the password path — OAuth must not be a way in for a
-    // partner account.
-    const wrongDoor = await enforceCustomerOnly();
-    if (wrongDoor) {
-      toast.error(wrongDoor);
-      return;
-    }
-    router.replace('/(customer)/(tabs)/home');
-  };
-  const onGoogle = async () => {
-    const res = await google.signIn();
-    if (!res.ok) {
-      toast.error(res.error ?? 'Google sign-in failed.');
-      return;
-    }
-    const wrongDoor = await enforceCustomerOnly();
-    if (wrongDoor) {
-      toast.error(wrongDoor);
-      return;
-    }
-    router.replace('/(customer)/(tabs)/home');
-  };
 
   const submit = async () => {
     if (!supabaseConfigured) {
@@ -209,33 +176,6 @@ export default function Login() {
                 disabled={!canSubmit}
                 onPress={submit}
               />
-            </View>
-
-            <View className="my-8 flex-row items-center">
-              <View className="h-px flex-1 bg-silver-200" />
-              <Text className="mx-3 text-xs uppercase text-silver-400">or continue with</Text>
-              <View className="h-px flex-1 bg-silver-200" />
-            </View>
-
-            {/* OAuth is customer-only — partners use the partner-signin
-                code-gated flow. On Android we hide Apple since it's iOS-only. */}
-            <View className="flex-row gap-3">
-              {Platform.OS === 'ios' ? (
-                <Pressable
-                  onPress={onApple}
-                  className="h-12 flex-1 flex-row items-center justify-center rounded-2xl border border-silver-300 bg-white active:opacity-70"
-                >
-                  <Ionicons name="logo-apple" size={20} color="#0A0A0A" />
-                  <Text className="ml-2 text-sm font-semibold text-ink-900">Apple</Text>
-                </Pressable>
-              ) : null}
-              <Pressable
-                onPress={onGoogle}
-                className="h-12 flex-1 flex-row items-center justify-center rounded-2xl border border-silver-300 bg-white active:opacity-70"
-              >
-                <Ionicons name="logo-google" size={20} color="#0A0A0A" />
-                <Text className="ml-2 text-sm font-semibold text-ink-900">Google</Text>
-              </Pressable>
             </View>
 
             <View className="mt-8 flex-row items-center justify-center">
