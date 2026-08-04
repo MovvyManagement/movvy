@@ -4,6 +4,7 @@ import { View, ActivityIndicator } from 'react-native';
 import { useRequireAuth, supabaseConfigured } from '@/lib/supabase';
 import { useThemedColors } from '@/lib/theme';
 import { RoleSurfaceGuard } from '@/components/RoleSurfaceGuard';
+import { PartnerOnboardingGate } from '@/components/PartnerOnboardingGate';
 
 // =============================================================================
 // Company route group — Stack on top of Tabs (mirrors the customer pattern).
@@ -44,6 +45,7 @@ export default function CompanyStack() {
         }}
       />
       <RoleSurfaceGuard surface="company" />
+      <PartnerOnboardingGate />
     </>
   );
 }

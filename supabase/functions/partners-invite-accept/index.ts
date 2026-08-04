@@ -271,6 +271,22 @@ handle(async (req) => {
       }
     }
 
+    // ─── 4b. Stamp the PARTNER side ─────────────────────────────────────────
+    // Joining a crew by code IS partner registration (migration 0086). Without
+    // this the person we just added to a roster would be turned away at the
+    // partner sign-in, because the two sides are separate registrations and
+    // this path never touches the signup form that normally stamps it.
+    {
+      const { error: sideErr } = await admin
+        .from('profiles')
+        .update({ partner_registered_at: new Date().toISOString() })
+        .eq('id', userId)
+        .is('partner_registered_at', null);
+      if (sideErr) {
+        console.error('[partners-invite-accept] partner side stamp', sideErr);
+      }
+    }
+
     // Mark the pre-invite (if any) as consumed
     if (preInviteId) {
       await admin

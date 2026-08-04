@@ -35,7 +35,7 @@ import { StepIndicator } from '@/components/StepIndicator';
 import { Input } from '@/components/Input';
 import { PhoneInput, isPhoneComplete, toE164 } from '@/components/PhoneInput';
 import { Button } from '@/components/Button';
-import { supabase, supabaseConfigured } from '@/lib/supabase';
+import { registerOtherSide, supabase, supabaseConfigured } from '@/lib/supabase';
 import { TERMS_VERSION } from '@/lib/brand';
 import { useToast } from '@/components/Toast';
 import { haptic } from '@/lib/haptics';
@@ -61,6 +61,9 @@ export default function PartnerSignup() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The number already has a Movvy login on the OTHER side. Supabase won't
+  // create a second account for it, so we offer the add-a-side path instead.
+  const [existingLogin, setExistingLogin] = useState(false);
 
   // Per-field error map — surfaces inline messages on Continue tap.
   const [fieldErrors, setFieldErrors] = useState<{
@@ -152,7 +155,10 @@ export default function PartnerSignup() {
       if (signupErr) {
         const msg = signupErr.message.toLowerCase();
         if (msg.includes('already') || msg.includes('registered')) {
-          setError("That phone number is already on a Movvy account. Try signing in instead.");
+          setExistingLogin(true);
+          setError(
+            "That number already has a Movvy login. Enter its password below to register as a partner so you can take jobs — same account, no second sign-up.",
+          );
         } else if (msg.includes('phone provider') || msg.includes('sms') || msg.includes('disabled')) {
           setError(
             'Phone signup needs Supabase Auth → Providers → Phone toggled ON with Twilio creds.',
@@ -167,6 +173,30 @@ export default function PartnerSignup() {
       setStep('otp');
     } catch (e: any) {
       setError(e?.message ?? "Couldn't start signup. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+  // ─── Already have a Movvy login? Add this side to it ─────────────────────
+  const addSide = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await registerOtherSide({
+        phone: phoneE164,
+        password,
+        side: 'partner',
+      });
+      if (!res.ok) {
+        setError(res.error ?? 'Could not add that account.');
+        return;
+      }
+      haptic.success();
+      router.replace('/(company)/onboarding/operator' as any);
+    } catch (e: any) {
+      setError(e?.message ?? 'Could not add that account.');
     } finally {
       setLoading(false);
     }
@@ -451,6 +481,21 @@ export default function PartnerSignup() {
             <Ionicons name="alert-circle" size={18} color="#EF4444" />
             <Text className="ml-2 flex-1 text-sm text-danger">{error}</Text>
           </View>
+        ) : null}
+
+        {/* Same number, other side. Supabase keys accounts by phone, so a second
+            sign-up is impossible — proving the existing password and adding the
+            side is the whole registration for this side. */}
+        {existingLogin ? (
+          <Pressable
+            onPress={addSide}
+            disabled={loading || password.length === 0}
+            className={`mt-3 h-12 rounded-2xl items-center justify-center ${
+              loading || password.length === 0 ? 'bg-silver-300' : 'bg-brand-600 active:opacity-90'
+            }`}
+          >
+            <Text className="text-sm font-bold text-white">Register as a partner</Text>
+          </Pressable>
         ) : null}
 
         <View className="my-4 rounded-2xl bg-silver-50 p-4">

@@ -55,15 +55,72 @@ export async function login(input: unknown): Promise<AuthResult> {
   const { error } = await supabase.auth.signInWithPassword(creds);
   if (error) return { ok: false, error: friendly(error.message) };
 
-  // ─── Partner accounts belong on the partner sign-in ────────────────────────
-  // A valid password is not enough: this door is the CUSTOMER app. A crew
-  // account signing in here landed on the customer home with a partner's
-  // session — wrong surface, and the two sides have different rules about what
-  // you can see. Sign them straight back out and point them at the right door.
-  // (Movvy staff keep using this screen — the console is web-only.)
+  // ─── This door is the CUSTOMER side ───────────────────────────────────────
+  // A valid password is not enough. The two sides are separate registrations
+  // (migration 0086): proving who you are opens nothing on its own — you also
+  // have to have registered HERE. Someone who wants both signs up on both.
   const wrongDoor = await enforceCustomerOnly();
   if (wrongDoor) return { ok: false, error: wrongDoor };
 
+  return { ok: true };
+}
+
+export interface AccountSides {
+  customer: boolean;
+  partner: boolean;
+}
+
+/** Which sides this identity has registered on. Both false until they sign up. */
+export async function accountSides(): Promise<AccountSides> {
+  const { data, error } = await supabase.rpc('my_account_sides');
+  if (error) return { customer: false, partner: false };
+  return {
+    customer: !!(data as any)?.customer,
+    partner: !!(data as any)?.partner,
+  };
+}
+
+/** Adds the given side to the identity that is currently signed in. */
+export async function registerAccountSide(side: 'customer' | 'partner'): Promise<boolean> {
+  const { error } = await supabase.rpc('register_account_side', { p_side: side });
+  return !error;
+}
+
+/**
+ * Second-side registration for someone who ALREADY has a Movvy login.
+ *
+ * Supabase keys accounts by phone/email and refuses a duplicate, so a partner
+ * who wants to book a move as a customer can't sign up again with the same
+ * number — the form just says "already registered". This is the way through:
+ * prove the existing password, then add the side. One identity, two
+ * registrations, which is exactly the separation without forcing a second
+ * email address on anyone.
+ */
+export async function registerOtherSide(args: {
+  phone: string;
+  password: string;
+  side: 'customer' | 'partner';
+}): Promise<AuthResult> {
+  const { error } = await supabase.auth.signInWithPassword({
+    phone: args.phone,
+    password: args.password,
+  });
+  if (error) {
+    const m = error.message.toLowerCase();
+    if (m.includes('invalid login')) {
+      return {
+        ok: false,
+        error:
+          "That's not the password for the Movvy account on this number. Use it, or reset it from the sign-in screen.",
+      };
+    }
+    return { ok: false, error: friendly(error.message) };
+  }
+  const added = await registerAccountSide(args.side);
+  if (!added) {
+    await supabase.auth.signOut();
+    return { ok: false, error: "Couldn't add that account. Try again." };
+  }
   return { ok: true };
 }
 
@@ -74,52 +131,12 @@ export async function login(input: unknown): Promise<AuthResult> {
  * skip login() entirely and would otherwise be a way around it.
  */
 export async function enforceCustomerOnly(): Promise<string | null> {
-  if (!(await isPartnerAccount())) return null;
+  const sides = await accountSides();
+  if (sides.customer) return null;
   await supabase.auth.signOut();
-  return "That's a partner account. Sign in through 'Partner sign in' instead.";
-}
-
-/**
- * True when the signed-in account is a Movvy PARTNER rather than a customer —
- * either by profile role or by holding a live org membership. Checks both
- * because the two can drift: an operator's profile role isn't always updated
- * when they create their org, and a legacy row can outlive a role change.
- */
-async function isPartnerAccount(): Promise<boolean> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return false;
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .maybeSingle();
-  const role = (profile as any)?.role ?? null;
-  if (role && ['driver', 'mover', 'company_owner', 'company_dispatcher'].includes(role)) {
-    return true;
-  }
-
-  const { data: membership } = await supabase
-    .from('company_members')
-    .select('company_id')
-    .eq('profile_id', user.id)
-    .is('removed_at', null)
-    .in('status', ['active', 'pending_approval'])
-    .limit(1)
-    .maybeSingle();
-  if (membership) return true;
-
-  const { data: teamMembership } = await supabase
-    .from('partner_team_members')
-    .select('team_id')
-    .eq('profile_id', user.id)
-    .is('removed_at', null)
-    .in('status', ['active', 'pending_approval'])
-    .limit(1)
-    .maybeSingle();
-  return !!teamMembership;
+  return sides.partner
+    ? "That login is registered on the partner side. Create a customer account to book a move — you can reuse this email."
+    : 'No customer account found for that login. Create one to book a move.';
 }
 
 // =============================================================================
@@ -173,6 +190,21 @@ export async function loginPartner(
   if (!user) {
     await supabase.auth.signOut();
     return { ok: false, error: 'Sign-in succeeded but session is missing. Try again.' };
+  }
+
+  // ─── This door is the PARTNER side ────────────────────────────────────────
+  // Mirror of the customer check: a customer's credentials are valid, but they
+  // have not registered as a partner, so this portal stays shut. Registering
+  // (same email is fine) is what opens it — see migration 0086.
+  const sides = await accountSides();
+  if (!sides.partner) {
+    await supabase.auth.signOut();
+    return {
+      ok: false,
+      error: sides.customer
+        ? "That login is registered on the customer side. Tap 'Create your account' to register as a partner — you can reuse this email."
+        : 'No partner account found for that login. Create one to start taking jobs.',
+    };
   }
 
   // Operator model: no invite code at login — your credentials ARE your access.

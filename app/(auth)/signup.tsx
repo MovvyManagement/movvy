@@ -33,7 +33,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { PhoneInput, isPhoneComplete, toE164 } from '@/components/PhoneInput';
-import { supabase, supabaseConfigured } from '@/lib/supabase';
+import { registerOtherSide, supabase, supabaseConfigured } from '@/lib/supabase';
 import { signInWithApple, useGoogleSignIn } from '@/lib/oauth';
 import { useToast } from '@/components/Toast';
 import { TERMS_VERSION } from '@/lib/brand';
@@ -63,6 +63,9 @@ export default function Signup() {
   // ─── Network state ───────────────────────────────────────────────────────
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The number already has a Movvy login on the OTHER side. Supabase won't
+  // create a second account for it, so we offer the add-a-side path instead.
+  const [existingLogin, setExistingLogin] = useState(false);
 
   // Per-field errors — set when the user taps "Send Verification Code" with
   // anything missing or malformed. Previously the button just stayed greyed
@@ -169,7 +172,10 @@ export default function Signup() {
       if (signupErr) {
         const msg = signupErr.message.toLowerCase();
         if (msg.includes('already') || msg.includes('registered')) {
-          setError("That phone number is already on a Movvy account. Try signing in instead.");
+          setExistingLogin(true);
+          setError(
+            "That number already has a Movvy login. Enter its password below to add customer access so you can book moves — same account, no second sign-up.",
+          );
         } else if (msg.includes('phone provider') || msg.includes('sms') || msg.includes('disabled')) {
           setError(
             'Phone signup needs to be enabled in your Supabase Auth dashboard: ' +
@@ -185,6 +191,30 @@ export default function Signup() {
       setStep('otp');
     } catch (e: any) {
       setError(e?.message ?? "Couldn't start signup. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+  // ─── Already have a Movvy login? Add this side to it ─────────────────────
+  const addSide = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await registerOtherSide({
+        phone: phoneE164,
+        password,
+        side: 'customer',
+      });
+      if (!res.ok) {
+        setError(res.error ?? 'Could not add that account.');
+        return;
+      }
+      haptic.success();
+      router.replace('/(customer)/(tabs)/home' as any);
+    } catch (e: any) {
+      setError(e?.message ?? 'Could not add that account.');
     } finally {
       setLoading(false);
     }
@@ -418,6 +448,21 @@ export default function Signup() {
             <Ionicons name="alert-circle" size={18} color="#EF4444" />
             <Text className="ml-2 flex-1 text-sm text-danger">{error}</Text>
           </View>
+        ) : null}
+
+        {/* Same number, other side. Supabase keys accounts by phone, so a second
+            sign-up is impossible — proving the existing password and adding the
+            side is the whole registration for this side. */}
+        {existingLogin ? (
+          <Pressable
+            onPress={addSide}
+            disabled={loading || password.length === 0}
+            className={`mt-3 h-12 rounded-2xl items-center justify-center ${
+              loading || password.length === 0 ? 'bg-silver-300' : 'bg-brand-600 active:opacity-90'
+            }`}
+          >
+            <Text className="text-sm font-bold text-white">Add customer access</Text>
+          </Pressable>
         ) : null}
 
         <View className="mt-6">
