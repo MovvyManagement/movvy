@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { pickPhoto } from '@/lib/pickPhoto';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCompanyDocuments, useUploadDocument } from '@/lib/data';
 import { useToast } from './Toast';
@@ -59,17 +59,8 @@ export function EditInsuranceSheet({ visible, companyId, onClose }: Props) {
 
   const pick = async (kind: 'insurance' | 'fleet_insurance') => {
     if (!companyId) return;
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      toast.error('Photo library permission denied');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-    });
-    if (result.canceled || result.assets.length === 0) return;
-    const asset = result.assets[0];
+    const file = await pickPhoto(kind, KINDS.find((k) => k.key === kind)?.label ?? 'Document');
+    if (!file) return;
     setBusyKind(kind);
     try {
       await upload.mutateAsync({
@@ -77,9 +68,9 @@ export function EditInsuranceSheet({ visible, companyId, onClose }: Props) {
         kind,
         subject_type: 'company',
         subject_id: companyId,
-        fileUri: asset.uri,
-        fileName: asset.fileName ?? `${kind}-${Date.now()}.jpg`,
-        mimeType: asset.mimeType ?? 'image/jpeg',
+        fileUri: file.uri,
+        fileName: file.name,
+        mimeType: file.mime,
       });
       qc.invalidateQueries({ queryKey: ['company-documents', companyId] });
       haptic.success();

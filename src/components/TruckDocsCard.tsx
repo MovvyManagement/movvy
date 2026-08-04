@@ -11,7 +11,7 @@
 import React, { useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { pickPhoto } from '@/lib/pickPhoto';
 import { useQueryClient } from '@tanstack/react-query';
 import { Card } from './Card';
 import { useToast } from './Toast';
@@ -38,17 +38,8 @@ export function TruckDocsCard({ companyId }: { companyId: string | null }) {
 
   const replace = async (kind: Kind) => {
     if (!companyId) return;
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      toast.error('Photo library permission denied');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-    });
-    if (result.canceled || result.assets.length === 0) return;
-    const asset = result.assets[0];
+    const file = await pickPhoto(kind, 'Upload document');
+    if (!file) return;
     setBusy(kind);
     try {
       await upload.mutateAsync({
@@ -56,9 +47,9 @@ export function TruckDocsCard({ companyId }: { companyId: string | null }) {
         kind,
         subject_type: 'company',
         subject_id: companyId,
-        fileUri: asset.uri,
-        fileName: asset.fileName ?? `${kind}-${Date.now()}.jpg`,
-        mimeType: asset.mimeType ?? 'image/jpeg',
+        fileUri: file.uri,
+        fileName: file.name,
+        mimeType: file.mime,
       });
       qc.invalidateQueries({ queryKey: ['fleet-readiness'] });
       qc.invalidateQueries({ queryKey: ['company-documents', companyId] });

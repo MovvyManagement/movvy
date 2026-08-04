@@ -64,13 +64,17 @@ export default function DisputeForm() {
     if (!booking) return;
     try {
       const ImagePicker = await import('expo-image-picker');
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (perm.status !== 'granted') {
-        toast.error('Photo permission needed to attach evidence.');
-        return;
+      // Android only — on iOS the permission prompt opens the limited-library
+      // management sheet and the picker never returns a file.
+      if (Platform.OS === 'android') {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (perm.status !== 'granted') {
+          toast.error('Photo permission needed to attach evidence.');
+          return;
+        }
       }
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         quality: 0.7,
         allowsMultipleSelection: true,
         selectionLimit: 6,

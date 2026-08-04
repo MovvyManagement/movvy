@@ -7,7 +7,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { PhoneInput, isPhoneComplete, toE164 } from '@/components/PhoneInput';
-import { login, supabaseConfigured } from '@/lib/supabase';
+import { enforceCustomerOnly, login, supabaseConfigured } from '@/lib/supabase';
 import { signInWithApple, useGoogleSignIn } from '@/lib/oauth';
 import { useToast } from '@/components/Toast';
 
@@ -51,12 +51,24 @@ export default function Login() {
       toast.error(res.error ?? 'Apple sign-in failed.');
       return;
     }
+    // Same door check as the password path — OAuth must not be a way in for a
+    // partner account.
+    const wrongDoor = await enforceCustomerOnly();
+    if (wrongDoor) {
+      toast.error(wrongDoor);
+      return;
+    }
     router.replace('/(customer)/(tabs)/home');
   };
   const onGoogle = async () => {
     const res = await google.signIn();
     if (!res.ok) {
       toast.error(res.error ?? 'Google sign-in failed.');
+      return;
+    }
+    const wrongDoor = await enforceCustomerOnly();
+    if (wrongDoor) {
+      toast.error(wrongDoor);
       return;
     }
     router.replace('/(customer)/(tabs)/home');

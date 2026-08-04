@@ -14,7 +14,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { supabaseServer } from '@/lib/supabase/server';
 
 export async function login(formData: FormData) {
@@ -71,13 +71,30 @@ export async function login(formData: FormData) {
     );
   }
 
-  // Successful sign-in sets the session cookie via the SSR client.
-  // Role gate happens in middleware on the next request.
+  // Successful sign-in sets the Supabase session cookie via the SSR client.
+  // Stamp the console's OWN session markers alongside it: proxy.ts requires
+  // both, and because they're session cookies (no maxAge) the console stops
+  // trusting a Supabase token that outlives the browser window. Role gate
+  // happens in the proxy on the next request.
+  const now = String(Date.now());
+  const jar = await cookies();
+  const opts = {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: process.env.NODE_ENV === 'production',
+    path: '/admin-management',
+  };
+  jar.set('mv_admin_seen', now, opts);
+  jar.set('mv_admin_since', now, opts);
+
   redirect('/admin-management/dashboard');
 }
 
 export async function logout() {
   const supabase = await supabaseServer();
   await supabase.auth.signOut();
+  const jar = await cookies();
+  jar.delete('mv_admin_seen');
+  jar.delete('mv_admin_since');
   redirect('/admin-management/login');
 }

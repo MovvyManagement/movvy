@@ -16,7 +16,7 @@ import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { pickPhoto } from '@/lib/pickPhoto';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
@@ -66,17 +66,8 @@ export default function OperatorOnboarding() {
   const [submitting, setSubmitting] = useState(false);
 
   const pickDoc = async (kind: DocKey) => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      toast.error('Photo access is needed to upload your documents.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
-    });
-    if (result.canceled || result.assets.length === 0) return;
-    const asset = result.assets[0];
+    const file = await pickPhoto(kind, DOCS.find((d) => d.key === kind)?.label ?? 'Document');
+    if (!file) return;
     setBusyDoc(kind);
     try {
       await upload.mutateAsync({
@@ -84,9 +75,9 @@ export default function OperatorOnboarding() {
         kind,
         subject_type: 'profile',
         subject_id: user!.id,
-        fileUri: asset.uri,
-        fileName: asset.fileName ?? `${kind}-${Date.now()}.jpg`,
-        mimeType: asset.mimeType ?? 'image/jpeg',
+        fileUri: file.uri,
+        fileName: file.name,
+        mimeType: file.mime,
       });
       setUploaded((p) => ({ ...p, [kind]: true }));
       haptic.success();

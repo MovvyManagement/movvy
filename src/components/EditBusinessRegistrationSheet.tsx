@@ -23,7 +23,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { pickPhoto } from '@/lib/pickPhoto';
 import { useQueryClient } from '@tanstack/react-query';
 import { Input } from './Input';
 import { useCompany, useUpdateCompany, useCompanyDocuments, useUploadDocument } from '@/lib/data';
@@ -74,20 +74,10 @@ export function EditBusinessRegistrationSheet({ visible, companyId, onClose }: P
 
   const pickAndUpload = async () => {
     if (!companyId) return;
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      toast.error('Photo library permission denied');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-      allowsEditing: false,
-    });
-    if (result.canceled || result.assets.length === 0) return;
-    const asset = result.assets[0];
-    const mime = asset.mimeType ?? 'image/jpeg';
-    const name = asset.fileName ?? `business-reg-${Date.now()}.jpg`;
+    const file = await pickPhoto('business_registration', 'Business registration');
+    if (!file) return;
+    const mime = file.mime;
+    const name = file.name;
     setUploading(true);
     try {
       await upload.mutateAsync({
@@ -95,7 +85,7 @@ export function EditBusinessRegistrationSheet({ visible, companyId, onClose }: P
         kind: 'business_registration',
         subject_type: 'company',
         subject_id: companyId,
-        fileUri: asset.uri,
+        fileUri: file.uri,
         fileName: name,
         mimeType: mime,
       });

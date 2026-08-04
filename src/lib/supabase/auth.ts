@@ -54,7 +54,72 @@ export async function login(input: unknown): Promise<AuthResult> {
   const creds = email ? { email, password } : { phone: phone!, password };
   const { error } = await supabase.auth.signInWithPassword(creds);
   if (error) return { ok: false, error: friendly(error.message) };
+
+  // ─── Partner accounts belong on the partner sign-in ────────────────────────
+  // A valid password is not enough: this door is the CUSTOMER app. A crew
+  // account signing in here landed on the customer home with a partner's
+  // session — wrong surface, and the two sides have different rules about what
+  // you can see. Sign them straight back out and point them at the right door.
+  // (Movvy staff keep using this screen — the console is web-only.)
+  const wrongDoor = await enforceCustomerOnly();
+  if (wrongDoor) return { ok: false, error: wrongDoor };
+
   return { ok: true };
+}
+
+/**
+ * Signs the current session out and returns an error message when it belongs to
+ * a partner. Returns null when the account is welcome on the customer side.
+ * Exported so the OAuth buttons (Apple / Google) enforce the same rule — they
+ * skip login() entirely and would otherwise be a way around it.
+ */
+export async function enforceCustomerOnly(): Promise<string | null> {
+  if (!(await isPartnerAccount())) return null;
+  await supabase.auth.signOut();
+  return "That's a partner account. Sign in through 'Partner sign in' instead.";
+}
+
+/**
+ * True when the signed-in account is a Movvy PARTNER rather than a customer —
+ * either by profile role or by holding a live org membership. Checks both
+ * because the two can drift: an operator's profile role isn't always updated
+ * when they create their org, and a legacy row can outlive a role change.
+ */
+async function isPartnerAccount(): Promise<boolean> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle();
+  const role = (profile as any)?.role ?? null;
+  if (role && ['driver', 'mover', 'company_owner', 'company_dispatcher'].includes(role)) {
+    return true;
+  }
+
+  const { data: membership } = await supabase
+    .from('company_members')
+    .select('company_id')
+    .eq('profile_id', user.id)
+    .is('removed_at', null)
+    .in('status', ['active', 'pending_approval'])
+    .limit(1)
+    .maybeSingle();
+  if (membership) return true;
+
+  const { data: teamMembership } = await supabase
+    .from('partner_team_members')
+    .select('team_id')
+    .eq('profile_id', user.id)
+    .is('removed_at', null)
+    .in('status', ['active', 'pending_approval'])
+    .limit(1)
+    .maybeSingle();
+  return !!teamMembership;
 }
 
 // =============================================================================

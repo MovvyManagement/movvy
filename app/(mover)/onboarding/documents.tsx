@@ -18,7 +18,7 @@
 // =============================================================================
 
 import React, { useState } from 'react';
-import { View, Text, ScrollView, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -77,20 +77,23 @@ export default function Documents() {
   const uploadDoc = useUploadDocument();
 
   const pickDocument = async (key: string) => {
-    // Ask for library permission first — silent denial leads to a confusing
-    // no-op when the picker returns 'cancelled' with no choice ever offered.
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert(
-        'Photo access needed',
-        'Movvy needs photo access to upload your verification documents.',
-      );
-      return;
+    // iOS runs the picker out of process and needs no permission — asking for
+    // one opens the "Selected Photos" management sheet instead, which has no
+    // way to submit anything (see src/lib/pickPhoto.ts).
+    if (Platform.OS === 'android') {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          'Photo access needed',
+          'Movvy needs photo access to upload your verification documents.',
+        );
+        return;
+      }
     }
     setUploadingKey(key);
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: false,
         quality: 0.85,
         exif: false,

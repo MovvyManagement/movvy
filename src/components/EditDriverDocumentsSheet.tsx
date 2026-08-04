@@ -24,7 +24,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { pickPhoto } from '@/lib/pickPhoto';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMyDriverDocuments, useUploadDocument } from '@/lib/data';
 import { useAuth } from '@/lib/supabase';
@@ -117,18 +117,8 @@ export function EditDriverDocumentsSheet({ visible, teamId, onClose }: Props) {
     }
     if (spec.scope === 'profile' && !user) return;
 
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      toast.error('Photo library permission denied');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-      allowsEditing: false,
-    });
-    if (result.canceled || result.assets.length === 0) return;
-    const asset = result.assets[0];
+    const file = await pickPhoto(spec.kind, spec.label ?? 'Document');
+    if (!file) return;
 
     setBusyKind(spec.kind);
     try {
@@ -137,9 +127,9 @@ export function EditDriverDocumentsSheet({ visible, teamId, onClose }: Props) {
         kind: spec.kind,
         subject_type: spec.scope,
         subject_id: spec.scope === 'profile' ? user!.id : teamId!,
-        fileUri: asset.uri,
-        fileName: asset.fileName ?? `${spec.kind}-${Date.now()}.jpg`,
-        mimeType: asset.mimeType ?? 'image/jpeg',
+        fileUri: file.uri,
+        fileName: file.name,
+        mimeType: file.mime,
       });
       qc.invalidateQueries({ queryKey: ['my-driver-documents', user?.id, teamId] });
       haptic.success();

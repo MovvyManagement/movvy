@@ -33,6 +33,46 @@ const RESET_PATH = '/admin-management/reset-password';
 // never grant durable console access on its own).
 const RECOVERY_COOKIE = 'movvy_recovery_pending';
 
+// ── Session lifetime ────────────────────────────────────────────────────────
+// Supabase's own auth cookie is long-lived and survives a browser restart, so
+// the console would let someone back in weeks later with no password — on a
+// surface that shows customer addresses, phone numbers and payouts. These two
+// markers pin the console to a real working session:
+//
+//   • ACTIVITY_COOKIE is a SESSION cookie (no maxAge) → the browser drops it
+//     when it closes, so the next visit has to sign in even though Supabase
+//     still considers the token valid.
+//   • Its value is the last-seen timestamp → an idle console locks itself.
+//   • ONSET_COOKIE caps the whole session, idle or not.
+//
+// Anything expired is signed out here, in front of every admin route, rather
+// than trusted to a page-level check.
+const ACTIVITY_COOKIE = 'mv_admin_seen';
+const ONSET_COOKIE = 'mv_admin_since';
+const IDLE_LIMIT_MS = 30 * 60 * 1000; // 30 minutes untouched
+const ABSOLUTE_LIMIT_MS = 12 * 60 * 60 * 1000; // 12 hours since sign-in
+
+/**
+ * Drop every auth cookie and send the caller to login. Supabase names its
+ * cookies `sb-<project-ref>-auth-token[.N]`, so we clear by prefix rather than
+ * guessing the ref — a chunked token left behind would re-authenticate them.
+ */
+function signOutTo(request: NextRequest, reason: string) {
+  const url = new URL(AUTH_PREFIX, request.url);
+  url.searchParams.set('error', reason);
+  const res = NextResponse.redirect(url);
+  for (const c of request.cookies.getAll()) {
+    // Path has to match the one the cookie was written with or the browser
+    // keeps it: Supabase writes at '/', our own markers at the admin subtree.
+    if (c.name.startsWith('sb-')) {
+      res.cookies.set(c.name, '', { path: '/', maxAge: 0 });
+    } else if (c.name === ACTIVITY_COOKIE || c.name === ONSET_COOKIE) {
+      res.cookies.set(c.name, '', { path: ADMIN_PREFIX, maxAge: 0 });
+    }
+  }
+  return res;
+}
+
 // Paths that must render without a session so unauthenticated users can
 // actually GET to login / recover their password.
 const PUBLIC_ADMIN_PATHS = [
@@ -74,9 +114,45 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // ── Session lifetime enforcement ─────────────────────────────────────────
+  // A valid Supabase token is necessary but NOT sufficient: the console also
+  // requires a live browser session that has been touched recently. Runs before
+  // the login-page redirect below, so a stale token can't bounce someone
+  // straight into the dashboard without ever typing a password.
+  const now = Date.now();
+  const seen = Number(request.cookies.get(ACTIVITY_COOKIE)?.value ?? 0);
+  const since = Number(request.cookies.get(ONSET_COOKIE)?.value ?? 0);
+  const liveConsoleSession =
+    !!seen && !!since && now - seen <= IDLE_LIMIT_MS && now - since <= ABSOLUTE_LIMIT_MS;
+
+  // The public admin paths are deliberately exempt: login needs to render, and
+  // reset-password runs on a recovery session that has no markers yet.
+  if (user && !isPublicPath) {
+    if (!seen || !since) {
+      // Token outlived the browser session (restart), or predates this rule.
+      return signOutTo(request, 'Please sign in again.');
+    }
+    if (now - seen > IDLE_LIMIT_MS) {
+      return signOutTo(request, 'Signed out after 30 minutes of inactivity.');
+    }
+    if (now - since > ABSOLUTE_LIMIT_MS) {
+      return signOutTo(request, 'Your session expired. Sign in again.');
+    }
+    // Slide the idle window forward. Session cookie on purpose — closing the
+    // browser must end console access.
+    response.cookies.set(ACTIVITY_COOKIE, String(now), {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: ADMIN_PREFIX,
+    });
+  }
+
   // Authenticated user hitting the login page → send them to the dashboard
-  // (avoids a "back to login" loop after signing in).
-  if (user && pathname.startsWith(AUTH_PREFIX)) {
+  // (avoids a "back to login" loop after signing in). Only when the console
+  // session is actually live: a leftover Supabase token must land on the form,
+  // not be waved through.
+  if (user && liveConsoleSession && pathname.startsWith(AUTH_PREFIX)) {
     return NextResponse.redirect(new URL('/admin-management/dashboard', request.url));
   }
 

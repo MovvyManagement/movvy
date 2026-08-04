@@ -23,7 +23,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { pickPhoto } from '@/lib/pickPhoto';
 import { useQueryClient } from '@tanstack/react-query';
 import { Input } from './Input';
 import { useAddCompanyVehicle, useUploadDocument } from '@/lib/data';
@@ -109,26 +109,13 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
   }, [visible]);
 
   const pick = async (kind: 'vehicle_registration' | 'insurance') => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      toast.error('Photo library permission denied');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-    });
-    if (result.canceled || result.assets.length === 0) return;
-    const asset = result.assets[0];
+    const file = await pickPhoto(
+      kind,
+      kind === 'insurance' ? 'Truck insurance' : 'Truck registration',
+    );
+    if (!file) return;
     haptic.light();
-    setDocs((d) => ({
-      ...d,
-      [kind]: {
-        uri: asset.uri,
-        name: asset.fileName ?? `${kind}-${Date.now()}.jpg`,
-        mime: asset.mimeType ?? 'image/jpeg',
-      },
-    }));
+    setDocs((d) => ({ ...d, [kind]: file }));
   };
 
   const valid =
