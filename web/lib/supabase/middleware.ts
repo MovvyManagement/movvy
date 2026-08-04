@@ -12,7 +12,15 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function updateSession(request: NextRequest) {
-  let response = NextResponse.next({ request });
+  // Forward the pathname to the server components as a REQUEST header. Layouts
+  // can't read the URL themselves, and the admin layout has to know when it's
+  // wrapping a public auth page so it renders bare instead of drawing the
+  // console shell around "Reset your password". Response headers can't do this
+  // — only request headers reach `headers()` in a server component.
+  const headers = new Headers(request.headers);
+  headers.set('x-movvy-pathname', request.nextUrl.pathname);
+
+  let response = NextResponse.next({ request: { headers } });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -26,7 +34,7 @@ export async function updateSession(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           );
-          response = NextResponse.next({ request });
+          response = NextResponse.next({ request: { headers } });
           cookiesToSet.forEach(({ name, value, options }) =>
             response.cookies.set(name, value, options),
           );

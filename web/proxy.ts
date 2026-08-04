@@ -93,6 +93,9 @@ export async function proxy(request: NextRequest) {
   // Refresh the session cookie so it doesn't silently expire.
   const { response, user } = await updateSession(request);
 
+  // (updateSession forwards the pathname to server components as a request
+  // header so the admin layout can render auth pages without the shell.)
+
   // RECOVERY LOCK: a session created by a password-reset link may not use the
   // console until the password is saved. While the recovery cookie is set,
   // pin the user to the reset form — even a valid session is bounced off

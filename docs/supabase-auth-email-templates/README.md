@@ -45,3 +45,22 @@ Before any of these will go out, configure SMTP under
 - `{{ .SiteURL }}` — `movvy.ca`
 - `{{ .Email }}` — recipient's address
 - `{{ .NewEmail }}` — used in the change-email template
+
+## Reset password — applied 2026-08-04
+
+The live template was still shipping `{{ .ConfirmationURL }}`, which is a PKCE
+link: it can only be redeemed by the browser that requested the reset. Opening
+it from webmail, a phone, or a second browser failed with "This link must be
+opened in the same browser you requested the reset from."
+
+It now links to:
+
+    {{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=recovery
+
+`.TokenHash` verifies server-side with no local code-verifier, so the link works
+from any browser or device. `.RedirectTo` keeps one template correct for both
+surfaces — the console sends its own origin (movvy.ca in prod, localhost in
+dev), the mobile app sends `movvy://reset-password`.
+
+The previous live content is kept in `03-reset-password.PREVIOUS-LIVE.html` in
+case it ever needs restoring.

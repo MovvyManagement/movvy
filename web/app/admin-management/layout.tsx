@@ -10,6 +10,7 @@
 // =============================================================================
 
 import Link from 'next/link';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { supabaseServer } from '@/lib/supabase/server';
 import { getAdminAccess } from '@/lib/adminAccess';
@@ -18,11 +19,30 @@ import { LoginGate } from './_components/LoginGate';
 import { AdminLiveCenter } from './_components/AdminLiveCenter';
 import { MobileTopBar, type MobileLink } from './_components/MobileTopBar';
 
+// Sign-in / recovery pages. They render standalone — no sidebar, no counts.
+const AUTH_PAGES = [
+  '/admin-management/login',
+  '/admin-management/forgot-password',
+  '/admin-management/reset-password',
+];
+
 export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Auth pages NEVER get the console shell, session or no session. This used to
+  // hinge on `!user`, which is wrong for the reset-password flow: redeeming a
+  // recovery link creates a session, so the sidebar, nav and live counts drew
+  // themselves around "Choose a new password" — console chrome for someone who
+  // hasn't finished authenticating. The pathname arrives as a request header
+  // from the proxy (server components can't read the URL).
+  const pathname = (await headers()).get('x-movvy-pathname') ?? '';
+  const isAuthPage = AUTH_PAGES.some((p) => pathname.startsWith(p));
+  if (isAuthPage) {
+    return <>{children}</>;
+  }
+
   const supabase = await supabaseServer();
   const { data: { user } } = await supabase.auth.getUser();
 
