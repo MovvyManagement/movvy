@@ -26,14 +26,21 @@ import { supabase, useAuth } from '@/lib/supabase';
 import { useCities, useUploadDocument } from '@/lib/data';
 
 type DocKey = 'driver_license' | 'gov_id' | 'vehicle_registration' | 'insurance';
-const DOCS: { key: DocKey; label: string; hint: string }[] = [
+// ID is ONE of the two — a licence or a government ID, whichever they have on
+// their phone. The truck papers are optional here: plenty of people sign up to
+// work on someone else's truck, and the ones who do own a truck can photograph
+// the registration later from Trucks → Documents. Nothing is lost by waiting —
+// accepting a job still needs an APPROVED registration on the crew's truck,
+// wherever it came from.
+const ID_DOCS: { key: DocKey; label: string; hint: string }[] = [
   { key: 'driver_license', label: "Driver's license", hint: 'Front, clear and readable' },
   { key: 'gov_id', label: 'Government ID', hint: 'Passport or provincial ID' },
-  // Proof the truck is actually theirs — required before any job can be
-  // accepted (enforced server-side in org_can_take_booking).
+];
+const TRUCK_DOCS: { key: DocKey; label: string; hint: string }[] = [
   { key: 'vehicle_registration', label: 'Truck registration', hint: 'Shows the truck is registered to you or your company' },
   { key: 'insurance', label: 'Truck insurance', hint: 'Commercial auto policy covering the truck' },
 ];
+const DOCS = [...ID_DOCS, ...TRUCK_DOCS];
 
 // Length in FEET decides which moves you can accept (src/lib/truckFit.ts).
 // The legacy enum is carried along for back-compat.
@@ -88,19 +95,26 @@ export default function OperatorOnboarding() {
     }
   };
 
+  // A truck is optional, but a HALF-entered one isn't: if they picked a size
+  // they have to give the plate too, or we'd write a vehicle row that can't be
+  // identified on the road.
+  const truckStarted = !!truckSize || plate.trim().length > 0;
+  const truckComplete =
+    !!truckSize && plate.trim().length >= 2 && province.trim().length >= 2;
   const canFinish =
-    uploaded.driver_license &&
-    uploaded.gov_id &&
-    uploaded.vehicle_registration &&
-    uploaded.insurance &&
+    (uploaded.driver_license || uploaded.gov_id) &&
     !!cityId &&
-    !!truckSize &&
-    plate.trim().length >= 2 &&
-    province.trim().length >= 2;
+    (!truckStarted || truckComplete);
 
   const finish = async () => {
     if (!canFinish) {
-      toast.error('Upload all four documents, pick your city, and add your truck first.');
+      toast.error(
+        !uploaded.driver_license && !uploaded.gov_id
+          ? "Upload your driver's license or government ID to continue."
+          : !cityId
+            ? 'Pick the city you work out of.'
+            : 'Add your plate and province, or clear the truck size to skip it for now.',
+      );
       return;
     }
     setSubmitting(true);
@@ -121,16 +135,20 @@ export default function OperatorOnboarding() {
       });
       if (orgErr) throw orgErr;
 
-      const { error: truckErr } = await supabase.from('vehicles').insert({
-        company_id: companyId,
-        type: truckSize,
-        length_ft: truckFt,
-        plate: plate.trim().toUpperCase(),
-        province: province.trim().toUpperCase(),
-      });
-      // A truck hiccup shouldn't strand them out of their new org — they can add
-      // it from the profile later. Surface it but continue.
-      if (truckErr) console.warn('[operator onboarding] truck insert failed', truckErr);
+      // Only when they gave us one — signing up with no truck is a supported
+      // path (you can work on your crew's truck).
+      if (truckComplete) {
+        const { error: truckErr } = await supabase.from('vehicles').insert({
+          company_id: companyId,
+          type: truckSize,
+          length_ft: truckFt,
+          plate: plate.trim().toUpperCase(),
+          province: province.trim().toUpperCase(),
+        });
+        // A truck hiccup shouldn't strand them out of their new org — they can
+        // add it from Trucks later. Surface it but continue.
+        if (truckErr) console.warn('[operator onboarding] truck insert failed', truckErr);
+      }
 
       haptic.success();
       toast.success('You\'re all set up.');
@@ -152,12 +170,65 @@ export default function OperatorOnboarding() {
           to your truck.
         </Text>
 
-        {/* 1. Documents */}
+        {/* 1. ID — one of the two is enough */}
         <Text className="mt-7 text-xs font-semibold uppercase tracking-wider text-silver-500">
-          1 · Your documents
+          1 · Your ID
+        </Text>
+        <Text className="mt-1 text-xs text-silver-500">
+          Either one works — a driver's license or a government ID.
         </Text>
         <View className="mt-3 gap-3">
-          {DOCS.map((d) => (
+          {ID_DOCS.map((d) => (
+            <Pressable
+              key={d.key}
+              onPress={() => pickDoc(d.key)}
+              disabled={busyDoc !== null}
+              className={`flex-row items-center rounded-2xl border p-4 active:opacity-80 ${
+                uploaded[d.key] ? 'border-brand-200 bg-brand-50' : 'border-silver-200 bg-white'
+              }`}
+            >
+              <View
+                className={`h-11 w-11 rounded-2xl items-center justify-center ${
+                  uploaded[d.key] ? 'bg-brand-600' : 'bg-silver-100'
+                }`}
+              >
+                {busyDoc === d.key ? (
+                  <ActivityIndicator color={uploaded[d.key] ? '#fff' : '#71717A'} />
+                ) : (
+                  <Ionicons
+                    name={uploaded[d.key] ? 'checkmark' : 'camera-outline'}
+                    size={20}
+                    color={uploaded[d.key] ? '#fff' : '#71717A'}
+                  />
+                )}
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="text-sm font-bold text-ink-900">{d.label}</Text>
+                <Text className="text-xs text-silver-500 mt-0.5">
+                  {uploaded[d.key] ? 'Uploaded — Movvy will review it' : d.hint}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#A1A1AA" />
+            </Pressable>
+          ))}
+        </View>
+
+        {/* 1b. Truck papers — optional, and genuinely so */}
+        <View className="mt-7 flex-row items-center">
+          <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500">
+            Truck papers
+          </Text>
+          <View className="ml-2 rounded-full bg-silver-100 px-2 py-0.5">
+            <Text className="text-[10px] font-bold text-silver-500">OPTIONAL</Text>
+          </View>
+        </View>
+        <Text className="mt-1 text-xs text-silver-500 leading-5">
+          Only if you own the truck. Working on your crew's truck instead? Skip
+          this — their approved registration covers everyone on the crew. You can
+          add yours any time from Trucks → Documents.
+        </Text>
+        <View className="mt-3 gap-3">
+          {TRUCK_DOCS.map((d) => (
             <Pressable
               key={d.key}
               onPress={() => pickDoc(d.key)}
@@ -221,9 +292,19 @@ export default function OperatorOnboarding() {
           </View>
         )}
 
-        {/* 3. Truck */}
-        <Text className="mt-8 text-xs font-semibold uppercase tracking-wider text-silver-500">
-          3 · Your truck
+        {/* 3. Truck — optional. A crew's trucks work for everyone on it. */}
+        <View className="mt-8 flex-row items-center">
+          <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500">
+            3 · Your truck
+          </Text>
+          <View className="ml-2 rounded-full bg-silver-100 px-2 py-0.5">
+            <Text className="text-[10px] font-bold text-silver-500">OPTIONAL</Text>
+          </View>
+        </View>
+        <Text className="mt-1 text-xs text-silver-500 leading-5">
+          Don't own one? Leave this empty. Once you join a crew, their trucks
+          count as yours — a crew with a 24 ft truck can take 24 ft jobs and any
+          member can be assigned to them.
         </Text>
         <View className="mt-3 flex-row flex-wrap gap-2">
           {TRUCK_SIZES.map((t) => {
@@ -232,6 +313,13 @@ export default function OperatorOnboarding() {
               <Pressable
                 key={t.ft}
                 onPress={() => {
+                  // Tapping the selected size again clears it — that's how you
+                  // back out of adding a truck after starting.
+                  if (active) {
+                    setTruckFt(null);
+                    setTruckSize(null);
+                    return;
+                  }
                   setTruckFt(t.ft);
                   setTruckSize(t.value);
                 }}

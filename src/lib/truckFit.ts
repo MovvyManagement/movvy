@@ -110,6 +110,8 @@ export interface FleetLike {
   truck_count: number;
   max_truck_ft: number;
   registration: { status: string; rejection_reason?: string | null };
+  /** Crew can't fix any of this themselves — word it for the right person. */
+  is_org_admin?: boolean;
 }
 
 export interface AcceptBlock {
@@ -126,10 +128,16 @@ export function acceptBlock(
 ): AcceptBlock | null {
   if (!fleet) return null; // readiness hasn't loaded — let the server decide
 
+  // The whole check is CREW-wide: one approved truck covers every member, so a
+  // member with nothing registered to them is fine as long as their crew has one.
+  const isAdmin = fleet.is_org_admin !== false;
+
   if ((fleet.truck_count ?? 0) === 0) {
     return {
-      title: 'Add your truck first',
-      body: 'Jobs are matched to your box size, so we need the truck — plus its registration and insurance — before you can accept anything.',
+      title: 'Your crew has no truck yet',
+      body: isAdmin
+        ? 'Jobs are matched to box size, so add your truck — or join a crew that has one, and theirs counts as yours.'
+        : "Ask your crew admin to add one. You don't need a truck of your own — once theirs is approved you can be assigned to jobs it fits.",
       fix: 'fleet',
     };
   }
@@ -147,14 +155,18 @@ export function acceptBlock(
       title: 'Registration needs changes',
       body:
         fleet.registration?.rejection_reason ??
-        'Movvy sent your registration back. Re-upload it from your Trucks screen.',
+        (isAdmin
+          ? 'Movvy sent the registration back. Re-upload it from Trucks → Documents.'
+          : 'Movvy sent the registration back — your crew admin needs to re-upload it.'),
       fix: 'fleet',
     };
   }
   if (reg !== 'approved') {
     return {
-      title: 'Truck registration required',
-      body: 'Upload your truck registration and insurance from the Trucks screen. Once Movvy approves the registration you can accept jobs.',
+      title: 'Truck registration needed',
+      body: isAdmin
+        ? "Add the truck's registration from Trucks → Documents. Once Movvy approves it you can accept jobs."
+        : "Your crew admin needs to upload the truck's registration before anyone on the crew can accept jobs.",
       fix: 'fleet',
     };
   }
@@ -168,8 +180,8 @@ export function acceptBlock(
   const have = fleet.max_truck_ft ?? 0;
   if (need > 0 && have < need) {
     return {
-      title: 'Your truck is too small for this move',
-      body: `This move needs a ${need} ft truck and your largest is ${have} ft. Leave it for a crew with a bigger truck — you'll still see everything you can carry.`,
+      title: "Your crew's truck is too small for this move",
+      body: `This move needs a ${need} ft truck and your crew's largest is ${have} ft. Leave it for a crew with a bigger truck — you'll still see everything you can carry.`,
       fix: 'size',
     };
   }

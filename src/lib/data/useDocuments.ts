@@ -98,6 +98,8 @@ export interface FleetReadiness {
   max_truck_ft: number;
   registration: TruckRegistrationStatus;
   insurance: TruckRegistrationStatus;
+  /** Only an admin can add a truck or re-upload papers — crew are told to ask. */
+  is_org_admin?: boolean;
 }
 
 const EMPTY_FLEET: FleetReadiness = {

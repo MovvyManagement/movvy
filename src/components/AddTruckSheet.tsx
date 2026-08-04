@@ -1,13 +1,17 @@
 // =============================================================================
 // AddTruckSheet
 //
-// Adds a row to the `vehicles` table tied to the current company, together with
-// the two documents Movvy has to see before that truck can take work:
-// the REGISTRATION and the INSURANCE. Both upload to verification_documents and
-// land in the admin approvals queue — and org_can_take_booking() (migration
-// 0084) refuses every job until the registration comes back APPROVED. Collecting
-// them here, at the moment the truck is created, is the only way a partner ends
-// up with a complete truck instead of one that silently can't accept anything.
+// Adds a row to the `vehicles` table tied to the current company, and offers
+// the two documents Movvy reviews before that truck can take work: the
+// REGISTRATION and the INSURANCE. Both upload to verification_documents and
+// land in the admin approvals queue — org_can_take_booking() (migration 0084)
+// refuses jobs until the registration comes back APPROVED.
+//
+// The documents are OPTIONAL here: someone photographing their truck at the
+// roadside shouldn't be stopped because the registration is in the glovebox.
+// The truck is saved either way and the Documents card on the Trucks screen
+// takes the papers later. The sheet is explicit that jobs stay locked until it
+// arrives, so nobody skips it by accident.
 // =============================================================================
 
 import React, { useEffect, useState } from 'react';
@@ -55,7 +59,7 @@ const TYPES: {
   { key: 'box_truck_26', ft: 26, label: '26 ft', sub: '4-bed house' },
 ];
 
-// The two documents a truck can't work without.
+// The two documents Movvy reviews for a truck. Optional at this step.
 const DOCS: { key: 'vehicle_registration' | 'insurance'; label: string; sub: string }[] = [
   {
     key: 'vehicle_registration',
@@ -124,11 +128,9 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
     model.trim().length >= 1 &&
     plate.trim().length >= 2 &&
     /^[A-Z]{2}$/.test(province.trim().toUpperCase()) &&
-    (year === '' || /^[0-9]{4}$/.test(year)) &&
-    // Both documents are mandatory — a truck without them can't take a job, so
-    // there's no point letting one be created half-formed.
-    !!docs.vehicle_registration &&
-    !!docs.insurance;
+    // Documents are optional here — see the header. The truck itself is what
+    // this sheet is for.
+    (year === '' || /^[0-9]{4}$/.test(year));
 
   const save = async () => {
     if (!valid || !companyId) return;
@@ -167,7 +169,11 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
       qc.invalidateQueries({ queryKey: ['fleet-readiness'] });
       qc.invalidateQueries({ queryKey: ['truck-registration-status'] });
       haptic.success();
-      toast.success('Sent to Movvy for approval');
+      toast.success(
+        docs.vehicle_registration
+          ? 'Sent to Movvy for approval'
+          : 'Truck added — add its registration when you can',
+      );
       onClose();
     } catch (e: any) {
       haptic.error();
@@ -287,8 +293,17 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
         </View>
       </View>
 
-      <Text className="mt-6 text-xs font-semibold uppercase tracking-wider text-silver-500 mb-2">
-        Documents · required
+      <View className="mt-6 mb-2 flex-row items-center">
+        <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500">
+          Documents
+        </Text>
+        <View className="ml-2 rounded-full bg-silver-100 px-2 py-0.5">
+          <Text className="text-[10px] font-bold text-silver-500">OPTIONAL NOW</Text>
+        </View>
+      </View>
+      <Text className="mb-3 text-xs text-silver-500 leading-5">
+        You can add these later from Trucks → Documents. This truck can't take
+        jobs until Movvy approves the registration.
       </Text>
       <View className="gap-3">
         {DOCS.map((d) => {
@@ -337,16 +352,18 @@ export function AddTruckSheet({ visible, companyId, onClose }: Props) {
           <>
             <Ionicons name="add" size={18} color="#fff" />
             <Text className="ml-2 text-base font-bold text-white">
-              Add truck & send for approval
+              {docs.vehicle_registration || docs.insurance
+                ? 'Add truck & send for approval'
+                : 'Add truck'}
             </Text>
           </>
         )}
       </Pressable>
       {saving && step ? (
         <Text className="mt-2 text-center text-xs text-silver-500">{step}</Text>
-      ) : !valid && !saving && (!docs.vehicle_registration || !docs.insurance) ? (
+      ) : !docs.vehicle_registration ? (
         <Text className="mt-2 text-center text-xs text-silver-500">
-          Add a photo of the registration and the insurance to continue.
+          No registration yet? Add the truck now and photograph it later.
         </Text>
       ) : null}
 

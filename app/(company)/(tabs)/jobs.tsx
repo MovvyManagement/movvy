@@ -990,7 +990,9 @@ function CrewOpenJobs({ companyId }: { companyId: string | null }) {
       Alert.alert(
         blocked.title,
         blocked.body,
-        blocked.fix === 'fleet'
+        // Only an admin can act on a fleet problem — don't send crew to a
+        // screen they can't change.
+        blocked.fix === 'fleet' && fleet?.is_org_admin !== false
           ? [
               { text: 'Not now', style: 'cancel' },
               { text: 'Open Trucks', onPress: () => router.push('/(company)/trucks') },

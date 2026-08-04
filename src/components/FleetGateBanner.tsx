@@ -1,13 +1,17 @@
 // =============================================================================
 // FleetGateBanner
 //
-// A crew can't accept ANY job until they own a truck and Movvy has approved its
-// registration (org_can_take_booking, migration 0084). That's a hard stop, so
-// it belongs at the top of the jobs feed — not as a surprise when Accept fails.
+// A crew can't accept ANY job until the CREW owns a truck and Movvy has
+// approved its registration (org_can_take_booking, migration 0084). Note whose
+// truck: the check is org-wide, so one approved 24 ft truck covers everyone on
+// the crew — a member with nothing registered to them can still be assigned to
+// a 24 ft job. That's a hard stop when it applies, so it belongs at the top of
+// the jobs feed rather than as a surprise when Accept fails.
 //
 // Shows exactly one of: add a truck / in review / changes requested (with the
 // reviewer's comment). Renders nothing once the registration is approved.
-// Tapping opens the Trucks screen, which is where both documents are uploaded.
+// Only an ADMIN can act on it — crew are told to ask theirs instead of being
+// sent to a screen they can't change.
 // =============================================================================
 
 import React from 'react';
@@ -23,13 +27,22 @@ export function FleetGateBanner({ fleet }: { fleet: FleetReadiness | undefined }
   const noTruck = (fleet.truck_count ?? 0) === 0;
   if (!noTruck && reg === 'approved') return null;
 
+  const isAdmin = fleet.is_org_admin !== false;
+
   const state = noTruck
-    ? {
-        tone: 'red' as const,
-        icon: 'car-outline' as const,
-        title: 'Add your truck to start accepting jobs',
-        body: 'We need the truck, its registration and its insurance. Jobs unlock once Movvy approves the registration.',
-      }
+    ? isAdmin
+      ? {
+          tone: 'red' as const,
+          icon: 'car-outline' as const,
+          title: 'Add a truck to start accepting jobs',
+          body: "Your crew has no truck yet. Add one — or join a crew that has one, and their truck counts as yours.",
+        }
+      : {
+          tone: 'red' as const,
+          icon: 'car-outline' as const,
+          title: 'Your crew has no truck yet',
+          body: 'Ask your crew admin to add one. Once their truck is approved you can be assigned to jobs it fits — you don\'t need one of your own.',
+        }
     : reg === 'pending'
       ? {
           tone: 'amber' as const,
@@ -44,20 +57,25 @@ export function FleetGateBanner({ fleet }: { fleet: FleetReadiness | undefined }
             title: 'Truck registration — changes requested',
             body:
               fleet.registration?.rejection_reason ??
-              'Re-upload your registration from the Trucks screen.',
+              (isAdmin
+                ? 'Re-upload the registration from Trucks → Documents.'
+                : 'Your crew admin needs to re-upload it.'),
           }
         : {
             tone: 'red' as const,
             icon: 'cloud-upload-outline' as const,
-            title: 'Truck registration required',
-            body: 'Upload your registration and insurance from the Trucks screen to start accepting jobs.',
+            title: 'Truck registration needed',
+            body: isAdmin
+              ? "Add the truck's registration from Trucks → Documents to start accepting jobs."
+              : "Your crew admin needs to upload the truck's registration before anyone can accept jobs.",
           };
 
   const amber = state.tone === 'amber';
 
   return (
     <Pressable
-      onPress={() => router.push('/(company)/trucks')}
+      onPress={() => (isAdmin ? router.push('/(company)/trucks') : undefined)}
+      disabled={!isAdmin}
       className={`mb-3 rounded-2xl border p-4 active:opacity-80 ${
         amber ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50'
       }`}
@@ -67,7 +85,9 @@ export function FleetGateBanner({ fleet }: { fleet: FleetReadiness | undefined }
         <Text className="ml-2 flex-1 text-sm font-bold text-ink-900">{state.title}</Text>
       </View>
       <Text className="mt-1 text-xs text-silver-600 leading-5">{state.body}</Text>
-      <Text className="mt-2 text-xs font-semibold text-brand-700">Open Trucks →</Text>
+      {isAdmin ? (
+        <Text className="mt-2 text-xs font-semibold text-brand-700">Open Trucks →</Text>
+      ) : null}
     </Pressable>
   );
 }
