@@ -31,6 +31,16 @@ interface BillingTimerProps {
    *  dollar figure. When true we keep the running/elapsed CLOCK but drop every
    *  money amount. */
   hideMoney?: boolean;
+
+  // ── Long-haul ────────────────────────────────────────────────────────────
+  /** True when transit is charged per km instead of by the clock. */
+  isLongHaul?: boolean;
+  /** The fixed transit charge, added to the running figure from the start. */
+  transitCents?: number | null;
+  /** When the crew pressed "in transit" — the highway stops the meter. */
+  inTransitAt?: string | null;
+  /** When they pressed "unloading" — the meter starts again. */
+  unloadingAt?: string | null;
 }
 
 export function BillingTimer({
@@ -41,6 +51,10 @@ export function BillingTimer({
   actualTotalCents,
   actualDriverPayoutCents,
   hideMoney,
+  isLongHaul,
+  transitCents,
+  inTransitAt,
+  unloadingAt,
 }: BillingTimerProps) {
   // 1Hz tick — only when the move is actively running. We stop the
   // interval the moment completedAt lands so finished cards don't waste
@@ -83,7 +97,21 @@ export function BillingTimer({
   // completion by the server). For the driver this is a "billing so far"
   // hero; precise final math happens on Finish Move.
   const rateCents = hourlyRateCustomerCents ?? 17500;
-  const liveServiceCents = Math.round((elapsedMs / 3_600_000) * rateCents);
+
+  // On a long haul the highway is paid for by the kilometre, so the meter has
+  // to STOP for the drive — otherwise the customer watches their bill climb
+  // through three hours of QE2 they've already paid a fixed price for. Deduct
+  // the transit span (still open while they're driving) and add the fixed
+  // transit charge, which is known from the moment the move is booked.
+  const transitStart = inTransitAt ? new Date(inTransitAt).getTime() : null;
+  const transitEnd = unloadingAt ? new Date(unloadingAt).getTime() : null;
+  const transitMs = isLongHaul && transitStart
+    ? Math.max(0, (transitEnd ?? end) - transitStart)
+    : 0;
+  const billableMs = Math.max(0, elapsedMs - transitMs);
+  const liveServiceCents =
+    Math.round((billableMs / 3_600_000) * rateCents) + (isLongHaul ? (transitCents ?? 0) : 0);
+  const onTheHighway = isLongHaul && !!transitStart && !transitEnd && !completedAt;
   // Approximate live driver take — 80% of running service cost. The real
   // 80% is computed on the FINAL total (after GST/materials/fuel) so this
   // undershoots a tiny bit on cross-city moves.
@@ -134,7 +162,7 @@ export function BillingTimer({
         </View>
         <View className="ml-3 flex-1">
           <Text className="text-xs font-semibold uppercase tracking-wider text-brand-300">
-            Move in progress · billing live
+            {onTheHighway ? 'On the road · meter paused' : 'Move in progress · billing live'}
           </Text>
           <Text
             className="text-3xl font-bold text-white mt-1"

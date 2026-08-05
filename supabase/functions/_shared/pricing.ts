@@ -92,7 +92,7 @@ const LONG_HAUL_KM             = 100;
 // Long-haul transit rate. Covers the crew's hours on the highway, the fuel, the
 // wear AND the empty drive home — which is why long-haul moves carry no
 // separate fuel line and no round-trip doubling.
-const TRANSIT_CENTS_PER_KM     = 350;
+export const TRANSIT_CENTS_PER_KM = 350;
 // Hours the matrix assigns to driving across a city. On a long haul that drive
 // isn't hourly any more, so it comes out of the labour estimate.
 const LOCAL_DRIVE_HOURS_IN_MATRIX = 2;

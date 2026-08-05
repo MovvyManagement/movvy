@@ -73,7 +73,7 @@ export default function Receipts() {
   // ─── Render ──────────────────────────────────────────────────────────────
 
   const totalSpentCents = completed.reduce(
-    (sum, b) => sum + (b.price_total_cents ?? 0) + ((b as any).tip_cents ?? 0),
+    (sum, b) => sum + ((b as any).actual_total_cents ?? b.price_total_cents ?? 0) + ((b as any).tip_cents ?? 0),
     0,
   );
 
@@ -154,7 +154,10 @@ export default function Receipts() {
                 const route = b.dropoff_line1
                   ? `${b.pickup_city ?? b.pickup_line1} → ${b.dropoff_city ?? b.dropoff_line1}`
                   : `${b.pickup_city ?? b.pickup_line1} · in-home`;
-                const total = ((b.price_total_cents ?? 0) + ((b as any).tip_cents ?? 0)) / 100;
+                // Charged amount, not the quote — see receiptFromBooking.
+                const total =
+                  (((b as any).actual_total_cents ?? b.price_total_cents ?? 0) +
+                    ((b as any).tip_cents ?? 0)) / 100;
                 return (
                   <View key={b.id} className="mb-3">
                     <Card>

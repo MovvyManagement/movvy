@@ -27,7 +27,7 @@ import {
 } from '../_shared/security.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { handle } from '../_shared/serve.ts';
-import { computeActualBill } from '../_shared/pricing.ts';
+import { computeActualBill, TRANSIT_CENTS_PER_KM } from '../_shared/pricing.ts';
 import { sendBrandedEmail } from '../_shared/email.ts';
 import { moveComplete } from '../_shared/emails/index.ts';
 import { fmtHours, fmtMoney } from '../_shared/format.ts';
@@ -76,6 +76,10 @@ handle(async (req) => {
     // but do not affect when the meter starts / stops.
     const stamp: Record<string, string> = { status: new_status };
     if (new_status === 'on_the_way') stamp.started_at = new Date().toISOString();
+    // The transit window — the customer's live meter pauses between these two
+    // on a long haul, since that stretch is billed by the kilometre.
+    if (new_status === 'in_transit') stamp.in_transit_at = new Date().toISOString();
+    if (new_status === 'unloading') stamp.unloading_at = new Date().toISOString();
     if (new_status === 'completed') stamp.completed_at = new Date().toISOString();
     if (new_status === 'cancelled') {
       stamp.cancelled_at = new Date().toISOString();
@@ -124,6 +128,29 @@ handle(async (req) => {
         }
       }
 
+      // ── Distance actually driven ──────────────────────────────────────
+      // Sum the GPS trace across the transit window, then clamp it to a band
+      // around the quote. Under-run passes through so a shorter route reaches
+      // the customer as a smaller bill; over-run is capped, because a detour —
+      // or a phone that woke up mid-route and drew a straight line — must not
+      // be able to move someone's price. A sparse trace falls back to the quote.
+      let billedTransitKm = Number(data.transit_km ?? 0);
+      let billedTransitCents = data.transit_cents ?? 0;
+      if (data.is_long_haul && inTransitAt && unloadingAt && billedTransitKm > 0) {
+        const { data: measured } = await admin.rpc('measured_transit_km', {
+          p_booking_id: booking_id,
+          p_from: inTransitAt,
+          p_to: unloadingAt,
+        });
+        const km = Number(measured);
+        if (Number.isFinite(km) && km > 0) {
+          const floor = billedTransitKm * 0.8;
+          const ceiling = billedTransitKm * 1.1;
+          billedTransitKm = Math.round(Math.min(Math.max(km, floor), ceiling) * 10) / 10;
+          billedTransitCents = Math.round(billedTransitKm * TRANSIT_CENTS_PER_KM);
+        }
+      }
+
       actualBill = computeActualBill({
         startedAt: data.started_at,
         completedAt: data.completed_at,
@@ -131,7 +158,7 @@ handle(async (req) => {
         materialsCents: data.materials_cents ?? 5000,
         fuelCents: data.fuel_cents ?? 0,
         isLongHaul: !!data.is_long_haul,
-        transitCents: data.transit_cents ?? 0,
+        transitCents: billedTransitCents,
         inTransitAt,
         unloadingAt,
         // Fallback when the crew skipped a status: deduct the transit duration
@@ -149,6 +176,8 @@ handle(async (req) => {
           actual_total_cents: actualBill.actualTotalCents,
           actual_commission_cents: actualBill.actualCommissionCents,
           actual_driver_payout_cents: actualBill.actualDriverPayoutCents,
+          actual_transit_km: data.is_long_haul ? billedTransitKm : null,
+          actual_transit_cents: data.is_long_haul ? billedTransitCents : null,
         })
         .eq('id', booking_id);
 

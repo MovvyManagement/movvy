@@ -112,8 +112,14 @@ export default function LiveMove() {
         date: live.scheduled_for_date,
         pickup: { line1: live.pickup_line1, city: live.pickup_city, lat: live.pickup_lat, lng: live.pickup_lng },
         dropoff: { line1: live.dropoff_line1 ?? '', city: live.dropoff_city ?? '', lat: live.dropoff_lat, lng: live.dropoff_lng },
-        totalCents: live.price_total_cents,
-        totalDollars: live.price_total_cents / 100,
+        // The ESTIMATE is what the deposit was taken against. Once the crew
+        // presses Finish the server writes actual_total_cents — the move that
+        // actually happened — and THAT is what the customer owes. Showing the
+        // estimate on the pay button while Stripe charged the actual was a
+        // support ticket every time the crew finished early.
+        totalCents: (live as any).actual_total_cents ?? live.price_total_cents,
+        totalDollars: ((live as any).actual_total_cents ?? live.price_total_cents) / 100,
+        isFinalBill: (live as any).actual_total_cents != null,
         // Deposit already collected at booking — credited on the final bill.
         depositDollars:
           (live as any).deposit_status === 'paid' ? ((live as any).deposit_cents ?? 0) / 100 : 0,
@@ -393,10 +399,14 @@ export default function LiveMove() {
             Move. Customer view, so showDriverPayout=false (they see the
             customer-side total, not the driver's 80% take). */}
         <BillingTimer
-          startedAt={(booking as any).started_at ?? null}
-          completedAt={(booking as any).completed_at ?? null}
-          hourlyRateCustomerCents={(booking as any).hourly_rate_customer_cents ?? null}
-          actualTotalCents={(booking as any).actual_total_cents ?? null}
+          startedAt={(live as any)?.started_at ?? null}
+          completedAt={(live as any)?.completed_at ?? null}
+          hourlyRateCustomerCents={(live as any)?.hourly_rate_customer_cents ?? null}
+          actualTotalCents={(live as any)?.actual_total_cents ?? null}
+          isLongHaul={!!(live as any)?.is_long_haul}
+          transitCents={(live as any)?.actual_transit_cents ?? (live as any)?.transit_cents ?? 0}
+          inTransitAt={(live as any)?.in_transit_at ?? null}
+          unloadingAt={(live as any)?.unloading_at ?? null}
         />
 
         {/* Live ETA pulse banner */}

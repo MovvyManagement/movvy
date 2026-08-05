@@ -82,6 +82,12 @@ export function bookingToReceiptData(
     dropoff,
     lines,
     tipDollars: (booking.tip_cents ?? 0) / 100,
-    totalDollars: (booking.price_total_cents + (booking.tip_cents ?? 0)) / 100,
+    // A receipt records what was PAID. actual_total_cents is the timed bill
+    // the customer was actually charged; price_total_cents is only the estimate
+    // the deposit was taken against, and on a completed move it's the wrong
+    // number to hand someone for their records.
+    totalDollars:
+      (((booking as any).actual_total_cents ?? booking.price_total_cents) +
+        (booking.tip_cents ?? 0)) / 100,
   };
 }
