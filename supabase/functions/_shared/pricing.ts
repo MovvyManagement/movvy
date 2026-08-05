@@ -87,6 +87,8 @@ const TAX_RATE_GST             = 0.05;
 const DEPOSIT_FRACTION         = 0.20;
 const FALLBACK_RATE_CENTS_PER_HR = 17500;
 const MIN_BILLABLE_HOURS       = 4;
+// Past this one-way distance the drop-off drive is billed both ways.
+const LONG_HAUL_KM             = 100;
 
 // Time-based fuel. Every move starts at $50 flat. If the planned total
 // drive time (HQ → pickup + pickup → dropoff) exceeds 60 minutes, we
@@ -165,7 +167,10 @@ export interface ServerPricingInput {
 // table INSERT in bookings-create doesn't have to change column-by-column.
 // The only fields that carry meaningful values now are flagged ★.
 export interface ServerPriceBreakdown {
-  travelHours: number;            // ★ travel hours (rounded up to 0.5)
+  travelHours: number;            // HQ → pickup, billed
+  transportHours: number;         // ★ pickup → drop-off, billed (doubled past 100 km)
+  roundTripApplied: boolean;      // ★ true when the drop-off drive is billed both ways
+  transportKm: number;            // ★ one-way pickup → drop-off distance
   propertyHours: number;          // ★ from the bedroom matrix
   packingHours: number;           // legacy — always 0 now
   additionalHours: number;        // legacy — always 0 now
@@ -180,7 +185,8 @@ export interface ServerPriceBreakdown {
 
   // Customer line items ────────────────────────────────────────────────────
   serviceCostCents: number;       // ★ onSiteHours × hourlyRate
-  travelCostCents: number;        // ★ travelHours × hourlyRate
+  travelCostCents: number;        // travelHours × hourlyRate
+  transportCostCents: number;     // transportHours × hourlyRate
   materialsCents: number;         // ★ flat $50
   insuranceCents: number;         // legacy — always 0
   /** Long-haul fuel ($1.50/km over 100km one-way). Customer-only line. */
@@ -243,46 +249,60 @@ export function computeServerPricing(input: ServerPricingInput): ServerPriceBrea
   // compatibility with screens that haven't been migrated.
   const hourlyRateDriverCents = Math.round(hourlyRateCustomerCents * DRIVER_SHARE_OF_TOTAL);
 
-  // ── 2. Travel time (HQ → PICKUP only — for the estimate breakdown) ─────
-  // The customer's "Travel time" line is the time it takes the crew to get
-  // from HQ to their pickup address. The pickup → dropoff drive is bundled
-  // into the matrix property hours (the matrix represents typical
-  // load + drive + unload for that property size).
+  // ── 2. Travel — BOTH legs are billed time ──────────────────────────────
+  // Two drives, each charged at the same hourly rate as the move:
   //
-  // On move day, the actual billing timer starts the moment the driver
-  // presses "We've left HQ" and runs straight through to "Finish Move" —
-  // so it captures HQ → pickup + load + pickup → dropoff + unload as one
-  // continuous block. The estimate is just a guide.
-  const pCity = cityForCoord(input.pickup);
-  const dCity = cityForCoord(input.dropoff);
-  const intraCity = !!pCity && pCity === dCity;
-
-  // Distance + drive time HQ → pickup (the "travel time" the customer sees).
-  const origin = closestMajor(input.pickup);
+  //   leg 1  HQ → pickup        (getting the truck to the customer)
+  //   leg 2  pickup → drop-off  (the move itself)
+  //
+  // Each leg rounds to the NEAREST half hour, with a half-hour floor, so a
+  // ten-minute hop across a neighbourhood still bills 0.5h.
+  //
+  // The round-trip rule: past LONG_HAUL_KM the drop-off leg is charged BOTH
+  // WAYS. Under that distance the truck is back in its service area and
+  // earning again, so the return absorbs into the local rate. Past it, the
+  // truck is committed to one customer for the day and has to drive home
+  // empty — that return is real time the crew can't sell to anyone else.
+  //
+  // Leg 2 used to be excluded entirely, on the theory that the matrix hours
+  // already contained it. True across a city; catastrophic at 345 km, where
+  // it meant ~10 hours of driving billed as a $225 fuel line.
+  const route = estimateRoute(input.pickup, input.dropoff);
+  const origin = closestMajorCity(input.pickup);
   const hqToPickupKm = roadKm(origin, input.pickup);
-  const hqToPickupHoursRaw = hqToPickupKm / 80 + 0.25;  // small handling buffer
-  const travelHours = roundUpHalf(hqToPickupHoursRaw);
+  const hqToPickupHoursRaw = hqToPickupKm / 80 + 0.25;
+  const travelHours = roundHalfMin(hqToPickupHoursRaw);
 
-  // Distance + drive time pickup → dropoff (NOT shown as a separate line,
-  // used only for fuel + as the "intercity km" diagnostic).
   const pickupToDropoffKm = roadKm(input.pickup, input.dropoff);
   const pickupToDropoffHoursRaw = pickupToDropoffKm / 80 + 0.25;
+  const oneWayTransportHours = roundHalfMin(pickupToDropoffHoursRaw);
+  const roundTripApplied = pickupToDropoffKm > LONG_HAUL_KM;
+  const transportHours = roundTripApplied
+    ? oneWayTransportHours * 2
+    : oneWayTransportHours;
+  if (roundTripApplied) {
+    notes.push(
+      `Long-haul: ${Math.round(pickupToDropoffKm)} km each way — drop-off drive billed both ways ` +
+      `(${oneWayTransportHours} hr × 2), since the truck returns empty.`,
+    );
+  }
 
-  // Total drive time used by the time-based fuel formula.
   const totalDriveMinutes = (hqToPickupHoursRaw + pickupToDropoffHoursRaw) * 60;
 
   // ── 3. On-site hours + 4-hour minimum ──────────────────────────────────
   // No more silent packing-hour inflation. The matrix property hours ARE
   // the on-site bill. The 4-hour floor still applies — small jobs round up.
-  const totalRawHours = roundUpHalf(propertyHours + travelHours);
+  const billedTravelHours = travelHours + transportHours;
+  const totalRawHours = roundUpHalf(propertyHours + billedTravelHours);
   const totalServiceHours = Math.max(MIN_BILLABLE_HOURS, totalRawHours);
   const minimumApplied = totalServiceHours > totalRawHours;
-  const billableOnSiteHours = totalServiceHours - travelHours;
+  const billableOnSiteHours = totalServiceHours - billedTravelHours;
   const onSiteHours = billableOnSiteHours;
 
   // ── 4. Customer line items ─────────────────────────────────────────────
   const serviceCostCents = Math.round(onSiteHours * hourlyRateCustomerCents);
-  const travelCostCents  = Math.round(travelHours * hourlyRateCustomerCents);
+  const travelCostCents     = Math.round(travelHours * hourlyRateCustomerCents);
+  const transportCostCents  = Math.round(transportHours * hourlyRateCustomerCents);
   const materialsCents   = MATERIALS_CENTS;
   const insuranceCents   = 0;  // line removed
 
@@ -294,7 +314,8 @@ export function computeServerPricing(input: ServerPricingInput): ServerPriceBrea
   const longHaulCustomerCents = FUEL_BASE_CENTS + extraHalfHours * FUEL_PER_HALF_HOUR_CENTS;
 
   const taxableSubtotalCents =
-    serviceCostCents + travelCostCents + materialsCents + longHaulCustomerCents;
+    serviceCostCents + travelCostCents + transportCostCents + materialsCents +
+    longHaulCustomerCents;
   const gstCents = Math.round(taxableSubtotalCents * TAX_RATE_GST);
   const totalRaw = taxableSubtotalCents + gstCents;
   const totalCents = Math.ceil(totalRaw / 100) * 100;
@@ -310,6 +331,9 @@ export function computeServerPricing(input: ServerPricingInput): ServerPriceBrea
 
   return {
     travelHours,
+    transportHours: Math.round(transportHours * 10) / 10,
+    roundTripApplied,
+    transportKm: Math.round(pickupToDropoffKm * 10) / 10,
     propertyHours: Math.round(propertyHours * 10) / 10,
     packingHours: 0,
     additionalHours: 0,
@@ -324,6 +348,7 @@ export function computeServerPricing(input: ServerPricingInput): ServerPriceBrea
 
     serviceCostCents,
     travelCostCents,
+    transportCostCents,
     materialsCents,
     insuranceCents,
     longHaulCustomerCents,

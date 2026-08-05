@@ -93,12 +93,23 @@ export function PriceBreakdownView({ price }: { price: PB }) {
       <Row
         label={`Move time · ${price.propertyHours}h × ${rateLabel(price.hourlyRateCustomerCents)}`}
         value={cents(price.serviceCostCents)}
-        sub="Load, drive between addresses, and unload — typical for your property size"
+        sub="Loading and unloading — typical for your property size"
       />
       <Row
         label={`Travel to your address · ${price.travelHours}h × ${rateLabel(price.hourlyRateCustomerCents)}`}
         value={cents(price.travelCostCents)}
         sub="Time for the crew to get from HQ to your pickup"
+      />
+      <Row
+        label={`Drive to drop-off · ${price.transportHours}h${
+          price.roundTripApplied ? ' round trip' : ''
+        } × ${rateLabel(price.hourlyRateCustomerCents)}`}
+        value={cents(price.transportCostCents)}
+        sub={
+          price.roundTripApplied
+            ? `${price.transportKm} km each way — billed both ways, the truck returns empty`
+            : 'Time on the road between your two addresses'
+        }
       />
       <Row
         label="Materials"

@@ -548,6 +548,17 @@ export default function ConfirmStep() {
             label={`Travel to your address · ${price.travelHours}h × $${(price.hourlyRateCustomerCents / 100).toFixed(0)}/hr`}
             value={fmtCurrency(price.travelCostCents / 100)}
           />
+          {/* The drive between the two addresses. Past 100 km it's billed both
+              ways — the truck has to come home and can't take another job on
+              the way. Saying so on the line item stops it reading as a typo. */}
+          <PriceLine
+            label={
+              price.roundTripApplied
+                ? `Drive to drop-off · ${price.transportHours}h round trip × $${(price.hourlyRateCustomerCents / 100).toFixed(0)}/hr`
+                : `Drive to drop-off · ${price.transportHours}h × $${(price.hourlyRateCustomerCents / 100).toFixed(0)}/hr`
+            }
+            value={fmtCurrency(price.transportCostCents / 100)}
+          />
           <PriceLine
             label="Materials (boxes, wrap, tape)"
             value={fmtCurrency(price.materialsCents / 100)}
