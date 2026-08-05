@@ -375,6 +375,12 @@ serve(async (req) => {
         // (bookings-update-status → computeActualBill) so the actual bill
         // can re-add it without knowing the route.
         fuel_cents: pricing.longHaulCustomerCents,
+        // Freeze the transit quote onto the booking: the FINAL bill reuses the
+        // exact figure the customer agreed to rather than re-measuring a
+        // distance later against a road network that may have changed.
+        transit_km: pricing.transportKm,
+        transit_cents: pricing.transitCents,
+        is_long_haul: pricing.isLongHaul,
         pricing_breakdown: { ...pricing, discount_cents: discountCents, promo_id: promoId } as any,
         promo_code_id: promoId,
 

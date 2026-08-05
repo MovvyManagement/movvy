@@ -87,8 +87,16 @@ const TAX_RATE_GST             = 0.05;
 const DEPOSIT_FRACTION         = 0.20;
 const FALLBACK_RATE_CENTS_PER_HR = 17500;
 const MIN_BILLABLE_HOURS       = 4;
-// Past this one-way distance the drop-off drive is billed both ways.
+// Past this one-way distance a move switches from all-hourly to per-km transit.
 const LONG_HAUL_KM             = 100;
+// Long-haul transit rate. Covers the crew's hours on the highway, the fuel, the
+// wear AND the empty drive home — which is why long-haul moves carry no
+// separate fuel line and no round-trip doubling.
+const TRANSIT_CENTS_PER_KM     = 350;
+// Hours the matrix assigns to driving across a city. On a long haul that drive
+// isn't hourly any more, so it comes out of the labour estimate.
+const LOCAL_DRIVE_HOURS_IN_MATRIX = 2;
+const MIN_LOAD_UNLOAD_HOURS    = 3;
 
 // Time-based fuel. Every move starts at $50 flat. If the planned total
 // drive time (HQ → pickup + pickup → dropoff) exceeds 60 minutes, we
@@ -182,7 +190,8 @@ export interface ServerPricingInput {
 export interface ServerPriceBreakdown {
   travelHours: number;            // HQ → pickup, billed
   transportHours: number;         // ★ pickup → drop-off, billed (doubled past 100 km)
-  roundTripApplied: boolean;      // ★ true when the drop-off drive is billed both ways
+  isLongHaul: boolean;            // ★ true when transit is charged per km, not hourly
+  transitCents: number;           // ★ fixed transit charge on a long haul
   transportKm: number;            // ★ one-way pickup → drop-off distance
   propertyHours: number;          // ★ from the bedroom matrix
   packingHours: number;           // legacy — always 0 now
@@ -301,22 +310,30 @@ export function computeServerPricing(input: ServerPricingInput): ServerPriceBrea
   const pickupToDropoffHoursRaw = input.route
     ? input.route.pickupToDropoffMinutes / 60 + 0.25
     : pickupToDropoffKm / 80 + 0.25;
-  const oneWayTransportHours = roundHalfMin(pickupToDropoffHoursRaw);
-  const roundTripApplied = pickupToDropoffKm > LONG_HAUL_KM;
-  const transportHours = roundTripApplied
-    ? oneWayTransportHours * 2
-    : oneWayTransportHours;
+  // ── The mode switch ────────────────────────────────────────────────────
+  // Local: the drive between addresses is hourly like everything else.
+  // Long-haul: it's a fixed distance charge instead, so weather and traffic
+  // can't move the price and the quote is a promise rather than a meter.
+  const isLongHaul = pickupToDropoffKm > LONG_HAUL_KM;
+  const transportHours = isLongHaul ? 0 : roundHalfMin(pickupToDropoffHoursRaw);
+  const transitCents = isLongHaul
+    ? Math.round(pickupToDropoffKm * TRANSIT_CENTS_PER_KM)
+    : 0;
 
-  // Fuel follows the wheels, not the invoice lines: on a round-trip job the
-  // truck burns the drop-off leg twice, so count it twice.
-  const totalDriveMinutes =
-    (hqToPickupHoursRaw + pickupToDropoffHoursRaw * (roundTripApplied ? 2 : 1)) * 60;
+  // Only used by the LOCAL fuel line — a long haul has no separate fuel charge.
+  const totalDriveMinutes = (hqToPickupHoursRaw + pickupToDropoffHoursRaw) * 60;
 
   // ── 3. On-site hours + 4-hour minimum ──────────────────────────────────
   // No more silent packing-hour inflation. The matrix property hours ARE
   // the on-site bill. The 4-hour floor still applies — small jobs round up.
+  // The matrix hours assume a local move — load, a drive across town, unload.
+  // On a long haul that middle drive is the per-km charge, so the hourly part
+  // is load + unload only.
+  const labourHours = isLongHaul
+    ? Math.max(MIN_LOAD_UNLOAD_HOURS, propertyHours - LOCAL_DRIVE_HOURS_IN_MATRIX)
+    : propertyHours;
   const billedTravelHours = travelHours + transportHours;
-  const totalRawHours = roundUpHalf(propertyHours + billedTravelHours);
+  const totalRawHours = roundUpHalf(labourHours + billedTravelHours);
   const totalServiceHours = Math.max(MIN_BILLABLE_HOURS, totalRawHours);
   const minimumApplied = totalServiceHours > totalRawHours;
   const billableOnSiteHours = totalServiceHours - billedTravelHours;
@@ -332,13 +349,17 @@ export function computeServerPricing(input: ServerPricingInput): ServerPriceBrea
   // Time-based fuel. $50 covers the first hour of total drive time
   // (HQ → pickup + pickup → dropoff). Each additional half-hour adds $25,
   // rounded down so a partial 15-min segment doesn't get billed.
+  // Long-haul fuel is already inside the per-km transit charge — billing the
+  // time-based line on top would charge the same diesel twice.
   const extraMinutes = Math.max(0, totalDriveMinutes - FUEL_BASE_MINUTES);
   const extraHalfHours = Math.floor(extraMinutes / 30);
-  const longHaulCustomerCents = FUEL_BASE_CENTS + extraHalfHours * FUEL_PER_HALF_HOUR_CENTS;
+  const longHaulCustomerCents = isLongHaul
+    ? 0
+    : FUEL_BASE_CENTS + extraHalfHours * FUEL_PER_HALF_HOUR_CENTS;
 
   const taxableSubtotalCents =
-    serviceCostCents + travelCostCents + transportCostCents + materialsCents +
-    longHaulCustomerCents;
+    serviceCostCents + travelCostCents + transportCostCents + transitCents +
+    materialsCents + longHaulCustomerCents;
   const gstCents = Math.round(taxableSubtotalCents * TAX_RATE_GST);
   const totalRaw = taxableSubtotalCents + gstCents;
   const totalCents = Math.ceil(totalRaw / 100) * 100;
@@ -355,7 +376,8 @@ export function computeServerPricing(input: ServerPricingInput): ServerPriceBrea
   return {
     travelHours,
     transportHours: Math.round(transportHours * 10) / 10,
-    roundTripApplied,
+    isLongHaul,
+    transitCents,
     transportKm: Math.round(pickupToDropoffKm * 10) / 10,
     propertyHours: Math.round(propertyHours * 10) / 10,
     packingHours: 0,
@@ -427,12 +449,31 @@ export interface ActualBillInput {
   hourlyRateCustomerCents: number;
   /** Materials charge captured at booking creation (usually flat $50). */
   materialsCents: number;
-  /** Long-haul fuel surcharge captured at booking creation. */
+  /** Fuel surcharge captured at booking creation. 0 on long hauls. */
   fuelCents: number;
+
+  // ── Long-haul only ──────────────────────────────────────────────────────
+  /** Quoted at booking. When set, transit is NOT billed by the clock. */
+  isLongHaul?: boolean;
+  /** The fixed transit charge the customer agreed to (km × rate). */
+  transitCents?: number;
+  /**
+   * When the crew pressed "in transit" and "unloading". The span between them
+   * is the highway drive — it comes OFF the clock on a long haul, because the
+   * customer is paying for that distance, not that duration. Absent (crew
+   * skipped a status), we fall back to the quoted transit duration so a missed
+   * button press can't silently bill hours of driving at the hourly rate.
+   */
+  inTransitAt?: Date | string | null;
+  unloadingAt?: Date | string | null;
+  /** Quoted transit duration, used as the fallback deduction. */
+  quotedTransitMinutes?: number;
 }
 
 export interface ActualBillOutput {
   actualHours: number;            // 2-decimal places, e.g. 6.42
+  /** Hours removed from the clock because transit was billed per km. */
+  transitHoursExcluded: number;
   actualServiceCents: number;     // actual_hours × hourlyRate
   actualSubtotalCents: number;    // service + materials + fuel
   actualGstCents: number;         // 5% of subtotal
@@ -447,10 +488,30 @@ export function computeActualBill(input: ActualBillInput): ActualBillOutput {
   const elapsedMs = Math.max(0, end - start);
   // Two-decimal hours so a 6h22m move bills as 6.37 hr (rounded to nearest
   // 1/100 hr ~= 36 sec). Plenty of resolution; no rounding-up scam.
-  const actualHours = Math.round((elapsedMs / 3_600_000) * 100) / 100;
+  let hours = elapsedMs / 3_600_000;
+
+  // On a long haul the highway is already paid for by the kilometre. Take it
+  // off the clock so the crew isn't paid twice for the same drive — and so a
+  // slow day on the QE2 doesn't land on the customer's invoice.
+  let transitHoursExcluded = 0;
+  if (input.isLongHaul) {
+    const t0 = input.inTransitAt ? new Date(input.inTransitAt).getTime() : NaN;
+    const t1 = input.unloadingAt ? new Date(input.unloadingAt).getTime() : NaN;
+    const measured = Number.isFinite(t0) && Number.isFinite(t1) && t1 > t0
+      ? (t1 - t0) / 3_600_000
+      : NaN;
+    transitHoursExcluded = Number.isFinite(measured)
+      ? measured
+      : (input.quotedTransitMinutes ?? 0) / 60;
+    hours = Math.max(0, hours - transitHoursExcluded);
+  }
+
+  const actualHours = Math.round(hours * 100) / 100;
+  transitHoursExcluded = Math.round(transitHoursExcluded * 100) / 100;
 
   const actualServiceCents  = Math.round(actualHours * input.hourlyRateCustomerCents);
-  const actualSubtotalCents = actualServiceCents + input.materialsCents + input.fuelCents;
+  const actualSubtotalCents =
+    actualServiceCents + input.materialsCents + input.fuelCents + (input.transitCents ?? 0);
   const actualGstCents      = Math.round(actualSubtotalCents * TAX_RATE_GST);
   const actualTotalRaw      = actualSubtotalCents + actualGstCents;
   const actualTotalCents    = Math.ceil(actualTotalRaw / 100) * 100;
@@ -460,6 +521,7 @@ export function computeActualBill(input: ActualBillInput): ActualBillOutput {
 
   return {
     actualHours,
+    transitHoursExcluded,
     actualServiceCents,
     actualSubtotalCents,
     actualGstCents,

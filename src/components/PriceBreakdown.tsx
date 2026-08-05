@@ -100,17 +100,19 @@ export function PriceBreakdownView({ price }: { price: PB }) {
         value={cents(price.travelCostCents)}
         sub="Time for the crew to get from HQ to your pickup"
       />
-      <Row
-        label={`Drive to drop-off · ${price.transportHours}h${
-          price.roundTripApplied ? ' round trip' : ''
-        } × ${rateLabel(price.hourlyRateCustomerCents)}`}
-        value={cents(price.transportCostCents)}
-        sub={
-          price.roundTripApplied
-            ? `${price.transportKm} km each way — billed both ways, the truck returns empty`
-            : 'Time on the road between your two addresses'
-        }
-      />
+      {price.isLongHaul ? (
+        <Row
+          label={`Transit · ${price.transportKm} km × $3.50/km`}
+          value={cents(price.transitCents)}
+          sub="Fixed for the distance — covers the drive, the fuel and the return, so traffic can't change your price"
+        />
+      ) : (
+        <Row
+          label={`Drive to drop-off · ${price.transportHours}h × ${rateLabel(price.hourlyRateCustomerCents)}`}
+          value={cents(price.transportCostCents)}
+          sub="Time on the road between your two addresses"
+        />
+      )}
       <Row
         label="Materials"
         value={cents(price.materialsCents)}

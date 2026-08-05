@@ -63,8 +63,16 @@ const TAX_RATE_GST             = 0.05;
 const DEPOSIT_FRACTION         = 0.20;
 const FALLBACK_RATE_CENTS_PER_HR = 17500;
 const MIN_BILLABLE_HOURS       = 4;
-// Past this one-way distance the drop-off drive is billed both ways.
+// Past this one-way distance a move switches from all-hourly to per-km transit.
 const LONG_HAUL_KM             = 100;
+// Long-haul transit rate. Covers the crew's hours on the highway, the fuel, the
+// wear AND the empty drive home — which is why long-haul moves carry no
+// separate fuel line and no round-trip doubling.
+const TRANSIT_CENTS_PER_KM     = 350;
+// Hours the matrix assigns to driving across a city. On a long haul that drive
+// isn't hourly any more, so it comes out of the labour estimate.
+const LOCAL_DRIVE_HOURS_IN_MATRIX = 2;
+const MIN_LOAD_UNLOAD_HOURS    = 3;
 
 // Time-based fuel. Every move starts at $50 flat. If the planned total
 // drive time (HQ → pickup + pickup → dropoff) exceeds 60 minutes, we add
@@ -160,8 +168,10 @@ export interface PriceBreakdown {
   travelHours: number;            // HQ → pickup, billed
   /** pickup → drop-off, billed. Doubled past LONG_HAUL_KM. */
   transportHours: number;
-  /** True when the drop-off drive is charged both ways. */
-  roundTripApplied: boolean;
+  /** True when transit is charged per km instead of hourly. */
+  isLongHaul: boolean;
+  /** Fixed transit charge on a long haul (km × rate). 0 on local moves. */
+  transitCents: number;
   /** One-way pickup → drop-off distance, km. */
   transportKm: number;
   propertyHours: number;
@@ -282,26 +292,35 @@ export function computePricing(input: PricingInput): PriceBreakdown {
   const pickupToDropoffHoursRaw = input.route
     ? input.route.pickupToDropoffMinutes / 60 + 0.25
     : pickupToDropoffKm / 80 + 0.25;
-  const oneWayTransportHours = roundHalfMin(pickupToDropoffHoursRaw);
-  const roundTripApplied = pickupToDropoffKm > LONG_HAUL_KM;
-  const transportHours = roundTripApplied
-    ? oneWayTransportHours * 2
-    : oneWayTransportHours;
-  if (roundTripApplied) {
+  // ── The mode switch ────────────────────────────────────────────────────
+  // Local: the drive between addresses is hourly like everything else.
+  // Long-haul: it's a fixed distance charge instead, so weather and traffic
+  // can't move the price and the quote is a promise rather than a meter.
+  const isLongHaul = pickupToDropoffKm > LONG_HAUL_KM;
+  const transportHours = isLongHaul ? 0 : roundHalfMin(pickupToDropoffHoursRaw);
+  const transitCents = isLongHaul
+    ? Math.round(pickupToDropoffKm * TRANSIT_CENTS_PER_KM)
+    : 0;
+  if (isLongHaul) {
     notes.push(
-      `Long-haul: ${Math.round(pickupToDropoffKm)} km each way — drop-off drive billed both ways ` +
-      `(${oneWayTransportHours} hr × 2), since the truck returns empty.`,
+      `Long-haul: ${Math.round(pickupToDropoffKm)} km — transit billed at ` +
+      `$${(TRANSIT_CENTS_PER_KM / 100).toFixed(2)}/km, which covers the drive, ` +
+      `the fuel and the return. Only the loading and unloading is on the clock.`,
     );
   }
 
-  // Fuel follows the wheels, not the invoice lines: on a round-trip job the
-  // truck burns the drop-off leg twice, so count it twice.
-  const totalDriveMinutes =
-    (hqToPickupHoursRaw + pickupToDropoffHoursRaw * (roundTripApplied ? 2 : 1)) * 60;
+  // Only used by the LOCAL fuel line — a long haul has no separate fuel charge.
+  const totalDriveMinutes = (hqToPickupHoursRaw + pickupToDropoffHoursRaw) * 60;
 
   // ── 3. On-site hours + 4-hour minimum ──────────────────────────────────
+  // The matrix hours assume a local move — load, a drive across town, unload.
+  // On a long haul that middle drive is the per-km charge, so the hourly part
+  // is load + unload only.
+  const labourHours = isLongHaul
+    ? Math.max(MIN_LOAD_UNLOAD_HOURS, propertyHours - LOCAL_DRIVE_HOURS_IN_MATRIX)
+    : propertyHours;
   const billedTravelHours = travelHours + transportHours;
-  const totalRawHours = roundUpHalf(propertyHours + billedTravelHours);
+  const totalRawHours = roundUpHalf(labourHours + billedTravelHours);
   const totalServiceHours = Math.max(MIN_BILLABLE_HOURS, totalRawHours);
   const minimumApplied = totalServiceHours > totalRawHours;
   const billableOnSiteHours = totalServiceHours - billedTravelHours;
@@ -319,16 +338,20 @@ export function computePricing(input: PricingInput): PriceBreakdown {
 
   // Time-based fuel. $50 base covers up to 60 min total drive time
   // (HQ→pickup + pickup→dropoff). Beyond that, +$25 per half-hour, floor.
+  // Long-haul fuel is already inside the per-km transit charge — billing the
+  // time-based line on top would charge the same diesel twice.
   const extraMinutes = Math.max(0, totalDriveMinutes - FUEL_BASE_MINUTES);
   const extraHalfHours = Math.floor(extraMinutes / 30);
-  const longHaulCustomerCents = FUEL_BASE_CENTS + extraHalfHours * FUEL_PER_HALF_HOUR_CENTS;
+  const longHaulCustomerCents = isLongHaul
+    ? 0
+    : FUEL_BASE_CENTS + extraHalfHours * FUEL_PER_HALF_HOUR_CENTS;
   if (extraHalfHours > 0) {
     notes.push(`Fuel: $50 base + ${extraHalfHours} × $25 (long-haul half-hours)`);
   }
 
   const taxableSubtotalCents =
-    serviceCostCents + travelCostCents + transportCostCents + materialsCents +
-    longHaulCustomerCents;
+    serviceCostCents + travelCostCents + transportCostCents + transitCents +
+    materialsCents + longHaulCustomerCents;
   const gstCents = Math.round(taxableSubtotalCents * TAX_RATE_GST);
   const totalRaw = taxableSubtotalCents + gstCents;
   const totalCents = Math.ceil(totalRaw / 100) * 100;
@@ -347,7 +370,8 @@ export function computePricing(input: PricingInput): PriceBreakdown {
   return {
     travelHours: round1(travelHours),
     transportHours: round1(transportHours),
-    roundTripApplied,
+    isLongHaul,
+    transitCents,
     transportKm: Math.round(pickupToDropoffKm * 10) / 10,
     propertyHours: round1(propertyHours),
     packingHours: 0,

@@ -88,7 +88,7 @@ handle(async (req) => {
       .from('bookings')
       .update(stamp)
       .eq('id', booking_id)
-      .select('id, short_code, status, customer_id, started_at, completed_at, hourly_rate_customer_cents, materials_cents, fuel_cents')
+      .select('id, short_code, status, customer_id, started_at, completed_at, hourly_rate_customer_cents, materials_cents, fuel_cents, is_long_haul, transit_cents, transit_km')
       .single();
 
     if (error) {
@@ -103,15 +103,43 @@ handle(async (req) => {
     // The math is server-side — no client can mess with the numbers.
     let actualBill: ReturnType<typeof computeActualBill> | null = null;
     if (new_status === 'completed' && data.started_at && data.completed_at) {
+      const admin = adminClient();
+
+      // On a long haul the highway is paid for by the kilometre, so the drive
+      // between the addresses has to come OFF the clock. booking_status_history
+      // already timestamps every transition, so the span is derivable without
+      // trusting anything the crew's device sends.
+      let inTransitAt: string | null = null;
+      let unloadingAt: string | null = null;
+      if (data.is_long_haul) {
+        const { data: hist } = await admin
+          .from('booking_status_history')
+          .select('new_status, created_at')
+          .eq('booking_id', booking_id)
+          .in('new_status', ['in_transit', 'unloading'])
+          .order('created_at', { ascending: true });
+        for (const row of hist ?? []) {
+          if (row.new_status === 'in_transit' && !inTransitAt) inTransitAt = row.created_at;
+          if (row.new_status === 'unloading' && !unloadingAt) unloadingAt = row.created_at;
+        }
+      }
+
       actualBill = computeActualBill({
         startedAt: data.started_at,
         completedAt: data.completed_at,
         hourlyRateCustomerCents: data.hourly_rate_customer_cents ?? 17500,
         materialsCents: data.materials_cents ?? 5000,
         fuelCents: data.fuel_cents ?? 0,
+        isLongHaul: !!data.is_long_haul,
+        transitCents: data.transit_cents ?? 0,
+        inTransitAt,
+        unloadingAt,
+        // Fallback when the crew skipped a status: deduct the transit duration
+        // we quoted rather than billing the drive at the hourly rate.
+        quotedTransitMinutes: data.transit_km
+          ? Math.round((Number(data.transit_km) / 90) * 60)
+          : 0,
       });
-
-      const admin = adminClient();
       const { error: billErr } = await admin
         .from('bookings')
         .update({
