@@ -315,7 +315,15 @@ export function computeServerPricing(input: ServerPricingInput): ServerPriceBrea
   // Long-haul: it's a fixed distance charge instead, so weather and traffic
   // can't move the price and the quote is a promise rather than a meter.
   const isLongHaul = pickupToDropoffKm > LONG_HAUL_KM;
-  const transportHours = isLongHaul ? 0 : roundHalfMin(pickupToDropoffHoursRaw);
+  // LOCAL: the drive between the addresses is NOT its own line. The matrix
+  // hours are "load, drive across town, unload" — billing the drive separately
+  // charges it twice. The only travel line is the 0.5h to reach the pickup,
+  // and the final bill agrees, because a local move runs one continuous clock
+  // from "left HQ" to "finish" that already contains that drive.
+  //
+  // LONG-HAUL: the drive is far too big to hide inside a matrix hour, so it
+  // comes OUT of the labour estimate and is charged by the kilometre instead.
+  const transportHours = 0;
   const transitCents = isLongHaul
     ? Math.round(pickupToDropoffKm * TRANSIT_CENTS_PER_KM)
     : 0;

@@ -560,17 +560,14 @@ export default function ConfirmStep() {
           {/* The drive between the two addresses. Local moves bill it hourly
               like everything else; past 100 km it becomes a fixed per-km charge
               so weather and traffic can't move the price. */}
+          {/* Long-haul only. On a local move the drive between the addresses is
+              already inside Move time, so there's no line for it here. */}
           {price.isLongHaul ? (
             <PriceLine
               label={`Transit · ${price.transportKm} km × $3.50/km`}
               value={fmtCurrency(price.transitCents / 100)}
             />
-          ) : (
-            <PriceLine
-              label={`Drive to drop-off · ${price.transportHours}h × $${(price.hourlyRateCustomerCents / 100).toFixed(0)}/hr`}
-              value={fmtCurrency(price.transportCostCents / 100)}
-            />
-          )}
+          ) : null}
           <PriceLine
             label="Materials (boxes, wrap, tape)"
             value={fmtCurrency(price.materialsCents / 100)}
