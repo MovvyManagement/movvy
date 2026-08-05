@@ -83,7 +83,7 @@ handle(async (req) => {
     // meaningfully within that radius.
     const k = (n: number) => n.toFixed(5);
     const cacheKey = await sha256(
-      `routes:${k(origin.lat)},${k(origin.lng)}->${
+      `routes.v2:${k(origin.lat)},${k(origin.lng)}->${
         waypoint ? `${k(waypoint.lat)},${k(waypoint.lng)}->` : ''
       }${k(destination.lat)},${k(destination.lng)}`,
     );
@@ -107,7 +107,7 @@ handle(async (req) => {
     });
     const useGoogle = budgetRes?.allowed === true && !!Deno.env.get('GOOGLE_MAPS_SERVER_KEY');
 
-    let result: { distanceKm: number; durationMinutes: number };
+    let result: { distanceKm: number; durationMinutes: number; legs: RouteLeg[] };
     let source: 'google' | 'haversine' = 'haversine';
     let costUsd = 0;
 
@@ -168,9 +168,11 @@ async function sha256(s: string): Promise<string> {
 
 interface Coord3 { lat: number; lng: number; }
 
+export interface RouteLeg { distanceKm: number; durationMinutes: number; }
+
 async function callGoogleRoutes(
   origin: Coord3, destination: Coord3, waypoint?: Coord3,
-): Promise<{ distanceKm: number; durationMinutes: number }> {
+): Promise<{ distanceKm: number; durationMinutes: number; legs: RouteLeg[] }> {
   const key = Deno.env.get('GOOGLE_MAPS_SERVER_KEY')!;
   const body: Record<string, any> = {
     origin: { location: { latLng: { latitude: origin.lat, longitude: origin.lng } } },
@@ -193,7 +195,11 @@ async function callGoogleRoutes(
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': key,
-        'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration',
+        // Per-LEG figures matter now: the pricing engine bills HQ → pickup and
+        // pickup → drop-off as separate lines with their own rounding, so a
+        // single total can't be split back apart. Legs stay on the basic SKU.
+        'X-Goog-FieldMask':
+          'routes.distanceMeters,routes.duration,routes.legs.distanceMeters,routes.legs.duration',
       },
       body: JSON.stringify(body),
     },
@@ -203,10 +209,15 @@ async function callGoogleRoutes(
   const route = json?.routes?.[0];
   if (!route) throw new Error('no routes returned');
   // Duration comes back as `"1234s"` — parse the seconds suffix.
-  const seconds = Number(String(route.duration ?? '0').replace(/[^\d]/g, '')) || 0;
+  const secs = (v: unknown) => Number(String(v ?? '0').replace(/[^\d]/g, '')) || 0;
+  const km = (m: unknown) => Math.round((Number(m ?? 0) / 1000) * 10) / 10;
   return {
-    distanceKm: Math.round((route.distanceMeters / 1000) * 10) / 10,
-    durationMinutes: Math.round(seconds / 60),
+    distanceKm: km(route.distanceMeters),
+    durationMinutes: Math.round(secs(route.duration) / 60),
+    legs: (route.legs ?? []).map((l: any) => ({
+      distanceKm: km(l.distanceMeters),
+      durationMinutes: Math.round(secs(l.duration) / 60),
+    })),
   };
 }
 
@@ -223,18 +234,26 @@ function haversineKm(a: Coord3, b: Coord3): number {
 
 function estimateHaversine(
   origin: Coord3, destination: Coord3, waypoint?: Coord3,
-): { distanceKm: number; durationMinutes: number } {
+): { distanceKm: number; durationMinutes: number; legs: RouteLeg[] } {
   // Same fudge factors as src/lib/distance.ts so the fallback matches the
   // existing pricing engine's expectations — switching to Google is a pure
   // accuracy upgrade, never a price shift.
   const ROAD_FUDGE = 1.30;
   const AVG_KPH = 80;
-  const km = waypoint
-    ? haversineKm(origin, waypoint) + haversineKm(waypoint, destination)
-    : haversineKm(origin, destination);
-  const roadKm = km * ROAD_FUDGE;
+  const leg = (a: Coord3, b: Coord3): RouteLeg => {
+    const d = haversineKm(a, b) * ROAD_FUDGE;
+    return {
+      distanceKm: Math.round(d * 10) / 10,
+      durationMinutes: Math.round((d / AVG_KPH) * 60),
+    };
+  };
+  const legs = waypoint
+    ? [leg(origin, waypoint), leg(waypoint, destination)]
+    : [leg(origin, destination)];
+  const distanceKm = Math.round(legs.reduce((t, l) => t + l.distanceKm, 0) * 10) / 10;
   return {
-    distanceKm: Math.round(roadKm * 10) / 10,
-    durationMinutes: Math.round((roadKm / AVG_KPH) * 60),
+    distanceKm,
+    durationMinutes: legs.reduce((t, l) => t + l.durationMinutes, 0),
+    legs,
   };
 }

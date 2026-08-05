@@ -10,6 +10,7 @@ import { Input } from '@/components/Input';
 import { PriceBreakdownView } from '@/components/PriceBreakdown';
 import { useBookingStore } from '@/store/bookingStore';
 import { estimatePrice } from '@/lib/pricing';
+import { useRouteLegs } from '@/lib/data/useRouteLegs';
 import { fmtCurrency } from '@/lib/format';
 import { COVERAGE_AMOUNT } from '@/lib/brand';
 
@@ -17,7 +18,15 @@ export default function PricingStep() {
   const draft = useBookingStore((s) => s.draft);
   const setPromoCode = useBookingStore((s) => s.setPromoCode);
   const [promo, setPromo] = useState(draft.promoCode ?? '');
-  const price = useMemo(() => estimatePrice(draft), [draft]);
+  // Real driving legs — both are billed time, and leg 2's distance decides
+  // whether the drop-off drive is charged one way or both. While this loads the
+  // engine falls back to straight-line distances, so a quote always renders;
+  // it just firms up once Google answers.
+  const { data: routeLegs } = useRouteLegs(draft.pickup, draft.dropoff);
+  const price = useMemo(
+    () => estimatePrice(draft, routeLegs ?? undefined),
+    [draft, routeLegs],
+  );
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={['top', 'bottom']}>

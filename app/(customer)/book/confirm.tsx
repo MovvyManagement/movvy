@@ -11,6 +11,7 @@ import { Badge } from '@/components/Badge';
 import { useBookingStore } from '@/store/bookingStore';
 import type { MoveAccess } from '@/types';
 import { estimatePrice, MOVE_TYPE_LABELS } from '@/lib/pricing';
+import { useRouteLegs } from '@/lib/data/useRouteLegs';
 import { fmtCurrency, fmtDateShort } from '@/lib/format';
 import { useCreateBooking } from '@/lib/data';
 import { useValidatePromo } from '@/lib/data/useAdmin';
@@ -40,7 +41,15 @@ export default function ConfirmStep() {
   const reset = useBookingStore((s) => s.reset);
   const setPromoCode = useBookingStore((s) => s.setPromoCode);
   const setDetails = useBookingStore((s) => s.setDetails);
-  const price = useMemo(() => estimatePrice(draft), [draft]);
+  // Real driving legs — both are billed time, and leg 2's distance decides
+  // whether the drop-off drive is charged one way or both. While this loads the
+  // engine falls back to straight-line distances, so a quote always renders;
+  // it just firms up once Google answers.
+  const { data: routeLegs } = useRouteLegs(draft.pickup, draft.dropoff);
+  const price = useMemo(
+    () => estimatePrice(draft, routeLegs ?? undefined),
+    [draft, routeLegs],
+  );
   const createBooking = useCreateBooking();
 
   // Promo code — validates against the promo-validate edge fn. We don't

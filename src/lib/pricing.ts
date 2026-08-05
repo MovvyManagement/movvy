@@ -139,6 +139,20 @@ export interface PricingInput {
 
   propertyHoursOverride?: number;
   rateOverrideCentsPerHr?: number;
+
+  /**
+   * Real driving legs from Google Routes (routes-distance edge function).
+   * Distance now sets the price directly — both travel lines AND the 100 km
+   * round-trip switch — so a straight-line guess is no longer good enough.
+   * Absent, we fall back to haversine × 1.30 at 80 km/h, which reads Calgary →
+   * Red Deer as 178 km against a real 150.
+   */
+  route?: {
+    hqToPickupKm: number;
+    hqToPickupMinutes: number;
+    pickupToDropoffKm: number;
+    pickupToDropoffMinutes: number;
+  };
 }
 
 export interface PriceBreakdown {
@@ -254,12 +268,20 @@ export function computePricing(input: PricingInput): PriceBreakdown {
   // it meant ~10 hours of driving billed as a $225 fuel line.
   const route = estimateRoute(input.pickup, input.dropoff);
   const origin = closestMajorCity(input.pickup);
-  const hqToPickupKm = roadKm(origin, input.pickup);
-  const hqToPickupHoursRaw = hqToPickupKm / 80 + 0.25;
+  // 0.25h on each leg is the handling buffer — parking, stairs to the door,
+  // the walk back. Real drive time comes from Google when the caller supplied
+  // it; otherwise it's distance ÷ 80 km/h.
+  const hqToPickupKm = input.route?.hqToPickupKm ?? roadKm(origin, input.pickup);
+  const hqToPickupHoursRaw = input.route
+    ? input.route.hqToPickupMinutes / 60 + 0.25
+    : hqToPickupKm / 80 + 0.25;
   const travelHours = roundHalfMin(hqToPickupHoursRaw);
 
-  const pickupToDropoffKm = roadKm(input.pickup, input.dropoff);
-  const pickupToDropoffHoursRaw = pickupToDropoffKm / 80 + 0.25;
+  const pickupToDropoffKm =
+    input.route?.pickupToDropoffKm ?? roadKm(input.pickup, input.dropoff);
+  const pickupToDropoffHoursRaw = input.route
+    ? input.route.pickupToDropoffMinutes / 60 + 0.25
+    : pickupToDropoffKm / 80 + 0.25;
   const oneWayTransportHours = roundHalfMin(pickupToDropoffHoursRaw);
   const roundTripApplied = pickupToDropoffKm > LONG_HAUL_KM;
   const transportHours = roundTripApplied
@@ -272,7 +294,10 @@ export function computePricing(input: PricingInput): PriceBreakdown {
     );
   }
 
-  const totalDriveMinutes = (hqToPickupHoursRaw + pickupToDropoffHoursRaw) * 60;
+  // Fuel follows the wheels, not the invoice lines: on a round-trip job the
+  // truck burns the drop-off leg twice, so count it twice.
+  const totalDriveMinutes =
+    (hqToPickupHoursRaw + pickupToDropoffHoursRaw * (roundTripApplied ? 2 : 1)) * 60;
 
   // ── 3. On-site hours + 4-hour minimum ──────────────────────────────────
   const billedTravelHours = travelHours + transportHours;
@@ -390,7 +415,15 @@ export function splitTip(tipCents: number): TipSplit {
 
 import type { BookingDraft } from '@/types';
 
-export function estimatePrice(draft: BookingDraft): PriceBreakdown {
+/**
+ * Quote a draft. Pass `route` (from useRouteLegs) whenever it's available —
+ * without it the engine falls back to straight-line distances, and distance now
+ * sets the price.
+ */
+export function estimatePrice(
+  draft: BookingDraft,
+  route?: PricingInput['route'],
+): PriceBreakdown {
   const moveType = draft.moveType ?? 'home_move';
   const pickup  = { lat: draft.pickup?.lat  ?? 51.0447, lng: draft.pickup?.lng  ?? -114.0719 };
   const dropoff = { lat: draft.dropoff?.lat ?? pickup.lat, lng: draft.dropoff?.lng ?? pickup.lng };
@@ -404,6 +437,7 @@ export function estimatePrice(draft: BookingDraft): PriceBreakdown {
     // Booleans kept for input shape; ignored by computePricing.
     packingService: !!d.packingNeeded,
     movingInsurance: !!d.movingInsurance,
+    route,
   });
 }
 

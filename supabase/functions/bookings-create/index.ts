@@ -28,6 +28,8 @@ import {
 } from '../_shared/security.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { computeServerPricing } from '../_shared/pricing.ts';
+import { measureRouteLegs } from '../_shared/routeLegs.ts';
+import { closestMajor } from '../_shared/pricing.ts';
 // NOTE: the booking-confirmed email + partner broadcast moved to stripe-webhook
 // (they fire only once the 20% deposit is paid), so this function no longer
 // sends email or notifies crews on creation.
@@ -238,11 +240,27 @@ serve(async (req) => {
 
     // 6) Pricing — recomputed AUTHORITATIVELY on the server.
     //    Never trusts the client's `client_estimate_total_cents` hint.
+    const pickupCoord = { lat: input.pickup.lat, lng: input.pickup.lng };
+    const dropoffCoord = input.dropoff
+      ? { lat: input.dropoff.lat, lng: input.dropoff.lng }
+      : pickupCoord; // labor-only: same loc
+
+    // Both travel legs are billed time, and the drop-off leg's distance decides
+    // whether it's charged one way or both — so the distances ARE the price and
+    // have to be measured here, not accepted from the caller. Usually a cache
+    // hit off the customer's own preview call.
+    const routeLegs = await measureRouteLegs(
+      admin,
+      closestMajor(pickupCoord),
+      pickupCoord,
+      dropoffCoord,
+      user.id,
+    );
+
     const pricing = computeServerPricing({
-      pickup: { lat: input.pickup.lat, lng: input.pickup.lng },
-      dropoff: input.dropoff
-        ? { lat: input.dropoff.lat, lng: input.dropoff.lng }
-        : { lat: input.pickup.lat, lng: input.pickup.lng }, // labor-only: same loc
+      pickup: pickupCoord,
+      dropoff: dropoffCoord,
+      route: routeLegs,
       moveType: input.details.moveType,
       dwelling: (input.details as any).dwelling,
       bedrooms: (input.details as any).bedrooms,

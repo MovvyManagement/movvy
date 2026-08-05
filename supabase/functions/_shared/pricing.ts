@@ -118,7 +118,7 @@ function cityForCoord(c: { lat: number; lng: number }): 'calgary' | 'edmonton' |
   if (c.lat >= EDMONTON.s && c.lat <= EDMONTON.n && c.lng >= EDMONTON.w && c.lng <= EDMONTON.e) return 'edmonton';
   return null;
 }
-function closestMajor(c: { lat: number; lng: number }) {
+export function closestMajor(c: { lat: number; lng: number }) {
   return haversineKm(c, CALGARY.c) <= haversineKm(c, EDMONTON.c) ? CALGARY.c : EDMONTON.c;
 }
 
@@ -161,6 +161,19 @@ export interface ServerPricingInput {
   packingService?: boolean;
   movingInsurance?: boolean;
   additionalHours?: number;
+
+  /**
+   * Real driving legs from Google Routes. Distance now sets the price directly
+   * — both travel lines AND the 100 km round-trip switch — so a straight-line
+   * guess is no longer good enough. Absent, we fall back to haversine × 1.30 at
+   * 80 km/h, which reads Calgary → Red Deer as 178 km against a real 150.
+   */
+  route?: {
+    hqToPickupKm: number;
+    hqToPickupMinutes: number;
+    pickupToDropoffKm: number;
+    pickupToDropoffMinutes: number;
+  };
 }
 
 // Many of these fields are kept at 0/legacy values so the existing bookings
@@ -217,6 +230,8 @@ export interface ServerPriceBreakdown {
 }
 
 const roundUpHalf = (n: number) => Math.ceil(n * 2) / 2;
+/** Nearest half hour, never less than one. */
+const roundHalfMin = (n: number) => Math.max(0.5, Math.round(n * 2) / 2);
 
 export function computeServerPricing(input: ServerPricingInput): ServerPriceBreakdown {
   // ── 1. Hours + rate from the matrix ────────────────────────────────────
@@ -267,27 +282,35 @@ export function computeServerPricing(input: ServerPricingInput): ServerPriceBrea
   // Leg 2 used to be excluded entirely, on the theory that the matrix hours
   // already contained it. True across a city; catastrophic at 345 km, where
   // it meant ~10 hours of driving billed as a $225 fuel line.
-  const route = estimateRoute(input.pickup, input.dropoff);
-  const origin = closestMajorCity(input.pickup);
-  const hqToPickupKm = roadKm(origin, input.pickup);
-  const hqToPickupHoursRaw = hqToPickupKm / 80 + 0.25;
+  const origin = closestMajor(input.pickup);
+  const pCity = cityForCoord(input.pickup);
+  const dCity = cityForCoord(input.dropoff);
+  const intraCity = !!pCity && pCity === dCity;
+
+  // 0.25h on each leg is the handling buffer — parking, stairs to the door,
+  // the walk back. Real drive time comes from Google when the caller supplied
+  // it; otherwise it's distance ÷ 80 km/h.
+  const hqToPickupKm = input.route?.hqToPickupKm ?? roadKm(origin, input.pickup);
+  const hqToPickupHoursRaw = input.route
+    ? input.route.hqToPickupMinutes / 60 + 0.25
+    : hqToPickupKm / 80 + 0.25;
   const travelHours = roundHalfMin(hqToPickupHoursRaw);
 
-  const pickupToDropoffKm = roadKm(input.pickup, input.dropoff);
-  const pickupToDropoffHoursRaw = pickupToDropoffKm / 80 + 0.25;
+  const pickupToDropoffKm =
+    input.route?.pickupToDropoffKm ?? roadKm(input.pickup, input.dropoff);
+  const pickupToDropoffHoursRaw = input.route
+    ? input.route.pickupToDropoffMinutes / 60 + 0.25
+    : pickupToDropoffKm / 80 + 0.25;
   const oneWayTransportHours = roundHalfMin(pickupToDropoffHoursRaw);
   const roundTripApplied = pickupToDropoffKm > LONG_HAUL_KM;
   const transportHours = roundTripApplied
     ? oneWayTransportHours * 2
     : oneWayTransportHours;
-  if (roundTripApplied) {
-    notes.push(
-      `Long-haul: ${Math.round(pickupToDropoffKm)} km each way — drop-off drive billed both ways ` +
-      `(${oneWayTransportHours} hr × 2), since the truck returns empty.`,
-    );
-  }
 
-  const totalDriveMinutes = (hqToPickupHoursRaw + pickupToDropoffHoursRaw) * 60;
+  // Fuel follows the wheels, not the invoice lines: on a round-trip job the
+  // truck burns the drop-off leg twice, so count it twice.
+  const totalDriveMinutes =
+    (hqToPickupHoursRaw + pickupToDropoffHoursRaw * (roundTripApplied ? 2 : 1)) * 60;
 
   // ── 3. On-site hours + 4-hour minimum ──────────────────────────────────
   // No more silent packing-hour inflation. The matrix property hours ARE
