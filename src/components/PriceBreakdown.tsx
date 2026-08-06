@@ -20,6 +20,7 @@ import { View, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fmtCurrency, fmtDuration } from '@/lib/format';
 import type { PriceBreakdown as PB } from '@/lib/pricing';
+import { TRANSIT_CENTS_PER_KM } from '@/lib/pricing';
 import { COVERAGE_AMOUNT } from '@/lib/brand';
 
 function Row({
@@ -69,6 +70,8 @@ function SectionHeader({ children }: { children: string }) {
 const cents = (c: number) => fmtCurrency(c / 100);
 const rateLabel = (c: number) => `$${Math.round(c / 100)}/hr`;
 
+const transitRateLabel = () => `$${(TRANSIT_CENTS_PER_KM / 100).toFixed(2)}/km`;
+
 export function PriceBreakdownView({ price }: { price: PB }) {
   return (
     <View>
@@ -103,7 +106,7 @@ export function PriceBreakdownView({ price }: { price: PB }) {
       {/* Long-haul only — a local drive is already inside Move time. */}
       {price.isLongHaul ? (
         <Row
-          label={`Transit · ${price.transportKm} km × $3.50/km`}
+          label={`Transit · ${price.transportKm} km × ${transitRateLabel()}`}
           value={cents(price.transitCents)}
           sub="Fixed for the distance — covers the drive, the fuel and the return, so traffic can't change your price"
         />

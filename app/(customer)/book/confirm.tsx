@@ -10,7 +10,7 @@ import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import { useBookingStore } from '@/store/bookingStore';
 import type { MoveAccess } from '@/types';
-import { estimatePrice, MOVE_TYPE_LABELS } from '@/lib/pricing';
+import { estimatePrice, MOVE_TYPE_LABELS, TRANSIT_CENTS_PER_KM } from '@/lib/pricing';
 import { useRouteLegs } from '@/lib/data/useRouteLegs';
 import { fmtCurrency, fmtDateShort } from '@/lib/format';
 import { useCreateBooking } from '@/lib/data';
@@ -564,7 +564,7 @@ export default function ConfirmStep() {
               already inside Move time, so there's no line for it here. */}
           {price.isLongHaul ? (
             <PriceLine
-              label={`Transit · ${price.transportKm} km × $3.50/km`}
+              label={`Transit · ${price.transportKm} km × $${(TRANSIT_CENTS_PER_KM / 100).toFixed(2)}/km`}
               value={fmtCurrency(price.transitCents / 100)}
             />
           ) : null}

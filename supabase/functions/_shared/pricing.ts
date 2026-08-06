@@ -92,11 +92,8 @@ const LONG_HAUL_KM             = 100;
 // Long-haul transit rate. Covers the crew's hours on the highway, the fuel, the
 // wear AND the empty drive home — which is why long-haul moves carry no
 // separate fuel line and no round-trip doubling.
-export const TRANSIT_CENTS_PER_KM = 350;
+export const TRANSIT_CENTS_PER_KM = 400;
 // Hours the matrix assigns to driving across a city. On a long haul that drive
-// isn't hourly any more, so it comes out of the labour estimate.
-const LOCAL_DRIVE_HOURS_IN_MATRIX = 2;
-const MIN_LOAD_UNLOAD_HOURS    = 3;
 
 // Time-based fuel. Every move starts at $50 flat. If the planned total
 // drive time (HQ → pickup + pickup → dropoff) exceeds 60 minutes, we
@@ -334,12 +331,11 @@ export function computeServerPricing(input: ServerPricingInput): ServerPriceBrea
   // ── 3. On-site hours + 4-hour minimum ──────────────────────────────────
   // No more silent packing-hour inflation. The matrix property hours ARE
   // the on-site bill. The 4-hour floor still applies — small jobs round up.
-  // The matrix hours assume a local move — load, a drive across town, unload.
-  // On a long haul that middle drive is the per-km charge, so the hourly part
-  // is load + unload only.
-  const labourHours = isLongHaul
-    ? Math.max(MIN_LOAD_UNLOAD_HOURS, propertyHours - LOCAL_DRIVE_HOURS_IN_MATRIX)
-    : propertyHours;
+  // The matrix hours ARE the loading and unloading — they contain no driving.
+  // So the same figure applies whether the drop-off is across town or across
+  // the province; distance is priced by the transit line, never by shaving
+  // hours off the crew's work.
+  const labourHours = propertyHours;
   const billedTravelHours = travelHours + transportHours;
   const totalRawHours = roundUpHalf(labourHours + billedTravelHours);
   const totalServiceHours = Math.max(MIN_BILLABLE_HOURS, totalRawHours);
