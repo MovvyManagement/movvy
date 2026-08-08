@@ -40,6 +40,15 @@ export interface ReceiptData {
   totalDollars: number;
   /** Optional payment-method summary, e.g. "Visa ····4242". */
   paymentLabel?: string;
+  /** Which bill this document is issued against.
+   *  'actual'   — the move finished and was billed on the time it really took
+   *  'estimate' — not completed yet, so only the quote exists
+   *  The two legitimately differ: the estimate exists to size the deposit. */
+  basis?: 'actual' | 'estimate';
+  /** Deposit already collected at booking (against the estimate). */
+  depositPaidDollars?: number;
+  /** Charged on completion — total less the deposit, tip included. */
+  balanceDollars?: number;
 }
 
 function escapeHtml(s: string): string {
@@ -94,6 +103,32 @@ export function buildReceiptHtml(data: ReceiptData): string {
     data.billedHours != null
       ? `<div class="muted" style="margin-top:4px">${data.billedHours.toFixed(2)} hours on site</div>`
       : '';
+
+  // Deposit / balance split. The customer pays 20% up front against the
+  // estimate and the rest when the crew finishes, so a total on its own reads
+  // as if the whole amount were charged at the end.
+  const settlement =
+    data.depositPaidDollars != null && data.depositPaidDollars > 0
+      ? `<table style="margin-top:14px">
+          <tbody>
+            <tr><td>Deposit paid at booking</td><td style="text-align:right">−${fmtCurrency(data.depositPaidDollars)}</td></tr>
+            <tr><td style="font-weight:700">Charged on completion</td><td style="text-align:right;font-weight:700">${fmtCurrency(data.balanceDollars ?? data.totalDollars - data.depositPaidDollars)}</td></tr>
+          </tbody>
+        </table>`
+      : '';
+
+  // Say plainly which bill this is. An estimate-basis receipt is not a record
+  // of payment, and must not be mistaken for one.
+  const basisNote =
+    data.basis === 'estimate'
+      ? `<div class="muted" style="margin-top:12px;padding:10px 12px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;color:#92400E">
+           <strong>Estimate — not a final receipt.</strong> This move hasn't been
+           completed yet. The final bill is calculated from the actual time the
+           move takes and may differ from the figures above.
+         </div>`
+      : data.basis === 'actual'
+        ? `<div class="muted" style="margin-top:10px">Billed on the actual time the move took, not the booking estimate.</div>`
+        : '';
 
   return `<!DOCTYPE html>
 <html>
@@ -280,9 +315,11 @@ export function buildReceiptHtml(data: ReceiptData): string {
       <tbody>${lineRows}${tipRow}</tbody>
     </table>
     <div class="total">
-      <div class="k">Total Charged</div>
+      <div class="k">${data.basis === 'estimate' ? 'Estimated Total' : 'Total Charged'}</div>
       <div class="v">${fmtCurrency(data.totalDollars)}</div>
     </div>
+    ${settlement}
+    ${basisNote}
     ${payment}
   </div>
 
