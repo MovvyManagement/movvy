@@ -32,50 +32,60 @@ import { CardSkeleton } from '@/components/Skeleton';
 import {
   useNotifications,
   useMarkNotificationRead,
-  useMarkAllNotificationsRead,
+  useMarkNotificationsRead,
   type AppNotification,
 } from '@/lib/data';
 import { fmtTime, fmtDateShort } from '@/lib/format';
 
 export type NotificationSurface = 'customer' | 'mover' | 'company';
 
-export function NotificationsInbox({ surface }: { surface: NotificationSurface }) {
-  const { data: items, isLoading, refetch, isRefetching } = useNotifications(50);
-  const markRead = useMarkNotificationRead();
-  const markAll = useMarkAllNotificationsRead();
+// One visit shows at most this many unread. A full page means there is more
+// waiting, so we say so rather than leaving the rest invisible.
+const PAGE_SIZE = 50;
 
-  // Opening the inbox marks everything read, and the query is unread-only —
-  // so the moment we mark-all, the live `items` would empty out while the user
-  // is still looking at the list. To avoid that flicker: snapshot the first loaded
+export function NotificationsInbox({ surface }: { surface: NotificationSurface }) {
+  const { data: items, isLoading, refetch, isRefetching } = useNotifications(PAGE_SIZE);
+  const markRead = useMarkNotificationRead();
+  const markShown = useMarkNotificationsRead();
+
+  // Opening the inbox marks what it shows as read, and the query is unread-only
+  // — so the moment we mark, the live `items` would empty out while the user is
+  // still looking at the list. To avoid that flicker: snapshot the first loaded
   // batch and render the snapshot for this visit. The rows stay put; they're
   // simply gone the NEXT time the inbox opens (the query no longer returns
   // them). `snapshot === null` means "haven't captured this visit yet".
   const [snapshot, setSnapshot] = useState<AppNotification[] | null>(null);
   const markedRef = useRef(false);
 
+  // Mark ONLY the ids we actually rendered. This used to mark every unread row
+  // for the profile, but the query is capped at PAGE_SIZE — so with more than a
+  // page of unread mail, the overflow was marked read without ever being shown,
+  // and a read notification never comes back. Anything past the first page was
+  // silently destroyed on open. Now the overflow stays unread and surfaces on
+  // the next visit (or a pull-to-refresh).
+  const markBatch = (batch: AppNotification[]) => {
+    if (markedRef.current) return;
+    const ids = batch.filter((n) => !n.read_at).map((n) => n.id);
+    if (ids.length === 0) return;
+    markedRef.current = true;
+    markShown.mutate(ids);
+  };
+
   useEffect(() => {
     if (snapshot === null && items) {
       setSnapshot(items);
-      // Auto-mark the whole batch read on open (once), so the badge clears and
-      // these don't reappear on the next visit.
-      if (!markedRef.current && items.some((n) => !n.read_at)) {
-        markedRef.current = true;
-        markAll.mutate();
-      }
+      markBatch(items);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, snapshot]);
 
-  // Pull-to-refresh re-captures the latest unread batch (and marks it read).
+  // Pull-to-refresh re-captures the next unread batch (and marks that batch read).
   const onRefresh = async () => {
     markedRef.current = false;
     const r = await refetch();
     const fresh = (r.data ?? []) as AppNotification[];
     setSnapshot(fresh);
-    if (!markedRef.current && fresh.some((n) => !n.read_at)) {
-      markedRef.current = true;
-      markAll.mutate();
-    }
+    markBatch(fresh);
   };
 
   // Render the frozen snapshot, not the live (soon-empty) query result.
@@ -149,6 +159,16 @@ export function NotificationsInbox({ surface }: { surface: NotificationSurface }
           {shown.map((n) => (
             <NotificationRow key={n.id} item={n} onPress={() => onTap(n)} />
           ))}
+
+          {/* A full page means more unread is queued behind this one. Say so —
+              the alternative is a user assuming this was everything. */}
+          {shown.length >= PAGE_SIZE ? (
+            <Pressable onPress={onRefresh} className="mt-2 items-center py-3 active:opacity-70">
+              <Text className="text-xs font-semibold text-brand-700">
+                Pull down to load older notifications
+              </Text>
+            </Pressable>
+          ) : null}
         </ScrollView>
       )}
     </SafeAreaView>

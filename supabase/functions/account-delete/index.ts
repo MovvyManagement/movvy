@@ -23,6 +23,22 @@ const Body = z.object({
   confirm_email_or_phone: z.string().min(3).max(254),
 });
 
+/** A unique, unroutable stand-in for a deleted user's phone number.
+ *  +999 is ITU-reserved (no real subscriber can hold it) and E.164 allows 15
+ *  digits total, leaving 12 for the id-derived part. Deterministic, so calling
+ *  account-delete twice produces the same tombstone instead of colliding. */
+async function tombstonePhone(profileId: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`movvy.deleted.phone:${profileId}`),
+  );
+  // 40 bits keeps the value comfortably under 10^12 before padding.
+  const bytes = new Uint8Array(digest).slice(0, 5);
+  let n = 0n;
+  for (const b of bytes) n = (n << 8n) | BigInt(b);
+  return `+999${(n % 1_000_000_000_000n).toString().padStart(12, '0')}`;
+}
+
 handle(async (req) => {
   const cors = corsHeaders(req);
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
@@ -101,14 +117,51 @@ handle(async (req) => {
 
     // Revoke all sessions AND ban the auth user so a "deleted" account can't
     // sign back in. We BAN rather than hard-delete the auth row on purpose:
-    // deleting it would break every booking/payout/audit FK that points at this
-    // user. The profile is already soft-deleted + PII-redacted above.
+    // profiles.id references auth.users(id) ON DELETE CASCADE, so removing the
+    // auth row would take the profile — and every booking, payout and audit
+    // record hanging off it — with it. The profile is already soft-deleted +
+    // PII-redacted above.
     try {
       await admin.auth.admin.signOut(user.id, 'global');
       // ~100 years — effectively permanent, reversible by support if needed.
       await admin.auth.admin.updateUserById(user.id, { ban_duration: '876000h' });
     } catch (e) {
       console.warn('[account-delete] session revoke / ban failed', e);
+    }
+
+    // ── Release the email + phone so the person can come back ────────────────
+    // request_account_deletion() redacts profiles.email/phone, but auth.users
+    // keeps the originals, and GoTrue enforces uniqueness there. Deleting your
+    // account therefore burned both identifiers permanently: signing up again
+    // with the same phone returned `phone_exists` and the same email
+    // `email_exists`, with no way for the user (or support, short of SQL) to
+    // recover. For a phone number someone has had for years, that meant they
+    // could never use Movvy again.
+    //
+    // So tombstone them on auth.users too. The row and its id survive — every
+    // FK stays intact — while the identifiers are freed for a genuinely fresh
+    // signup, which gets a NEW profile id and therefore none of the deleted
+    // account's history.
+    //
+    // GoTrue will not clear a phone: `null` and `""` are both accepted with a
+    // 200 and silently ignored, so it has to be REPLACED. +999 is an
+    // ITU-reserved country code that can never belong to a real subscriber,
+    // and E.164 caps the whole thing at 15 digits — hence 999 + 12. Derived
+    // from a hash of the user id so a retried delete is idempotent rather than
+    // conflicting with its own first attempt.
+    try {
+      const { data: authUser } = await admin.auth.admin.getUserById(user.id);
+      const patch: { email?: string; phone?: string } = {
+        email: `deleted+${user.id}@deleted.movvy.ca`,
+      };
+      if (authUser?.user?.phone) patch.phone = await tombstonePhone(user.id);
+      const { error: freeErr } = await admin.auth.admin.updateUserById(user.id, patch);
+      if (freeErr) throw freeErr;
+    } catch (e) {
+      // Non-fatal: the account IS deleted either way. Worst case the
+      // identifiers stay reserved, which is the old behaviour — but log loudly,
+      // because it means a returning customer will hit "already registered".
+      console.error('[account-delete] could not release email/phone', e);
     }
 
     await audit({

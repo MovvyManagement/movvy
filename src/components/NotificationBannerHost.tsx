@@ -27,6 +27,8 @@ export function NotificationBannerHost() {
   // and rebuilt every render.
   const toastRef = useRef(toast);
   toastRef.current = toast;
+  // Twin keys already banner'd this session — see the dedupe note below.
+  const seenRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!user?.id || !supabaseConfigured) return;
@@ -49,6 +51,31 @@ export function NotificationBannerHost() {
 
           const title = String(row.title ?? 'Movvy');
           const body = String(row.body ?? '');
+
+          // ── Suppress the in_app/push twin ─────────────────────────────────
+          // Five event classes write TWO rows with identical title+body — one
+          // 'in_app' for the inbox, one 'push' for the Expo pipeline (0022:
+          // assigned, on_the_way, arrived, completed, cancelled; also the two
+          // partner join events and the reminder crons). We must watch both
+          // channels, because a manual admin send via notifications-send
+          // writes a 'push' row with no in_app twin — filtering to in_app
+          // alone would silence it. So dedupe on the pair instead.
+          //
+          // The twins are written in ONE transaction, and created_at defaults
+          // to now() — transaction start — so a twin pair shares created_at to
+          // the microsecond while two genuinely separate events never do.
+          // That makes this key exact: it drops the duplicate banner without
+          // ever swallowing a real second notification, even one with the same
+          // wording seconds later.
+          const twinKey = `${row.category}|${title}|${body}|${row.created_at}`;
+          if (seenRef.current.has(twinKey)) return;
+          seenRef.current.add(twinKey);
+          if (seenRef.current.size > 200) {
+            // Bound the set on a long session; insertion order is oldest-first.
+            const oldest = seenRef.current.values().next().value;
+            if (oldest !== undefined) seenRef.current.delete(oldest);
+          }
+
           haptic.light();
           toastRef.current.show(body ? `${title} — ${body}` : title, {
             variant: 'info',

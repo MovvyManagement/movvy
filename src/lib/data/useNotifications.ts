@@ -90,17 +90,24 @@ export function useMarkNotificationRead() {
   });
 }
 
-/** Mark all unread notifications as read in one round-trip. */
-export function useMarkAllNotificationsRead() {
-  const { user } = useAuth();
+/** Mark a specific set of notifications read in one round-trip.
+ *
+ *  Takes explicit ids rather than "everything unread" on purpose. The inbox is
+ *  unread-only AND capped at a page (50), so a blanket
+ *  `update ... where read_at is null` marked rows the user was never shown —
+ *  and because a read row never comes back, notification 51+ were destroyed on
+ *  open. Anyone with a busy week lost the oldest of their unread mail without
+ *  ever seeing it. Scoping to the ids actually rendered means the overflow
+ *  simply waits for the next visit. */
+export function useMarkNotificationsRead() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (ids: string[]) => {
+      if (ids.length === 0) return;
       const { error } = await supabase
         .from('notifications')
         .update({ read_at: new Date().toISOString() })
-        .eq('profile_id', user!.id)
-        .eq('channel', 'in_app')
+        .in('id', ids)
         .is('read_at', null);
       if (error) throw error;
     },
