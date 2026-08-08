@@ -321,9 +321,13 @@ export default function MoverActive() {
     if (!next || !liveJob) return;
     try {
       await update.mutateAsync({ booking_id: liveJob.id, new_status: next.toStatus as any });
-      if (next.toStatus === 'arrived') {
-        setTimeout(() => update.mutate({ booking_id: liveJob.id, new_status: 'loading' as any }), 600);
-      }
+      // There used to be an unawaited follow-up here pushing `arrived` on to
+      // `loading` after 600 ms, because the DB refused arrived → in_transit and
+      // this button asks for exactly that. When the follow-up didn't land the
+      // move stranded at `arrived` with an error the crew couldn't clear.
+      // 0097 makes the skip legal, so the extra call is gone — and it has to be
+      // gone, or it would race and attempt in_transit → loading, illegal the
+      // other way round.
     } catch (e: any) {
       Alert.alert('Could not update', e?.message ?? 'Try again.');
     }
