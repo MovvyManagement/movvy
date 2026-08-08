@@ -11,7 +11,9 @@
 // the request was made — and any mismatch with the live profile is called out.
 // =============================================================================
 
+import { redirect } from 'next/navigation';
 import { supabaseServer } from '@/lib/supabase/server';
+import { getAdminAccess } from '@/lib/adminAccess';
 import { fmtCents, fmtDateTime, fmtRelative } from '@/lib/format';
 import { PayoutActions } from './PayoutActions';
 
@@ -19,6 +21,15 @@ export const dynamic = 'force-dynamic';
 
 export default async function PayoutsPage() {
   const supabase = await supabaseServer();
+
+  // MANAGEMENT ONLY. This page prints crew banking details — e-Transfer address,
+  // institution, transit, account tail — and the RLS policy on payout_requests
+  // allows is_admin(), which is TRUE for the staff tier (0055 syncs a staff
+  // console user to profiles.role = 'movvy_support'). So RLS is not a backstop
+  // here and the layout hiding the link is not a control: without this check a
+  // staff user who types the URL reads every crew's banking information.
+  const access = await getAdminAccess(supabase);
+  if (access !== 'management') redirect('/admin-management/dashboard');
 
   const { data: requests } = await supabase
     .from('payout_requests')

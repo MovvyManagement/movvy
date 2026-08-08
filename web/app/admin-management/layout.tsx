@@ -103,13 +103,13 @@ export default async function AdminLayout({
     { href: '/admin-management/dashboard', label: 'Dashboard' },
     { href: '/admin-management/moves', label: 'Moves' },
     { href: '/admin-management/approvals', label: 'Approvals', badge: pendingApprovals || undefined },
-    { href: '/admin-management/payouts', label: 'Payouts', badge: pendingPayouts || undefined },
     { href: '/admin-management/users', label: 'Users' },
     { href: '/admin-management/support', label: 'Support', badge: openSupport || undefined },
     { href: '/admin-management/disputes', label: 'Disputes', badge: openDisputes || undefined },
     { href: '/admin-management/security', label: 'Security' },
     ...(isManagement
       ? [
+          { href: '/admin-management/payouts', label: 'Payouts', badge: pendingPayouts || undefined },
           { href: '/admin-management/revenue', label: 'Revenue' },
           { href: '/admin-management/payments', label: 'Payments' },
           { href: '/admin-management/team', label: 'Team' },
