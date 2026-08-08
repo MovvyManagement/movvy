@@ -68,7 +68,7 @@ export default async function DashboardPage() {
     cancelledToday,
     completedAllTime,
     topCities,
-    driverPayouts,
+    payoutRequests,
     unreadNotifications,
   ] = await Promise.all([
     supabase
@@ -140,9 +140,13 @@ export default async function DashboardPage() {
       .select('id', { count: 'exact', head: true })
       .eq('onboarding_status', 'verified'),
 
+    // `ratings.score` has never existed — the columns are overall,
+    // professionalism, timeliness, carefulness, communication (0003). Selecting
+    // a phantom column makes PostgREST 400 the request, so .data was null and
+    // this tile read "— / 5 · 0 total ratings" no matter how many ratings existed.
     supabase
       .from('ratings')
-      .select('score'),
+      .select('overall'),
 
     supabase
       .from('bookings')
@@ -161,15 +165,23 @@ export default async function DashboardPage() {
       .gte('created_at', new Date(Date.now() - 30 * 86_400_000).toISOString())
       .not('pickup_city', 'is', null),
 
+    // Was driver_payouts.amount_cents — a column that doesn't exist on that
+    // table (it has gross_cents / movvy_margin_cents / net_cents), so the tile
+    // read "0 · All caught up" while crews waited. It also disagreed with the
+    // sidebar badge, which counts payout_requests. Payouts are requested and
+    // paid by hand through payout_requests now, so read the same table the badge
+    // does — one number, one source.
     supabase
-      .from('driver_payouts')
+      .from('payout_requests')
       .select('id, amount_cents', { count: 'exact' })
       .eq('status', 'pending'),
 
+    // `notifications.read` doesn't exist — unread is `read_at is null` (0004).
+    // .eq('read', false) 400'd, so the count was null and rendered as 0.
     supabase
       .from('notifications')
       .select('id', { count: 'exact', head: true })
-      .eq('read', false)
+      .is('read_at', null)
       .gte('created_at', startOfToday.toISOString()),
   ]);
 
@@ -233,12 +245,12 @@ export default async function DashboardPage() {
   const ratings = ratingsData.data ?? [];
   const avgRating =
     ratings.length > 0
-      ? (ratings.reduce((s: number, r: any) => s + (r.score ?? 0), 0) / ratings.length).toFixed(1)
+      ? (ratings.reduce((s: number, r: any) => s + (r.overall ?? 0), 0) / ratings.length).toFixed(1)
       : null;
 
   // ── Payouts ────────────────────────────────────────────────────────────────
-  const pendingPayoutsCount = driverPayouts.count ?? 0;
-  const pendingPayoutsAmount = (driverPayouts.data ?? []).reduce(
+  const pendingPayoutsCount = payoutRequests.count ?? 0;
+  const pendingPayoutsAmount = (payoutRequests.data ?? []).reduce(
     (s: number, p: any) => s + (p.amount_cents ?? 0), 0,
   );
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Stack } from 'expo-router';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, AppState } from 'react-native';
 import { useRequireAuth, supabaseConfigured } from '@/lib/supabase';
 import { useThemedColors } from '@/lib/theme';
 import { useSetMyPresence } from '@/lib/data';
@@ -26,16 +26,37 @@ export default function MoverStack() {
   const palette = useThemedColors();
 
   // Partners are always online while the driver app is open. We removed the
-  // manual Online/Offline toggle, so mark presence online once auth is ready
-  // and leave it that way for the whole session — the matcher + the company
-  // assign-driver picker keep seeing them as available.
+  // manual Online/Offline toggle, so presence is marked for them.
+  //
+  // It has to be a HEARTBEAT, not a one-shot. company_drivers_roster computes
+  // is_online as `is_online AND last_online_at > now() - interval '30 minutes'`,
+  // so a single ping at launch expires after half an hour: the whole crew showed
+  // "Offline · last seen …" to their own admin while sitting in the app, every
+  // assignment went through the destructive "Assign anyway" confirm, and the
+  // dashboard utilization tile read 0%.
+  //
+  // Ten minutes gives three pings inside the window, so one missed tick (dead
+  // zone, throttled timer) doesn't flip them offline. The AppState listener
+  // re-pings on foreground because JS timers don't fire reliably while
+  // backgrounded — coming back to the app should mark you present immediately,
+  // not up to ten minutes later.
   const setPresence = useSetMyPresence();
-  const presenceMarked = useRef(false);
+  const pingPresence = useRef<() => void>(() => {});
+  pingPresence.current = () => {
+    if (supabaseConfigured) setPresence.mutate(true);
+  };
+
   useEffect(() => {
-    if (ready && supabaseConfigured && !presenceMarked.current) {
-      presenceMarked.current = true;
-      setPresence.mutate(true);
-    }
+    if (!ready || !supabaseConfigured) return;
+    pingPresence.current();
+    const id = setInterval(() => pingPresence.current(), 10 * 60 * 1000);
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') pingPresence.current();
+    });
+    return () => {
+      clearInterval(id);
+      sub.remove();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
