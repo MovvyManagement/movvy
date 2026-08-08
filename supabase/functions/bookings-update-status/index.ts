@@ -218,13 +218,22 @@ handle(async (req) => {
     if (milestone && data.customer_id) {
       try {
         const admin = adminClient();
-        await admin.from('notifications').insert({
+        // `channel` is NOT NULL with no default, and the fan-out trigger keys
+        // off it — omit it and the row never lands, so neither the in-app
+        // notification nor the push ever happens.
+        const { error: notifWriteErr } = await admin.from('notifications').insert({
           profile_id: data.customer_id,
+          channel: 'in_app',
           category: `booking.${new_status}`,
           title: milestone.title,
           body: milestone.body,
           data: { booking_id, short_code: data.short_code, new_status },
         });
+        // supabase-js RETURNS errors rather than throwing, so the surrounding
+        // try/catch never saw this. Log it explicitly.
+        if (notifWriteErr) {
+          console.error('[bookings-update-status] milestone notification insert failed', notifWriteErr);
+        }
       } catch (notifErr) {
         console.warn('[bookings-update-status] milestone notification failed (non-fatal)', notifErr);
       }

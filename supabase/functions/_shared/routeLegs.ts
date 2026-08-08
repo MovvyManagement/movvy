@@ -131,6 +131,10 @@ export async function measureRouteLegs(
         p_service: 'google_routes',
         p_endpoint: 'computeRoutes',
         p_profile_id: profileId ?? null,
+        // p_ip has NO default in the signature (0008) — leave it out and
+        // PostgREST matches no candidate, so the spend never reaches
+        // api_spend_log and api_budget_check can't see it.
+        p_ip: null,
         p_cost_usd: COST_GOOGLE_ROUTES,
         p_cache_hit: false,
         p_metadata: { caller: 'bookings-create' },
