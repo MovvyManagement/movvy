@@ -34,8 +34,11 @@ import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { PhoneInput, isPhoneComplete, toE164 } from '@/components/PhoneInput';
 import {
+  accountSides,
+  myPartnerSurface,
   sendPasswordResetCode,
   setNewPassword,
+  logout,
   supabaseConfigured,
   verifyPasswordResetCode,
 } from '@/lib/supabase';
@@ -138,11 +141,38 @@ export default function ForgotPassword() {
         setError(res.error ?? "Couldn't save that password.");
         return;
       }
+      // ─── The reset must not be a way around the door check ────────────────
+      // Verifying the code creates a real session, so without this a
+      // partner-only account could reset its password on the customer screen
+      // and walk straight into the customer app — and a customer-only account
+      // could do the reverse with ?side=partner and get pushed into partner
+      // onboarding. login() and loginPartner() both gate on registered sides;
+      // this path was the one hole in that.
+      const sides = await accountSides();
+      const allowed = isPartner ? sides.partner : sides.customer;
+      if (!allowed) {
+        await logout();
+        setError(
+          isPartner
+            ? "Password updated — but this login isn't registered as a partner. Tap 'Create your account' on the partner sign-in to register, then sign in."
+            : "Password updated — but this login isn't registered as a customer. Create a customer account to book a move; you can reuse this email.",
+        );
+        return;
+      }
+
       haptic.success();
-      // Verifying the code already signed them in, so there's nothing left to
-      // do but land them where they belong.
+      // Land them on the surface they're actually registered for. Crew must not
+      // be dropped on the admin dashboard — that's where pricing and dispatch
+      // live, and partner-signin is careful to route crew to (mover).
+      if (!isPartner) {
+        router.replace('/(customer)/(tabs)/home');
+        return;
+      }
+      const membership = await myPartnerSurface();
       router.replace(
-        isPartner ? '/(company)/(tabs)/dashboard' : '/(customer)/(tabs)/home',
+        membership === 'admin'
+          ? '/(company)/(tabs)/dashboard'
+          : '/(mover)/(tabs)/dashboard',
       );
     } catch (e: any) {
       setError(e?.message ?? "Couldn't save that password.");

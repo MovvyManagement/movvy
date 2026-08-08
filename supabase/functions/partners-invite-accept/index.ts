@@ -129,6 +129,26 @@ handle(async (req) => {
       .maybeSingle();
 
     if (existingProfile?.id) {
+      // ─── Prove you own this account before we bind anything to it ─────────
+      // Reusing an existing profile on the strength of a submitted email/phone
+      // alone means anyone holding a crew code — which crews are told to
+      // broadcast — plus someone's email could put that person on their roster,
+      // stamp partner_registered_at on their identity (defeating the
+      // customer/partner separation in 0086), and expose their name, email and
+      // phone to the org owner via pending_join_requests.
+      //
+      // The password submitted with the join is what we check it against. The
+      // sibling endpoint partners-invite-respond does the equivalent by
+      // matching the invite's contact to the CALLER's own profile.
+      const { data: signedIn, error: pwErr } = await admin.auth.signInWithPassword(
+        email ? { email, password } : { phone: phone!, password },
+      );
+      if (pwErr || signedIn?.user?.id !== existingProfile.id) {
+        throw httpError(
+          403,
+          'That email or phone already has a Movvy account. Enter its password to join with it, or sign in and use the crew code from your profile.',
+        );
+      }
       userId = existingProfile.id;
     } else {
       const { data: created, error: cErr } = await admin.auth.admin.createUser({

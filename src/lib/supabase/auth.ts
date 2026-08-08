@@ -80,6 +80,30 @@ export async function accountSides(): Promise<AccountSides> {
   };
 }
 
+/**
+ * Which partner surface this account belongs on: the admin dashboard or the
+ * crew surface. Mirrors how loginPartner routes — a joined crew wins over your
+ * own org, and only an org ADMIN gets the surface with pricing and dispatch on
+ * it. Returns null when there's no membership yet.
+ */
+export async function myPartnerSurface(): Promise<'admin' | 'crew' | null> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data } = await supabase
+    .from('company_members')
+    .select('org_role')
+    .eq('profile_id', user.id)
+    .eq('status', 'active')
+    .is('removed_at', null);
+  const rows = data ?? [];
+  if (rows.length === 0) return null;
+  // A joined crew membership is the context they're working in.
+  if (rows.some((r: any) => r.org_role === 'crew')) return 'crew';
+  return rows.some((r: any) => r.org_role === 'admin') ? 'admin' : 'crew';
+}
+
 /** Adds the given side to the identity that is currently signed in. */
 export async function registerAccountSide(side: 'customer' | 'partner'): Promise<boolean> {
   const { error } = await supabase.rpc('register_account_side', { p_side: side });

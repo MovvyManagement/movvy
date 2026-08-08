@@ -93,10 +93,27 @@ export async function startLiveLocation(bookingId: string): Promise<boolean> {
       () => false,
     );
     if (!already) {
+      // CADENCE MATTERS TO THE INVOICE, not just the map. On a long haul the
+      // customer's transit charge is measured from this GPS trace
+      // (measured_transit_km, migration 0090), clamped to 80–110% of the quote.
+      //
+      // 25 m was roughly one ping PER SECOND at highway speed, against a limit
+      // of 720 pings/hour on tracking-ping. The bucket emptied a few minutes
+      // into the drive, every later ping got a 429 that the task swallowed, and
+      // the trace arrived with hour-long holes — so the measurement landed on
+      // the 0.8× floor of the clamp and the crew lost ~20% of transit revenue on
+      // every long haul.
+      //
+      // 500 m + a 20s floor is ~1 ping every 20-40s on the highway (≈110/hour,
+      // comfortably inside the budget) and still smooth enough for the map,
+      // which interpolates between pings anyway. deferredUpdatesInterval is
+      // iOS-only and not honoured at Balanced accuracy, so timeInterval is what
+      // actually paces this on both platforms.
       await Location.startLocationUpdatesAsync(LIVE_LOCATION_TASK, {
         accuracy: Location.Accuracy.Balanced,
-        distanceInterval: 25, // metres between updates
-        deferredUpdatesInterval: 10_000, // ~10s cadence, matches the old heartbeat
+        distanceInterval: 500,
+        timeInterval: 20_000,
+        deferredUpdatesInterval: 20_000,
         pausesUpdatesAutomatically: false,
         showsBackgroundLocationIndicator: true,
         activityType: Location.ActivityType.AutomotiveNavigation,

@@ -122,7 +122,11 @@ export function useDriverNavigation({ bookingId, target, enabled = true }: Args)
                 booking_id: bookingId,
                 lat: coord.lat,
                 lng: coord.lng,
-                heading: heading ?? undefined,
+                // iOS reports -1 when it has no compass fix (stationary, or a
+                // bad magnetometer). tracking-ping validates heading >= 0, so
+                // sending -1 400s the WHOLE ping and the customer's pin freezes
+                // — lat/lng included. bgTracking already guards this way.
+                heading: heading != null && heading >= 0 ? heading : undefined,
                 speed_kph: speedKph ?? undefined,
               });
             }
