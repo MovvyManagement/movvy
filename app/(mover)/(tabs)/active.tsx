@@ -251,6 +251,12 @@ export default function MoverActive() {
     lastStatusRef.current = liveJob?.status ?? null;
   }, [liveJob?.status, isPassengerMover]);
 
+  // NOTE for future readers: this looks like an ungated mock fallback, and an
+  // audit flagged it as one. It isn't reachable in production — the early return
+  // at "No active move" below catches `supabaseConfigured && !liveJob` before
+  // anything renders, so mockBookings[0] can only surface when Supabase keys are
+  // absent entirely (local dev). Keeping the `!liveJob` term is also what
+  // narrows liveJob for the branch beneath it.
   const usingMock = !supabaseConfigured || !liveJob;
   const booking = usingMock
     ? mockBookings[0]

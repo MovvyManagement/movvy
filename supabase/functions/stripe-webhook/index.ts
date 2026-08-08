@@ -192,6 +192,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
             }
           } else {
             const depositApplied = Number(obj.metadata?.deposit_applied_cents ?? 0) || 0;
+            // The tip is recorded on the BOOKING here, not only on the payment
+            // row. This is the single point where a collected tip becomes the
+            // crew's money: bookings.tip_cents is what the
+            // bookings_bump_payout_on_tip trigger watches, and what the crew's
+            // withdrawable balance counts.
+            //
+            // It used to be written only to payments.tip_cents, with the booking
+            // left to a fire-and-forget client call whose error was swallowed —
+            // so a customer could be charged a tip that never reached anyone if
+            // the app was closed at the wrong moment. Stripe retries this
+            // webhook; the client cannot be retried.
+            //
+            // 100% of a tip is the crew's, so tip_driver_cents === tip_cents and
+            // Movvy's cut is zero.
             await admin.from('bookings').update({
               payment_status: 'captured',
               // Total collected for the move = this charge + the deposit that
@@ -199,7 +213,57 @@ Deno.serve(async (req: Request): Promise<Response> => {
               amount_paid_cents: amount - tipCents + depositApplied,
               paid_at: new Date().toISOString(),
               stripe_payment_intent_id: obj.id,
+              ...(tipCents > 0
+                ? {
+                    tip_cents: tipCents,
+                    tip_driver_cents: tipCents,
+                    tip_movvy_cut_cents: 0,
+                  }
+                : {}),
             }).eq('id', bookingId);
+
+            // Tell the crew what they were tipped. Movvy pays tips out by hand,
+            // so this notification plus the running total on Earnings is how a
+            // crew knows there's something to request.
+            if (tipCents > 0) {
+              try {
+                const { data: bk } = await admin
+                  .from('bookings')
+                  .select('short_code, assigned_driver_profile_id, assigned_company_id')
+                  .eq('id', bookingId)
+                  .maybeSingle();
+                const recipients = new Set<string>();
+                if (bk?.assigned_driver_profile_id) recipients.add(bk.assigned_driver_profile_id);
+                if (bk?.assigned_company_id) {
+                  const { data: admins } = await admin
+                    .from('company_members')
+                    .select('profile_id')
+                    .eq('company_id', bk.assigned_company_id)
+                    .eq('org_role', 'admin')
+                    .eq('status', 'active')
+                    .is('removed_at', null);
+                  for (const a of admins ?? []) recipients.add(a.profile_id);
+                }
+                if (recipients.size > 0) {
+                  const dollars = (tipCents / 100).toFixed(2);
+                  const { error: tipNotifErr } = await admin.from('notifications').insert(
+                    [...recipients].map((pid) => ({
+                      profile_id: pid,
+                      channel: 'in_app',
+                      category: 'tip.received',
+                      title: `You were tipped $${dollars} 🎉`,
+                      body: `Your customer added a $${dollars} tip on #${bk?.short_code ?? ''}. It's yours in full — request it from Earnings.`,
+                      data: { booking_id: bookingId, tip_cents: tipCents },
+                    })),
+                  );
+                  if (tipNotifErr) {
+                    console.error('[stripe-webhook] tip notification failed', tipNotifErr);
+                  }
+                }
+              } catch (e) {
+                console.warn('[stripe-webhook] tip notification setup failed (non-fatal)', e);
+              }
+            }
           }
         }
         await upsertPayment({

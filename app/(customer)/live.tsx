@@ -331,7 +331,7 @@ export default function LiveMove() {
             <View className="flex-row items-center gap-2">
               {/* Customer-service shortcut — opens the support chat directly.
                   Replaces the SOS button per design: SOS still lives at
-                  /(customer)/support/sos for emergencies, but the more common
+                  the more common
                   in-flight need is "I want to talk to Movvy" which is now
                   one tap from the live-move header. */}
               {!isCompleted ? (

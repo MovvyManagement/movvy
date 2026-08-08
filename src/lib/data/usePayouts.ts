@@ -31,6 +31,8 @@ export interface PayoutSummary {
   clearing_cents: number;
   /** When the oldest held move clears. */
   next_available_at: string | null;
+  /** Tips inside available_cents — called out so a crew sees them. */
+  tips_cents: number;
   penalties_cents: number;
   lifetime_paid_cents: number;
   open_request: OpenPayoutRequest | null;
@@ -43,6 +45,7 @@ const EMPTY: PayoutSummary = {
   available_cents: 0,
   clearing_cents: 0,
   next_available_at: null,
+  tips_cents: 0,
   penalties_cents: 0,
   lifetime_paid_cents: 0,
   open_request: null,

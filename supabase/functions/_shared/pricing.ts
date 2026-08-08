@@ -103,7 +103,11 @@ const FUEL_BASE_CENTS          = 5000;   // $50 covers everything up to 60 min
 const FUEL_PER_HALF_HOUR_CENTS = 2500;   // $25 per additional half-hour
 const FUEL_BASE_MINUTES        = 60;     // first hour included in the base
 
-const TIP_MOVVY_CUT            = 0.10;
+// Movvy takes NOTHING from a tip. Four customer-facing surfaces plus the Terms
+// of Service all say "100% of the tip goes to your crew" — this is what makes
+// that true, rather than the copy being a 10% misstatement on the contractual
+// surface.
+const TIP_MOVVY_CUT            = 0;
 
 // ── Service cities ─────────────────────────────────────────────────────────
 // MUST match src/lib/distance.ts MAJOR_CITIES exactly. This engine used to know

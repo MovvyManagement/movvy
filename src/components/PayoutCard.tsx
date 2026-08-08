@@ -116,6 +116,12 @@ export function PayoutCard() {
           </Text>
         ) : null}
 
+        {s.tips_cents > 0 ? (
+          <Text className="mt-1 text-xs text-brand-700">
+            includes {fmtCurrency(s.tips_cents / 100)} in tips — yours in full
+          </Text>
+        ) : null}
+
         {s.penalties_cents > 0 ? (
           <Text className="mt-1 text-xs text-danger">
             −{fmtCurrency(s.penalties_cents / 100)} in late-release charges deducted

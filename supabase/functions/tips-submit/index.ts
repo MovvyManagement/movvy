@@ -59,6 +59,34 @@ handle(async (req) => {
       }
     }
 
+    // ─── Never credit a tip that wasn't collected ─────────────────────────
+    // This endpoint only RECORDS a tip; it takes no payment. The
+    // bookings_bump_payout_on_tip trigger then adds it to driver_payouts, so
+    // recording a tip with no charge behind it means Movvy owes a crew money it
+    // never received — and lowering a tip clawed money back out of an already
+    // queued payout.
+    //
+    // Tips are collected at checkout (stripe-create-payment-intent puts the tip
+    // in the PI, and the webhook writes it to the booking). So the only tip this
+    // may record is one Stripe has actually captured.
+    const { data: paid } = await admin
+      .from('payments')
+      .select('tip_cents')
+      .eq('booking_id', booking_id)
+      .eq('status', 'succeeded');
+    const collectedTip = (paid ?? []).reduce(
+      (sum: number, r: any) => sum + (r.tip_cents ?? 0),
+      0,
+    );
+    if (amount_cents > collectedTip) {
+      throw httpError(
+        409,
+        collectedTip > 0
+          ? `Only $${(collectedTip / 100).toFixed(2)} of tip has been collected for this move.`
+          : 'Add your tip at checkout — we can only record a tip that has been paid.',
+      );
+    }
+
     const split = splitTip(amount_cents);
 
     // Update bookings — trigger `bookings_bump_payout_on_tip` updates driver_payouts atomically

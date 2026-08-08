@@ -67,6 +67,21 @@ export default function ConfirmStep() {
   };
   const [promoInput, setPromoInput] = useState(draft.promoCode ?? '');
   const [promoDiscountCents, setPromoDiscountCents] = useState<number | null>(null);
+
+  // ── The discounted figures, derived once ─────────────────────────────────
+  // The server already recomputes the total AND the deposit after a promo
+  // (bookings-create), but this screen was rendering price.totalCents raw — so
+  // the button promised a deposit on the undiscounted total and the card was
+  // charged less. Every total/deposit below reads these instead.
+  //
+  // A promo comes off the MOVE TOTAL, which is what the deposit is a percentage
+  // of, so the discount flows through to the deposit too.
+  // Rounded exactly the way bookings-create does it — ceil to whole dollars on
+  // both the total and the deposit — so the number on this button is the number
+  // Stripe charges, to the cent.
+  const discountCents = Math.max(0, Math.min(promoDiscountCents ?? 0, price.totalCents));
+  const payableTotalCents = Math.ceil(Math.max(0, price.totalCents - discountCents) / 100) * 100;
+  const depositDueCents = Math.ceil((payableTotalCents * DEPOSIT_RATE) / 100) * 100;
   const [promoError, setPromoError] = useState<string | null>(null);
   const validatePromo = useValidatePromo();
 
@@ -473,7 +488,7 @@ export default function ConfirmStep() {
           <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500 mb-2">
             Promo code
           </Text>
-          {promoDiscountCents != null && promoDiscountCents >= 0 ? (
+          {discountCents > 0 ? (
             <View className="flex-row items-center justify-between rounded-2xl bg-brand-50 border border-brand-100 px-3 py-2.5">
               <View className="flex-row items-center flex-1">
                 <Ionicons name="pricetag" size={16} color="#047857" />
@@ -481,7 +496,7 @@ export default function ConfirmStep() {
                   {promoInput || draft.promoCode || 'Applied'}
                 </Text>
                 <Text className="ml-2 text-xs text-brand-700">
-                  -{fmtCurrency(promoDiscountCents / 100)} off
+                  -{fmtCurrency(discountCents / 100)} off
                 </Text>
               </View>
               <Pressable onPress={clearPromo} hitSlop={8}>
@@ -583,7 +598,7 @@ export default function ConfirmStep() {
           <View className="h-px bg-silver-200 my-2" />
           <PriceLine
             label="Estimate"
-            value={fmtCurrency(price.totalCents / 100)}
+            value={fmtCurrency(payableTotalCents / 100)}
             bold
           />
           {/* Actual-time billing callout — this is the ESTIMATE, not the
@@ -636,11 +651,11 @@ export default function ConfirmStep() {
             Estimated total
           </Text>
           <Text className="text-[11px] text-silver-500">
-            {fmtCurrency(Math.round(price.totalCents * DEPOSIT_RATE) / 100)} deposit due now
+            {fmtCurrency(depositDueCents / 100)} deposit due now
           </Text>
         </View>
         <Text className="text-3xl font-bold text-ink-900 mt-0.5">
-          {fmtCurrency(price.totalCents / 100)}
+          {fmtCurrency(payableTotalCents / 100)}
         </Text>
         <Text className="text-[11px] text-silver-500 mt-0.5">
           20% deposit today, credited to your final bill. The rest is billed
@@ -653,7 +668,7 @@ export default function ConfirmStep() {
             label={
               isPaying
                 ? 'Processing…'
-                : `Pay ${fmtCurrency(Math.round(price.totalCents * DEPOSIT_RATE) / 100)} deposit`
+                : `Pay ${fmtCurrency(depositDueCents / 100)} deposit`
             }
             size="lg"
             fullWidth

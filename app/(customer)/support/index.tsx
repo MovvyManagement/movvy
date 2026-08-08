@@ -54,21 +54,6 @@ export default function SupportHub() {
 
   const tiles: Tile[] = [
     {
-      icon: 'warning',
-      title: 'Trigger SOS',
-      body: active
-        ? `Alert support + dispatch instantly for booking #${active.short_code}.`
-        : 'Only available when a move is in progress.',
-      tone: 'sos',
-      onPress: () => {
-        if (!active) {
-          toast.info('SOS is only available during an in-flight move.');
-          return;
-        }
-        router.push('/(customer)/support/sos');
-      },
-    },
-    {
       icon: 'shield-checkmark',
       title: 'File an insurance claim',
       body: 'Up to $5,000 coverage on every completed move — submit with photos.',

@@ -341,7 +341,7 @@ export default function CustomerHome() {
                     When’s the big day?
                   </Text>
                   <Text className="mt-1 mb-3 text-sm text-silver-500">
-                    Pick a date — you’ll choose an arrival window next.
+                    Pick a date — your crew arrives between 9:00 and 11:00 AM.
                   </Text>
                   <DateScroller value={selectedDate} onChange={setSelectedDate} />
                 </View>

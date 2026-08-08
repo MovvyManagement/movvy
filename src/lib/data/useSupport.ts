@@ -2,7 +2,6 @@
 // Customer support hooks
 //
 // One module for every entry point on the Help & Support hub:
-//   • useSos               — fires the support-sos edge fn
 //   • useEnsureSupportThread — opens the customer↔admin chat thread
 //   • useSubmitInsuranceClaim — files a claim via disputes-open (kind=insurance_claim)
 //   • useSubmitDispute     — generic dispute (damage / theft / etc.)
@@ -32,21 +31,6 @@ export interface SosResult {
   support_thread_id: string | null;
 }
 
-export function useSos() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: SosArgs): Promise<SosResult> => {
-      const { data, error } = await supabase.functions.invoke('support-sos', { body: args });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      return data as SosResult;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['my-disputes'] });
-      qc.invalidateQueries({ queryKey: ['chat', 'threads'] });
-    },
-  });
-}
 
 // ─── Support thread bootstrap ──────────────────────────────────────────────
 
