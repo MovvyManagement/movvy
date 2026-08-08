@@ -105,8 +105,30 @@ const FUEL_BASE_MINUTES        = 60;     // first hour included in the base
 
 const TIP_MOVVY_CUT            = 0.10;
 
-const CALGARY  = { n: 51.2125, s: 50.8425, e: -113.8585, w: -114.2710, c: { lat: 51.0447, lng: -114.0719 } };
-const EDMONTON = { n: 53.7099, s: 53.3955, e: -113.2902, w: -113.7106, c: { lat: 53.5461, lng: -113.4938 } };
+// ── Service cities ─────────────────────────────────────────────────────────
+// MUST match src/lib/distance.ts MAJOR_CITIES exactly. This engine used to know
+// only Calgary and Edmonton while the app knew ten, so the two disagreed about
+// which HQ a move starts from — and the HQ→pickup leg is billed time AND feeds
+// the fuel calculation. A local 1-bed move quoted $1,300 in the app was charged
+// $1,864 in Lethbridge and $2,691 in Grande Prairie, with the deposit taken on
+// the server's number. Anything added here has to be added there too.
+interface CityBox {
+  n: number; s: number; e: number; w: number;
+  slug: string; rank: number;
+  c: { lat: number; lng: number };
+}
+const SERVICE_CITIES: CityBox[] = [
+  { slug: 'calgary',        rank: 10, n: 51.2125, s: 50.8425, e: -113.8585, w: -114.2710, c: { lat: 51.0447, lng: -114.0719 } },
+  { slug: 'edmonton',       rank: 9,  n: 53.7099, s: 53.3955, e: -113.2902, w: -113.7106, c: { lat: 53.5461, lng: -113.4938 } },
+  { slug: 'red-deer',       rank: 5,  n: 52.3300, s: 52.2100, e: -113.7400, w: -113.8800, c: { lat: 52.2681, lng: -113.8112 } },
+  { slug: 'lethbridge',     rank: 5,  n: 49.7400, s: 49.6600, e: -112.7400, w: -112.9200, c: { lat: 49.6956, lng: -112.8451 } },
+  { slug: 'medicine-hat',   rank: 4,  n: 50.0900, s: 50.0000, e: -110.6100, w: -110.7400, c: { lat: 50.0405, lng: -110.6764 } },
+  { slug: 'grande-prairie', rank: 4,  n: 55.2100, s: 55.1300, e: -118.7400, w: -118.8600, c: { lat: 55.1707, lng: -118.7947 } },
+  { slug: 'fort-mcmurray',  rank: 4,  n: 56.7800, s: 56.6800, e: -111.3000, w: -111.4600, c: { lat: 56.7264, lng: -111.3803 } },
+  { slug: 'airdrie',        rank: 2,  n: 51.3500, s: 51.2700, e: -113.9700, w: -114.0700, c: { lat: 51.2917, lng: -114.0144 } },
+  { slug: 'st-albert',      rank: 2,  n: 53.6700, s: 53.6000, e: -113.5800, w: -113.6900, c: { lat: 53.6305, lng: -113.6256 } },
+  { slug: 'okotoks',        rank: 2,  n: 50.7500, s: 50.6900, e: -113.9300, w: -113.9900, c: { lat: 50.7236, lng: -113.9750 } },
+];
 
 function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371;
@@ -118,13 +140,27 @@ function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: num
 }
 const roadKm = (a: any, b: any) => haversineKm(a, b) * 1.30;
 
-function cityForCoord(c: { lat: number; lng: number }): 'calgary' | 'edmonton' | null {
-  if (c.lat >= CALGARY.s && c.lat <= CALGARY.n && c.lng >= CALGARY.w && c.lng <= CALGARY.e) return 'calgary';
-  if (c.lat >= EDMONTON.s && c.lat <= EDMONTON.n && c.lng >= EDMONTON.w && c.lng <= EDMONTON.e) return 'edmonton';
+function cityForCoord(c: { lat: number; lng: number }): string | null {
+  for (const city of SERVICE_CITIES) {
+    if (c.lat >= city.s && c.lat <= city.n && c.lng >= city.w && c.lng <= city.e) return city.slug;
+  }
   return null;
 }
+
+// Same rank-weighted nearest as closestMajorCity() in src/lib/distance.ts: the
+// half-km-per-rank nudge keeps a commuter suburb from outranking the metro it
+// orbits when a pickup sits between them.
 export function closestMajor(c: { lat: number; lng: number }) {
-  return haversineKm(c, CALGARY.c) <= haversineKm(c, EDMONTON.c) ? CALGARY.c : EDMONTON.c;
+  let best = SERVICE_CITIES[0];
+  let bestScore = Infinity;
+  for (const city of SERVICE_CITIES) {
+    const adjusted = haversineKm(c, city.c) - city.rank * 0.5;
+    if (adjusted < bestScore) {
+      bestScore = adjusted;
+      best = city;
+    }
+  }
+  return best.c;
 }
 
 // ─── Rate-card lookups ───────────────────────────────────────────────────────
