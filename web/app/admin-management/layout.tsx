@@ -67,7 +67,7 @@ export default async function AdminLayout({
   const isManagement = access === 'management';
 
   // Fetch live counts for sidebar badges
-  const [pendingApprovals, openSupport, openDisputes] = await Promise.all([
+  const [pendingApprovals, openSupport, openDisputes, pendingPayouts] = await Promise.all([
     supabase
       .from('partner_teams')
       .select('id', { count: 'exact', head: true })
@@ -90,6 +90,12 @@ export default async function AdminLayout({
       .select('id', { count: 'exact', head: true })
       .in('status', ['open', 'in_review'])
       .then((r) => r.count ?? 0),
+    // Crews waiting on money — the one badge that costs goodwill to ignore.
+    supabase
+      .from('payout_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .then((r) => r.count ?? 0),
   ]);
 
   // Flat link list for the mobile drawer (same gating as the sidebar).
@@ -97,6 +103,7 @@ export default async function AdminLayout({
     { href: '/admin-management/dashboard', label: 'Dashboard' },
     { href: '/admin-management/moves', label: 'Moves' },
     { href: '/admin-management/approvals', label: 'Approvals', badge: pendingApprovals || undefined },
+    { href: '/admin-management/payouts', label: 'Payouts', badge: pendingPayouts || undefined },
     { href: '/admin-management/users', label: 'Users' },
     { href: '/admin-management/support', label: 'Support', badge: openSupport || undefined },
     { href: '/admin-management/disputes', label: 'Disputes', badge: openDisputes || undefined },
@@ -169,6 +176,12 @@ export default async function AdminLayout({
           {isManagement ? (
             <NavSection label="Management">
               <NavLink href="/admin-management/revenue" label="Revenue" icon="revenue" />
+              <NavLink
+                href="/admin-management/payouts"
+                label="Payouts"
+                icon="revenue"
+                badge={pendingPayouts || undefined}
+              />
               <NavLink href="/admin-management/payments" label="Payments" icon="revenue" />
               <NavLink href="/admin-management/team" label="Team" icon="team" />
               <NavLink href="/admin-management/settings" label="Settings" icon="settings" />

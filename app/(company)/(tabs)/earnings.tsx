@@ -8,6 +8,7 @@ import { fmtCurrency, fmtDateShort } from '@/lib/format';
 import { useMyMembership, useCompanyEarningsSummary, useReleasePenalties } from '@/lib/data';
 import { EarningsExportSheet } from '@/components/EarningsExportSheet';
 import { NotificationBell } from '@/components/NotificationBell';
+import { PayoutCard } from '@/components/PayoutCard';
 import { Skeleton } from '@/components/Skeleton';
 
 // =============================================================================
@@ -63,6 +64,9 @@ export default function CompanyEarnings() {
         />
       </View>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+        {/* What's withdrawable, and the request button. Renders nothing for crew
+            — they're paid a wage by their admin, not per move. */}
+        <PayoutCard />
         <View className="rounded-3xl bg-ink-900 p-6">
           <Text className="text-white/70 text-xs uppercase font-semibold tracking-wider">
             This month
