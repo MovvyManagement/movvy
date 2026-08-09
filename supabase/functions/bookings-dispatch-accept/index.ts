@@ -49,11 +49,16 @@ handle(async (req) => {
 
     const admin = adminClient();
 
-    // Verify the caller is an ACTIVE member of this org. Merged model: ANY
-    // member — admin OR crew — can claim a job for the org (the job then
-    // awaits a performer being assigned). status='active' excludes
-    // pending_approval / rejected self-joins. Only ASSIGNING a performer
-    // (bookings-dispatch-assign) stays admin-gated.
+    // Verify the caller is an ACTIVE ADMIN of this org. Only admins take work;
+    // they then assign a performer with bookings-dispatch-assign, and that
+    // assignment is the only route by which a job reaches a crew member.
+    //
+    // This used to allow any active member, admin or crew. It never actually
+    // worked for crew — bookings-accept:69 has always thrown 403 for
+    // role='driver', which is what join_crew_by_code inserts — so a crew member
+    // could see jobs, tap accept, and be refused. Refusing here, with a
+    // sentence that tells them what to do instead, is the honest version.
+    // status='active' excludes pending_approval / rejected self-joins.
     const { data: membership } = await admin
       .from('company_members')
       .select('org_role')
@@ -63,6 +68,12 @@ handle(async (req) => {
       .is('removed_at', null)
       .maybeSingle();
     if (!membership) throw httpError(403, 'You are not a member of this org');
+    if (membership.org_role !== 'admin') {
+      throw httpError(
+        403,
+        'Only your crew admin can take a job. Once they do, they can assign it to you and it appears in My Jobs.',
+      );
+    }
 
     // Capacity gate. Enforced HERE, not just in the UI — otherwise a crew with
     // a 16 ft van could still claim a 4-bedroom house through a stale screen or

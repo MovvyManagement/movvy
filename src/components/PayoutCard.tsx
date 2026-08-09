@@ -32,8 +32,27 @@ export function PayoutCard() {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
 
-  // Crew don't see money. Neither does anyone without an org yet.
-  if (isLoading || !s || !s.company_id || !s.is_org_admin) return null;
+  // Nothing to show while loading, or for someone with no org at all.
+  if (isLoading || !s || !s.company_id) return null;
+
+  // A crew member doesn't see the balance — payouts belong to the org and
+  // settle to the admin's banking details. Say that plainly rather than
+  // rendering nothing: a crew member who opens their profile and finds no
+  // mention of pay assumes the app is broken, and asks their admin, who asks
+  // us. One sentence removes the whole support thread.
+  if (!s.can_view) {
+    return (
+      <View className="rounded-3xl bg-white dark:bg-night-100 p-5 border border-silver-100">
+        <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500">
+          Payouts
+        </Text>
+        <Text className="mt-2 text-sm text-silver-600 leading-5">
+          Your crew admin handles payouts for the whole crew — earnings and tips
+          are paid out to them, and they settle up with you.
+        </Text>
+      </View>
+    );
+  }
 
   const open = s.open_request;
 
@@ -109,10 +128,13 @@ export function PayoutCard() {
           {fmtCurrency(s.available_cents / 100)}
         </Text>
 
-        {s.clearing_cents > 0 ? (
+        {/* The 7-day window is informational now, not a lock — everything
+            earned and collected is withdrawable today, so this says "included
+            above" rather than implying part of the balance is unavailable. */}
+        {s.in_hold_cents > 0 ? (
           <Text className="mt-1 text-xs text-silver-500 leading-5">
-            {fmtCurrency(s.clearing_cents / 100)} clearing
-            {s.next_available_at ? ` · available ${fmtDateShort(s.next_available_at)}` : ''}
+            includes {fmtCurrency(s.in_hold_cents / 100)} from moves in the last{' '}
+            {s.hold_days} days — withdrawable now
           </Text>
         ) : null}
 

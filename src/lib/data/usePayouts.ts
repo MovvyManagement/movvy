@@ -24,12 +24,18 @@ export interface OpenPayoutRequest {
 export interface PayoutSummary {
   company_id: string | null;
   is_org_admin: boolean;
+  /** False for a crew member: payouts belong to the org and settle to the
+   *  admin's banking details, so a crew member is not shown the balance. */
+  can_view: boolean;
   hold_days: number;
-  /** Withdrawable right now. */
+  /** Withdrawable right now. Since 0103 this INCLUDES money still inside the
+   *  7-day window — earned and collected means requestable. */
   available_cents: number;
-  /** Earned and collected, still inside the hold window. */
+  /** Always 0 since 0103. Kept so an older build can't double-count it. */
   clearing_cents: number;
-  /** When the oldest held move clears. */
+  /** Portion of available_cents still inside the hold window — informational. */
+  in_hold_cents: number;
+  /** When the oldest held move passes the hold window. Informational only. */
   next_available_at: string | null;
   /** Tips inside available_cents — called out so a crew sees them. */
   tips_cents: number;
@@ -41,9 +47,11 @@ export interface PayoutSummary {
 const EMPTY: PayoutSummary = {
   company_id: null,
   is_org_admin: false,
+  can_view: false,
   hold_days: 7,
   available_cents: 0,
   clearing_cents: 0,
+  in_hold_cents: 0,
   next_available_at: null,
   tips_cents: 0,
   penalties_cents: 0,
