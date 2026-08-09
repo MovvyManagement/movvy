@@ -7,7 +7,8 @@
 //      is computed SERVER-SIDE (stripe-create-payment-intent) — we never send
 //      or trust a client amount here.
 //   2. initPaymentSheet with the returned client_secret.
-//   3. presentPaymentSheet — the native Apple/Google-Pay-capable sheet.
+//   3. presentPaymentSheet — card entry only; the wallets are off by design
+//      (see the initPaymentSheet call for why).
 //   4. On success, the stripe-webhook marks the booking paid; we just report
 //      success so the UI can update optimistically.
 //
@@ -50,11 +51,15 @@ export function usePayForMove() {
       const init = await initPaymentSheet({
         merchantDisplayName: 'Movvy',
         paymentIntentClientSecret: clientSecret,
-        // Return URL lets redirect-based methods (some wallets) come back to
-        // the app. Matches the `movvy` scheme registered in app.json.
+        // Return URL lets redirect-based methods come back to the app. Matches
+        // the `movvy` scheme registered in app.json.
         returnURL: 'movvy://stripe-redirect',
-        applePay: { merchantCountryCode: 'CA' },
-        googlePay: { merchantCountryCode: 'CA', currencyCode: 'CAD', testEnv: true },
+        // Card only — no Apple Pay, no Google Pay. Both are deliberately off:
+        // Apple Pay needs a merchant ID and the in-app-payments entitlement on
+        // a paid Apple account, and Google Pay was configured with
+        // `testEnv: true`, which would have sent real production checkouts to
+        // Google's test environment and collected nothing. Rather than ship a
+        // wallet button that silently fails, Movvy takes cards.
       });
       if (init.error) throw new Error(init.error.message);
 

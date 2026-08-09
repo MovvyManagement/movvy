@@ -8,7 +8,17 @@ export type MoveType =
   | 'labor_only';    // no truck — just helpers for loading, junk run, in-home moving
 
 export type HomeDwelling = 'apartment' | 'condo' | 'house' | 'townhouse';
-export type CommercialKind = 'office' | 'retail' | 'warehouse' | 'restaurant';
+// Single items and labour-only jobs are COMMERCIAL kinds, not move types of
+// their own: they're billed on the same hourly commercial rate with the same
+// 4-hour minimum. They previously existed as MoveType values that the booking
+// flow never offered, so they were advertised but unbookable.
+export type CommercialKind =
+  | 'office'
+  | 'retail'
+  | 'warehouse'
+  | 'restaurant'
+  | 'single_items'
+  | 'labor_only';
 
 export type LaborTask = 'loading' | 'unloading' | 'in_home' | 'junk_run' | 'packing' | 'other';
 

@@ -135,8 +135,10 @@ export default function Profile() {
     {
       icon: 'headset-outline',
       label: 'Customer Service',
-      value: 'Chat with a real person',
-      onPress: () => router.push('/(customer)/support/chat'),
+      // The hub, not chat directly — it's the only route into insurance
+      // claims, disputes and the audit-log export.
+      value: 'Chat, claims, disputes',
+      onPress: () => router.push('/(customer)/support'),
     },
     {
       icon: 'document-text-outline',

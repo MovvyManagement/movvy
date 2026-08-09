@@ -30,6 +30,7 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { useToast } from '@/components/Toast';
 import { useSavedAddresses, useSaveAddress, useDeleteSavedAddress } from '@/lib/data';
+import { cityForCoord, closestMajorCity } from '@/lib/distance';
 import { supabase } from '@/lib/supabase';
 import type { GeocodeResult } from '@/lib/geocoding';
 
@@ -60,14 +61,21 @@ export default function SavedAddresses() {
       return;
     }
     try {
-      // Resolve the city from the address (defaults to Calgary if not matched)
+      // Resolve the city from the ADDRESS the customer actually picked. This
+      // used to query the 'calgary' slug unconditionally, so every saved
+      // address in all ten service cities was stored as Calgary — which then
+      // fed the wrong HQ into pricing when the address was reused for a
+      // booking. Exact bounding-box hit first, nearest major city otherwise.
+      const coord = { lat: geo.lat, lng: geo.lng };
+      const slug = cityForCoord(coord) ?? closestMajorCity(coord).slug;
       const { data: city } = await supabase
-        .from('cities').select('id, name, region, country_code').eq('slug', 'calgary').single();
+        .from('cities').select('id, name, region, country_code').eq('slug', slug).single();
+      const fallbackName = closestMajorCity(coord).name;
       await save.mutateAsync({
         label: label.trim() || undefined,
         line1: geo.label,
         city_id: city?.id ?? '',
-        city_name: city?.name ?? 'Calgary',
+        city_name: city?.name ?? fallbackName,
         region: city?.region ?? 'AB',
         country_code: city?.country_code ?? 'CA',
         lat: geo.lat,

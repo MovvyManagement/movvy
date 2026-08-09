@@ -33,7 +33,7 @@ import { useBooking, useModifyBooking } from '@/lib/data';
 import { useToast } from '@/components/Toast';
 import { buildCalendar } from '@/lib/scheduling';
 import { fmtDateShort } from '@/lib/format';
-import type { GeocodeResult } from '@/lib/geocoding';
+import { cityProvinceFromGeocode, type GeocodeResult } from '@/lib/geocoding';
 
 const WINDOWS = ['9:00 AM – 11:00 AM', '11:00 AM – 1:00 PM', '1:00 PM – 3:00 PM', '3:00 PM – 5:00 PM'];
 
@@ -110,21 +110,28 @@ export default function ModifyBooking() {
       if (date !== booking.scheduled_for_date) args.scheduled_for_date = date;
       if (windowLabel !== booking.scheduled_for_window) args.scheduled_for_window = windowLabel;
       if (notes !== ((booking as any).customer_notes ?? '')) args.customer_notes = notes;
+      // City + province come from the geocode result, never a constant. Movvy
+      // runs in ten Alberta cities and every crew has its own HQ, so stamping
+      // 'Calgary' on a Lethbridge address made the server re-quote the move
+      // from the wrong HQ — wrong travel time, and on anything near the 100 km
+      // line, the wrong side of local-vs-long-haul entirely.
       if (pickupGeo) {
+        const { city, province } = cityProvinceFromGeocode(pickupGeo);
         args.pickup = {
           line1: pickupGeo.label,
-          city: 'Calgary',
-          region: 'AB',
+          city,
+          region: province,
           country_code: 'CA',
           lat: pickupGeo.lat,
           lng: pickupGeo.lng,
         };
       }
       if (dropoffGeo) {
+        const { city, province } = cityProvinceFromGeocode(dropoffGeo);
         args.dropoff = {
           line1: dropoffGeo.label,
-          city: 'Calgary',
-          region: 'AB',
+          city,
+          region: province,
           country_code: 'CA',
           lat: dropoffGeo.lat,
           lng: dropoffGeo.lng,

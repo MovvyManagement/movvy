@@ -38,6 +38,18 @@ interface ResidentialPreset {
   crew: number;
   icon: keyof typeof Ionicons.glyphMap;
 }
+// Commercial job kinds. Single items and labour-only live here rather than
+// being their own move types — same hourly commercial rate, same 4-hour
+// minimum. Ordered so the two "smaller job" options read last.
+const COMMERCIAL_KIND_LABELS: Record<CommercialKind, string> = {
+  office: 'Office',
+  retail: 'Retail',
+  warehouse: 'Warehouse',
+  restaurant: 'Restaurant',
+  single_items: 'Single items',
+  labor_only: 'Labour only',
+};
+
 const RESIDENTIAL_PRESETS: ResidentialPreset[] = [
   { key: 'apt-1', dwelling: 'apartment', bedrooms: 1, title: '1-bedroom apartment', hours: 6,  crew: 2, icon: 'business-outline' },
   { key: 'apt-2', dwelling: 'apartment', bedrooms: 2, title: '2-bedroom apartment', hours: 8,  crew: 2, icon: 'business-outline' },
@@ -170,12 +182,12 @@ export default function DetailsStep() {
               Crew size and estimated hours drive your hourly estimate.
             </Text>
 
-            <SectionLabel>Type of space</SectionLabel>
+            <SectionLabel>Type of job</SectionLabel>
             <View className="flex-row flex-wrap gap-2">
-              {(['office', 'retail', 'warehouse', 'restaurant'] as CommercialKind[]).map((d) => (
+              {(Object.keys(COMMERCIAL_KIND_LABELS) as CommercialKind[]).map((d) => (
                 <Chip
                   key={d}
-                  label={d[0].toUpperCase() + d.slice(1)}
+                  label={COMMERCIAL_KIND_LABELS[d]}
                   selected={commercialKind === d}
                   onPress={() => setCommercialKind(d)}
                 />
@@ -204,12 +216,15 @@ export default function DetailsStep() {
                 min={2}
                 max={12}
               />
+              {/* 4 hours, matching MIN_BILLABLE_HOURS in the pricing engine.
+                  This said "2 hour minimum" and let the counter go to 2, so a
+                  customer picked 2 and was quoted — and billed — for 4. */}
               <Counter
                 label="Estimated hours"
-                sub="2 hour minimum"
+                sub="4 hour minimum"
                 value={estimatedHours}
                 onChange={setEstimatedHours}
-                min={2}
+                min={4}
                 max={16}
               />
             </View>

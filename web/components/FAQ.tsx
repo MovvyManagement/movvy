@@ -23,7 +23,7 @@ const faqs = [
   },
   {
     q: "What if I don't need a full move — just one heavy item?",
-    a: 'Pick "Single Items" or "Labor Only" in the app. Same vetted crews, a fraction of the cost. Great for a couch, a fridge, or just an extra set of hands for the day.',
+    a: 'Choose "Commercial & other" in the app, then pick "Single items" or "Labour only". Same vetted crews, billed hourly with a 4-hour minimum. Great for a couch, a fridge, or just an extra set of hands for the day.',
   },
   {
     q: 'Which cities are covered?',

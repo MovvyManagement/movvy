@@ -16,11 +16,14 @@ export function MoveActions({
     crewOptions,
     canCancel,
     isTerminal,
+    canReassign,
 }: {
     bookingId: string;
     crewOptions: CrewOption[];
     canCancel: boolean;
     isTerminal: boolean;
+    /** False once the crew has left HQ — the move is theirs to finish. */
+    canReassign: boolean;
 }) {
     const [reassignState, reassignAction, reassigning] = useActionState<MoveActionState, FormData>(reassignMove, {});
     const [cancelState, cancelAction, cancelling] = useActionState<MoveActionState, FormData>(cancelMove, {});
@@ -38,7 +41,16 @@ export function MoveActions({
 
   return (
         <div className="space-y-4">
-  {/* Reassign */}
+  {/* Reassign — only before the crew leaves HQ */}
+  {!canReassign ? (
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+          <div className="text-sm font-semibold text-zinc-900 mb-1">Reassign crew</div>
+          <p className="text-sm text-zinc-500">
+            This crew has already left HQ, so the move can&apos;t be reassigned. They
+            finish it, or it gets cancelled and rebooked.
+          </p>
+        </div>
+  ) : (
         <form action={reassignAction} className="rounded-2xl border border-zinc-200 bg-white p-4">
           <div className="text-sm font-semibold text-zinc-900 mb-2">Reassign crew</div>
           <input type="hidden" name="booking_id" value={bookingId} />
@@ -54,6 +66,7 @@ export function MoveActions({
 {reassignState.error ? <p className="text-sm text-red-600 mt-2">{reassignState.error}</p> : null}
 {reassignState.ok ? <p className="text-sm text-emerald-700 mt-2">{reassignState.ok}</p> : null}
       </form>
+  )}
 
 {/* Cancel — management only */}
 {canCancel ? (

@@ -89,10 +89,13 @@ export default function RootLayout() {
           <SafeAreaProvider>
             <ToastProvider>
               <AuthProvider>
+                {/* No merchantIdentifier: that prop exists only to enable
+                    Apple Pay, and setting it makes the build ask for the
+                    in-app-payments entitlement. Movvy takes cards — see
+                    usePayForMove. */}
                 <StripeProvider
                   publishableKey={STRIPE_PUBLISHABLE_KEY}
                   urlScheme="movvy"
-                  merchantIdentifier="merchant.com.movvy.app"
                 >
                 <>
                 <PushTokenWatcher />

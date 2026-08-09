@@ -31,9 +31,12 @@ const options: Option[] = [
   },
   {
     key: 'commercial',
-    title: 'Commercial move',
-    body: 'Move a business location.',
-    examples: 'Office, retail, warehouse, or restaurant',
+    // Single items and labour-only jobs are booked here as commercial job
+    // kinds — same hourly rate, same 4-hour minimum — so they're findable
+    // instead of being advertised move types with no way to book them.
+    title: 'Commercial & other',
+    body: 'Business moves, single items, or labour without a truck.',
+    examples: 'Office, retail, warehouse, restaurant, single items, labour only',
     icon: 'business-outline',
     pricing: 'Hourly',
   },

@@ -49,6 +49,10 @@ export default async function MoveDetailPage({ params }: { params: Promise<{ id:
     ...(companies ?? []).map((c: any) => ({ value: `company:${c.id}`, label: `${c.display_name} (company)` })),
   ];
   const isTerminal = TERMINAL.includes(b.status);
+  // Reassignment closes the moment a crew presses "I've left HQ". Mirrors the
+  // guard in admin-reassign-booking — the button shouldn't offer something the
+  // server will refuse.
+  const canReassign = ['draft', 'pending', 'searching', 'assigned', 'confirmed'].includes(b.status);
 
   return (
     <div className="p-6 sm:p-8 max-w-5xl">
@@ -95,7 +99,7 @@ export default async function MoveDetailPage({ params }: { params: Promise<{ id:
       ) : null}
 
       <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 mb-2">Actions</h2>
-      <MoveActions bookingId={b.id} crewOptions={crewOptions} canCancel={isManagement} isTerminal={isTerminal} />
+      <MoveActions bookingId={b.id} crewOptions={crewOptions} canCancel={isManagement} isTerminal={isTerminal} canReassign={canReassign} />
     </div>
   );
 }
