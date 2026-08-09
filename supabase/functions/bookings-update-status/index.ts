@@ -220,7 +220,20 @@ handle(async (req) => {
         });
         const km = Number(measured);
         if (Number.isFinite(km) && km > 0) {
-          const floor = billedTransitKm * 0.8;
+          // A trace that reaches here has already passed the coverage test in
+          // measured_transit_km (0105) — it spans the transit window with no
+          // long gaps. A partial trace returns NULL instead and leaves the
+          // quote standing, which is why the floor can now be tight.
+          //
+          // Floor raised from 0.8 to 0.95: at 0.8 a Calgary → Fort McMurray
+          // measurement that came in low could cut $584 off a $2,920 transit
+          // charge, roughly $490 of it out of the crew's pocket. A chord sum
+          // over a well-covered trace tracks road distance within about 1%, so
+          // 5% is generous slack for genuine measurement error while capping
+          // what a bad reading can move. The 1.1 ceiling stays — a detour, or a
+          // phone that woke mid-route and drew a straight line, must not be
+          // able to inflate someone's bill.
+          const floor = billedTransitKm * 0.95;
           const ceiling = billedTransitKm * 1.1;
           billedTransitKm = Math.round(Math.min(Math.max(km, floor), ceiling) * 10) / 10;
           billedTransitCents = Math.round(billedTransitKm * TRANSIT_CENTS_PER_KM);
