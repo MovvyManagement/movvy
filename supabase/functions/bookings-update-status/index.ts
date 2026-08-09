@@ -38,7 +38,22 @@ const Body = z.object({
     'on_the_way', 'arrived', 'loading', 'in_transit', 'unloading', 'completed', 'cancelled',
   ]),
   reason: z.string().max(200).optional(),
+  // Crews forget to press buttons. If it's 4:30 and they actually left the
+  // pickup at 4:15, they can say so instead of the bill absorbing 15 minutes
+  // in whichever direction. See the validation block below — a backdated stamp
+  // is bounded, monotonic, and never in the future, because "let the crew pick
+  // the time" is otherwise a licence to write their own invoice.
+  occurred_at: z.string().datetime().optional(),
 });
+
+// How far back a correction may reach. A crew fixing a missed tap is minutes
+// or an hour out; twelve hours is longer than any single Movvy move, so this
+// bounds the damage of a fat finger or a malicious entry without getting in a
+// real crew's way.
+const MAX_BACKDATE_HOURS = 12;
+// Tolerate a little clock skew on the device so a phone running 30s fast
+// doesn't get its honest "now" rejected as the future.
+const FUTURE_SKEW_MS = 2 * 60 * 1000;
 
 handle(async (req) => {
   const cors = corsHeaders(req);
@@ -63,7 +78,7 @@ handle(async (req) => {
 
     const parsed = Body.safeParse(await req.json().catch(() => ({})));
     if (!parsed.success) throw httpError(400, parsed.error.issues[0]?.message ?? 'Invalid input');
-    const { booking_id, new_status, reason } = parsed.data;
+    const { booking_id, new_status, reason, occurred_at } = parsed.data;
 
     const supabase = userClient(req.headers.get('Authorization'));
 
@@ -74,15 +89,76 @@ handle(async (req) => {
     // job. 'arrived' / 'loading' / 'in_transit' / 'unloading' are kept
     // as informational status updates that drive customer notifications
     // but do not affect when the meter starts / stops.
+    // ── When did this actually happen? ──────────────────────────────────────
+    // Default is now. A crew may supply occurred_at to correct a tap they
+    // forgot — "it's 4:30, we left the pickup at 4:15". Every downstream
+    // calculation then uses the corrected instant automatically: the billed
+    // hours come from started_at → completed_at, and measured_transit_km sums
+    // GPS pings BETWEEN in_transit_at and unloading_at, so fixing the timestamp
+    // also fixes which part of the location trace is treated as the highway
+    // drive. That's the whole point — the phone already recorded where it was
+    // at 4:15; the only thing missing was the crew saying so.
+    //
+    // Bounded three ways, because otherwise this is a text box that writes the
+    // invoice:
+    //   • never in the future (beyond a little device clock skew)
+    //   • never further back than MAX_BACKDATE_HOURS
+    //   • never before the previous milestone, so the timeline can't invert
+    const nowMs = Date.now();
+    let effectiveMs = nowMs;
+    if (occurred_at) {
+      const t = new Date(occurred_at).getTime();
+      if (!Number.isFinite(t)) throw httpError(400, 'That time could not be read.');
+      if (t > nowMs + FUTURE_SKEW_MS) {
+        throw httpError(400, "That time is in the future — pick when it actually happened.");
+      }
+      if (t < nowMs - MAX_BACKDATE_HOURS * 3600_000) {
+        throw httpError(
+          400,
+          `That time is more than ${MAX_BACKDATE_HOURS} hours ago. Contact Movvy support to correct it.`,
+        );
+      }
+      effectiveMs = t;
+    }
+
+    // Monotonic check against the timestamps already on the booking. A crew
+    // can't say they left the drop-off before they arrived at the pickup —
+    // computeActualBill subtracts one from the other, so an inverted pair
+    // produces negative hours and a nonsense bill.
+    if (occurred_at) {
+      const { data: prior } = await supabase
+        .from('bookings')
+        .select('started_at, in_transit_at, unloading_at')
+        .eq('id', booking_id)
+        .maybeSingle();
+      const earlier = [
+        new_status !== 'on_the_way' ? prior?.started_at : null,
+        new_status === 'unloading' || new_status === 'completed' ? prior?.in_transit_at : null,
+        new_status === 'completed' ? prior?.unloading_at : null,
+      ]
+        .filter(Boolean)
+        .map((s) => new Date(s as string).getTime())
+        .filter((n) => Number.isFinite(n));
+      const floor = earlier.length ? Math.max(...earlier) : null;
+      if (floor != null && effectiveMs < floor) {
+        throw httpError(
+          400,
+          `That time is before an earlier step on this move (${new Date(floor).toISOString()}). Pick a later time.`,
+        );
+      }
+    }
+
+    const effectiveAt = new Date(effectiveMs).toISOString();
+
     const stamp: Record<string, string> = { status: new_status };
-    if (new_status === 'on_the_way') stamp.started_at = new Date().toISOString();
+    if (new_status === 'on_the_way') stamp.started_at = effectiveAt;
     // The transit window — the customer's live meter pauses between these two
     // on a long haul, since that stretch is billed by the kilometre.
-    if (new_status === 'in_transit') stamp.in_transit_at = new Date().toISOString();
-    if (new_status === 'unloading') stamp.unloading_at = new Date().toISOString();
-    if (new_status === 'completed') stamp.completed_at = new Date().toISOString();
+    if (new_status === 'in_transit') stamp.in_transit_at = effectiveAt;
+    if (new_status === 'unloading') stamp.unloading_at = effectiveAt;
+    if (new_status === 'completed') stamp.completed_at = effectiveAt;
     if (new_status === 'cancelled') {
-      stamp.cancelled_at = new Date().toISOString();
+      stamp.cancelled_at = effectiveAt;
       stamp.cancellation_reason = reason ?? 'Cancelled by crew';
     }
 
@@ -197,7 +273,21 @@ handle(async (req) => {
       entityId: booking_id,
       ip: clientIp(req),
       ua: req.headers.get('user-agent') ?? undefined,
-      payload: { new_status, reason, actual_bill: actualBill },
+      payload: {
+        new_status,
+        reason,
+        actual_bill: actualBill,
+        // A corrected time changes the bill, so leave a trail: what they said
+        // happened, when they said it, and how far back the correction reached.
+        ...(occurred_at
+          ? {
+              backdated: true,
+              occurred_at: effectiveAt,
+              recorded_at: new Date(nowMs).toISOString(),
+              backdated_by_minutes: Math.round((nowMs - effectiveMs) / 60000),
+            }
+          : {}),
+      },
     });
 
     // ─── Customer milestone notification ────────────────────────────────────

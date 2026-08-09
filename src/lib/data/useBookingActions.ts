@@ -49,6 +49,10 @@ interface UpdateStatusArgs {
   booking_id: string;
   new_status: Exclude<BookingStatus, 'draft' | 'pending' | 'searching' | 'assigned' | 'confirmed' | 'failed'>;
   reason?: string;
+  /** ISO instant this step actually happened, when the crew is correcting a tap
+   *  they forgot. Omit for "now". The server bounds it: never in the future,
+   *  never more than 12h back, never before an earlier step on the move. */
+  occurred_at?: string;
 }
 
 /** Patch every cached copy of a booking so the crew's UI advances immediately —

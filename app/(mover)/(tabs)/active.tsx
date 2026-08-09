@@ -23,6 +23,7 @@ import { ChatSheet } from '@/components/ChatSheet';
 import { fmtDateShort, fmtTime } from '@/lib/format';
 import { moveSummary, moveWhen, moveExtras } from '@/lib/moveSummary';
 import { BillingTimer } from '@/components/BillingTimer';
+import { BackdateStepSheet } from '@/components/BackdateStepSheet';
 import { useRef, useEffect } from 'react';
 import { openInMaps } from '@/lib/maps';
 import { supabaseConfigured } from '@/lib/supabase';
@@ -160,6 +161,8 @@ export default function MoverActive() {
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [crewRoster, user?.id]);
   const [showSourcePicker, setShowSourcePicker] = useState(false);
+  // "I forgot to tap this on time" — see BackdateStepSheet.
+  const [showBackdate, setShowBackdate] = useState(false);
   const [sourceChoice, setSourceChoice] = useState<string | null>(null);
 
   // Multi-job queue: the rest of the driver's assigned jobs (excluding the
@@ -323,10 +326,16 @@ export default function MoverActive() {
   };
 
   // The actual status transition (after the source picker, if any).
-  const doAdvance = async () => {
+  // `occurredAt` is set only when the crew corrected the time via
+  // BackdateStepSheet; omitting it means "now", which is the normal path.
+  const doAdvance = async (occurredAt?: string) => {
     if (!next || !liveJob) return;
     try {
-      await update.mutateAsync({ booking_id: liveJob.id, new_status: next.toStatus as any });
+      await update.mutateAsync({
+        booking_id: liveJob.id,
+        new_status: next.toStatus as any,
+        ...(occurredAt ? { occurred_at: occurredAt } : {}),
+      });
       // There used to be an unawaited follow-up here pushing `arrived` on to
       // `loading` after 600 ms, because the DB refused arrived → in_transit and
       // this button asks for exactly that. When the follow-up didn't land the
@@ -770,7 +779,21 @@ export default function MoverActive() {
               </Text>
             </View>
           ) : (
-            <Button label={next.label} size="lg" fullWidth loading={update.isPending} onPress={advance} />
+            <>
+              <Button label={next.label} size="lg" fullWidth loading={update.isPending} onPress={advance} />
+              {/* Quiet by design: the common case is tapping on time, so this
+                  is a text link under the button rather than a second CTA
+                  competing with it. */}
+              <Pressable
+                onPress={() => setShowBackdate(true)}
+                disabled={update.isPending}
+                className="mt-3 items-center py-1.5 active:opacity-70"
+              >
+                <Text className="text-xs font-semibold text-brand-700">
+                  Forgot to tap this earlier?
+                </Text>
+              </Pressable>
+            </>
           )
         ) : (
           <View className="rounded-2xl bg-brand-50 border border-brand-100 p-4 items-center">
@@ -859,6 +882,17 @@ export default function MoverActive() {
       />
 
       {/* Whose location does the customer follow? — asked when a 2+ crew starts */}
+      <BackdateStepSheet
+        visible={showBackdate}
+        stepLabel={next?.label ?? 'this step'}
+        busy={update.isPending}
+        onCancel={() => setShowBackdate(false)}
+        onConfirm={async (occurredAt) => {
+          setShowBackdate(false);
+          await doAdvance(occurredAt);
+        }}
+      />
+
       <Modal visible={showSourcePicker} transparent animationType="slide" onRequestClose={() => setShowSourcePicker(false)}>
         <Pressable
           onPress={() => setShowSourcePicker(false)}
