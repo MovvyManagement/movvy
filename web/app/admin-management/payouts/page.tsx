@@ -42,6 +42,14 @@ export default async function PayoutsPage() {
     .order('created_at', { ascending: false })
     .limit(100);
 
+  // What Movvy owes each crew RIGHT NOW, whether or not they've asked for it.
+  // Same math as the crew's own screen (0103/0104), so the number here and the
+  // number in their app can't disagree. Recording a payment below subtracts
+  // from this automatically — `claimed` counts paid requests.
+  const { data: balances } = await supabase.rpc('admin_crew_balances');
+  const crewBalances = (balances ?? []) as any[];
+  const totalOwed = crewBalances.reduce((s: number, b: any) => s + Number(b.owed_cents ?? 0), 0);
+
   const rows = requests ?? [];
   const pending = rows.filter((r: any) => r.status === 'pending');
   const settled = rows.filter((r: any) => r.status !== 'pending');
@@ -54,9 +62,65 @@ export default async function PayoutsPage() {
         <p className="mt-0.5 text-sm text-zinc-500">
           {pending.length > 0
             ? `${pending.length} crew${pending.length === 1 ? '' : 's'} waiting on ${fmtCents(owed)}`
-            : 'No withdrawal requests waiting. Crews can request once a move has been paid and held 7 days.'}
+            : 'No withdrawal requests waiting. Crews can request any money that has been collected from the customer.'}
         </p>
       </div>
+
+      {/* ── Owed to crews ────────────────────────────────────────────────────
+          Total liability, including crews who haven't requested yet. Before
+          this, the console only showed requests, so the only way to know what
+          you owed was to wait for someone to ask. */}
+      {crewBalances.length > 0 ? (
+        <div className="mb-8 rounded-2xl border border-zinc-200 bg-white overflow-hidden">
+          <div className="flex items-baseline justify-between px-4 py-3 border-b border-zinc-200 bg-zinc-50">
+            <div className="text-sm font-semibold text-zinc-900">Owed to crews</div>
+            <div className="text-sm font-bold text-zinc-900 tabular-nums">{fmtCents(totalOwed)} total</div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-zinc-200">
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">Crew</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Owed now</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Of which tips</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Requested</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Paid to date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {crewBalances.map((b: any) => (
+                  <tr key={b.company_id} className="border-b border-zinc-100 last:border-b-0">
+                    <td className="px-4 py-2.5 font-medium text-zinc-900">{b.display_name ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-right font-bold text-zinc-900 tabular-nums">
+                      {fmtCents(Number(b.owed_cents))}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-zinc-600 tabular-nums">
+                      {Number(b.tips_cents) > 0 ? fmtCents(Number(b.tips_cents)) : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">
+                      {b.open_request_id ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                          {b.open_request_status} · {fmtCents(Number(b.open_request_cents))}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-400">not requested</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-zinc-500 tabular-nums">
+                      {fmtCents(Number(b.lifetime_paid_cents))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="px-4 py-2.5 text-xs text-zinc-500 border-t border-zinc-200 bg-zinc-50">
+            &quot;Owed now&quot; is money collected from the customer and not yet
+            paid out or claimed by an open request. Marking a request sent below
+            subtracts it here and in the crew&apos;s own app.
+          </div>
+        </div>
+      ) : null}
 
       <Section title="Waiting to be sent" count={pending.length} empty="Nothing to pay right now.">
         {pending.map((r: any) => {
