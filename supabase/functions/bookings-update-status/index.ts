@@ -206,38 +206,28 @@ handle(async (req) => {
     // updates. The notifications_push_fanout trigger delivers it to their
     // device. Fire-and-forget; a notification failure must never fail the
     // status transition itself.
-    const CUSTOMER_MILESTONES: Record<string, { title: string; body: string }> = {
-      on_the_way: { title: 'Your crew is on the way', body: 'Your movers have left and are heading to your pickup.' },
-      arrived:    { title: 'Your crew has arrived', body: 'Your movers are at the pickup location.' },
-      loading:    { title: 'Loading has started', body: 'Your crew has begun loading your belongings.' },
-      in_transit: { title: 'On the way to your drop-off', body: 'Your belongings are on the way to the destination.' },
-      unloading:  { title: 'Unloading has started', body: 'Your crew has arrived at the drop-off and is unloading.' },
-      completed:  { title: 'Your move is complete 🎉', body: 'All done — thanks for moving with Movvy!' },
-    };
-    const milestone = CUSTOMER_MILESTONES[new_status];
-    if (milestone && data.customer_id) {
-      try {
-        const admin = adminClient();
-        // `channel` is NOT NULL with no default, and the fan-out trigger keys
-        // off it — omit it and the row never lands, so neither the in-app
-        // notification nor the push ever happens.
-        const { error: notifWriteErr } = await admin.from('notifications').insert({
-          profile_id: data.customer_id,
-          channel: 'in_app',
-          category: `booking.${new_status}`,
-          title: milestone.title,
-          body: milestone.body,
-          data: { booking_id, short_code: data.short_code, new_status },
-        });
-        // supabase-js RETURNS errors rather than throwing, so the surrounding
-        // try/catch never saw this. Log it explicitly.
-        if (notifWriteErr) {
-          console.error('[bookings-update-status] milestone notification insert failed', notifWriteErr);
-        }
-      } catch (notifErr) {
-        console.warn('[bookings-update-status] milestone notification failed (non-fatal)', notifErr);
-      }
-    }
+    // NOTHING TO DO HERE — and that is deliberate.
+    //
+    // This function used to insert its own customer milestone notification for
+    // on_the_way / arrived / loading / in_transit / unloading / completed. But
+    // the `bookings_notify_status` trigger on bookings (defined in 0009,
+    // body last replaced by 0037's notify_customer_on_status_change) already
+    // writes exactly one in_app row for EVERY status change, and 0063's
+    // notifications_push_fanout then pushes any in_app or push row to the
+    // customer's devices.
+    //
+    // So the insert here was a second, differently-worded row for the same
+    // event: two inbox entries, two banners, and — once the paid Apple account
+    // exists — two pushes, for all six of those transitions. It never showed up
+    // in production only because the completed test bookings were transitioned
+    // by direct database writes rather than through this endpoint; the first
+    // real crew driving a move through the app would have doubled every
+    // milestone.
+    //
+    // The trigger is the right single source: it fires however the status
+    // changes, including admin tools and direct SQL, which this function cannot.
+    // If the customer-facing copy needs to change, change it in a migration to
+    // notify_customer_on_status_change — not by adding a second writer here.
 
     // ─── Move-complete email ────────────────────────────────────────────────
     // Fires only on the completed transition + only if we computed an actual
