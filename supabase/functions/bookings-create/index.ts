@@ -220,9 +220,35 @@ serve(async (req) => {
         .eq('id', row.id)
         .single();
       city = full;
-      // Cap the dispatch distance — refuse if more than ~200km from any HQ
-      if ((row.distance_km ?? 0) > 200) {
-        throw httpError(403, `Out of service area (${Math.round(row.distance_km)} km from nearest Movvy HQ).`);
+      // ── Only take the booking if some crew can actually SEE it ─────────────
+      // This used to be a flat 200 km cap, while crews could only see jobs
+      // within a hardcoded 60 km. Everything in between was created, charged a
+      // deposit, and invisible to every crew — MV-1025 (Canmore, 90.4 km out)
+      // collected $399.00 and then expired with "no company accepted".
+      //
+      // Coverage is now whatever the crews themselves chose: each org sets its
+      // own job radius, and any_crew_covers_pickup (0100) asks whether any
+      // verified, staffed org's radius reaches this pickup. The number that
+      // decides whether we take the money is now the same number that decides
+      // who sees the job, which is the only way this stays correct as crews
+      // change their radius or new ones join.
+      const { data: covered, error: coverErr } = await admin.rpc('any_crew_covers_pickup', {
+        p_lat: input.pickup.lat,
+        p_lng: input.pickup.lng,
+      });
+      if (coverErr) {
+        // Don't strand a real customer because the check itself broke — fall
+        // back to the old ceiling and let dispatch sort it out.
+        console.error('[bookings-create] coverage check failed', coverErr);
+        if ((row.distance_km ?? 0) > 200) {
+          throw httpError(403, `Out of service area (${Math.round(row.distance_km)} km from nearest Movvy HQ).`);
+        }
+      } else if (covered !== true) {
+        throw httpError(
+          403,
+          `We don't have a crew covering that address yet — it's ${Math.round(row.distance_km ?? 0)} km from our nearest crew. ` +
+          `Email support@movvy.ca and we'll tell you as soon as we do.`,
+        );
       }
     }
     if (!city) throw httpError(400, 'Could not determine a serving city');

@@ -469,7 +469,14 @@ export default async function DashboardPage() {
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">Date</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">Status</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">GMV</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Commission</th>
+                  {/* Commission is Movvy's cut — management only. This table sits
+                      AFTER the isManagement block closes, so the column used to
+                      render for staff-tier employees too, on the one screen they
+                      can reach. /revenue redirects them away; this showed them
+                      the same figures per booking. */}
+                  {isManagement ? (
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Commission</th>
+                  ) : null}
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Created</th>
                 </tr>
               </thead>
@@ -489,7 +496,9 @@ export default async function DashboardPage() {
                     <td className="px-4 py-3 text-zinc-600 whitespace-nowrap">{fmtDate(b.scheduled_for_date)}</td>
                     <td className="px-4 py-3"><StatusBadge status={b.status} /></td>
                     <td className="px-4 py-3 text-right font-semibold text-zinc-900">{fmtCents(b.price_total_cents)}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-emerald-700">{fmtCents(b.movvy_margin_cents)}</td>
+                    {isManagement ? (
+                      <td className="px-4 py-3 text-right font-semibold text-emerald-700">{fmtCents(b.movvy_margin_cents)}</td>
+                    ) : null}
                     <td className="px-4 py-3 text-right text-zinc-400 whitespace-nowrap text-xs">{fmtRelative(b.created_at)}</td>
                   </tr>
                 ))}
