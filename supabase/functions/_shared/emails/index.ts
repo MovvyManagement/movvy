@@ -18,3 +18,4 @@ export { moverApproved } from './moverApproved.ts';
 export { moverApplicationDeclined } from './moverApplicationDeclined.ts';
 export { docNeedsResubmission } from './docNeedsResubmission.ts';
 export { weeklyPayoutSummary } from './weeklyPayoutSummary.ts';
+export { passwordResetCode } from './passwordResetCode.ts';

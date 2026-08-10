@@ -366,23 +366,26 @@ export async function sendPasswordResetCode(
   const phone = contact.phone?.trim();
   if (!email && !phone) return { ok: false, error: 'Enter your email or phone number.' };
 
-  const { error } = await supabase.auth.signInWithOtp(
-    email
-      ? { email, options: { shouldCreateUser: false } }
-      : { phone: phone!, options: { shouldCreateUser: false } },
-  );
+  // Movvy's own endpoint, NOT supabase.auth.signInWithOtp. That endpoint
+  // answers 200 for a registered address and 422 otp_disabled for an unknown
+  // one, so anyone holding the anon key baked into this app could test a list
+  // of emails for free. Masking it here was never a fix — an attacker calls
+  // Supabase directly and never runs this code. password-reset-request always
+  // answers 200 regardless, so there is nothing to compare.
+  const { data, error } = await supabase.functions.invoke('password-reset-request', {
+    body: email ? { email } : { phone },
+  });
   if (error) {
-    const m = error.message.toLowerCase();
-    // Supabase says "signups not allowed for otp" when the contact has no
-    // account. Don't confirm or deny it — that would let anyone test which
-    // emails and numbers are registered.
-    if (m.includes('signups not allowed') || m.includes('not found')) return { ok: true };
-    return { ok: false, error: friendly(error.message) };
+    const msg = await readEdgeError(error);
+    // A 429 is worth showing — it's about the caller's rate, not the account.
+    return { ok: false, error: friendly(msg) };
   }
+  if ((data as any)?.error) return { ok: false, error: friendly((data as any).error) };
   return { ok: true };
 }
 
-/** Step 2 — check the code. A correct one leaves us signed in. */
+/** Step 2 — check the code. Does NOT sign anyone in and does not consume the
+ *  code; the password step below spends it. */
 export async function verifyPasswordResetCode(
   contact: { email?: string; phone?: string },
   code: string,
@@ -392,29 +395,67 @@ export async function verifyPasswordResetCode(
   const token = code.replace(/\D/g, '');
   if (token.length < 6) return { ok: false, error: 'Enter the 6-digit code.' };
 
-  const { error } = await supabase.auth.verifyOtp(
-    email
-      ? { email, token, type: 'email' }
-      : { phone: phone!, token, type: 'sms' },
-  );
-  if (error) {
-    const m = error.message.toLowerCase();
-    if (m.includes('expired')) {
-      return { ok: false, error: 'That code expired. Send a new one.' };
-    }
-    return { ok: false, error: "That code didn't match. Check it and try again." };
-  }
+  const { data, error } = await supabase.functions.invoke('password-reset-verify', {
+    body: { ...(email ? { email } : { phone }), code: token },
+  });
+  if (error) return { ok: false, error: await readEdgeError(error) };
+  if ((data as any)?.error) return { ok: false, error: (data as any).error };
   return { ok: true };
 }
 
-/** Step 3 — set the new password on the session the code just created. */
-export async function setNewPassword(password: string): Promise<AuthResult> {
+/**
+ * Step 3 — set the new password.
+ *
+ * Takes the contact and code again because the reset no longer runs on a
+ * session: the server verifies the code and writes the password with the
+ * service role. Nothing signs the user in, which is the point — the old
+ * Supabase flow signed you in merely for verifying a code, so a partner-only
+ * account could reset on the customer screen and land in the customer app. Now
+ * a reset proves you own the address and nothing more; you sign in through the
+ * normal door, which already checks which side you're registered for.
+ */
+export async function setNewPassword(
+  password: string,
+  contact?: { email?: string; phone?: string },
+  code?: string,
+): Promise<AuthResult> {
   if (password.length < 8) {
     return { ok: false, error: 'Password must be at least 8 characters.' };
   }
+
+  // Reset flow: no session, so go through the edge function.
+  if (contact && code) {
+    const email = contact.email?.trim().toLowerCase();
+    const phone = contact.phone?.trim();
+    const { data, error } = await supabase.functions.invoke('password-reset-verify', {
+      body: {
+        ...(email ? { email } : { phone }),
+        code: code.replace(/\D/g, ''),
+        new_password: password,
+      },
+    });
+    if (error) return { ok: false, error: await readEdgeError(error) };
+    if ((data as any)?.error) return { ok: false, error: (data as any).error };
+    return { ok: true };
+  }
+
+  // Signed-in user changing their own password from settings.
   const { error } = await supabase.auth.updateUser({ password });
   if (error) return { ok: false, error: friendly(error.message) };
   return { ok: true };
+}
+
+/** Edge errors carry the real reason in a Response body, not in .message —
+ *  without unwrapping it the user gets "non-2xx status code". */
+async function readEdgeError(error: unknown): Promise<string> {
+  const ctx = (error as any)?.context;
+  if (ctx && typeof ctx.json === 'function') {
+    try {
+      const body = await ctx.json();
+      if (body?.error) return String(body.error);
+    } catch { /* fall through */ }
+  }
+  return friendly((error as any)?.message);
 }
 
 /** @deprecated Link-based reset — kept only for the web console's own flow. */

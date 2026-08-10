@@ -2,19 +2,25 @@
 // /(auth)/forgot-password — reset by CODE, in three steps.
 //
 //   1. Enter the email or phone on the account  → we send a 6-digit code
-//   2. Type the code                            → verifying it signs you in
-//   3. Choose a new password                    → saved, and you're in the app
+//   2. Type the code                            → checked, nothing consumed
+//   3. Choose a new password                    → saved, then sign in
 //
 // Replaces a link-based reset that pointed at movvy://reset-password — a route
 // that never existed, so anyone who forgot their password had no way back in.
 // A code also works over SMS, which a link can't do well, and survives the mail
 // app opening its own in-app browser.
 //
-// Used by BOTH sides. `?side=partner` (from the partner sign-in) lands them on
-// the partner dashboard afterwards instead of the customer home.
+// The codes are MOVVY'S OWN (migration 0107 + password-reset-request), not
+// Supabase OTP. Supabase's endpoint answers differently for a registered and an
+// unregistered address, which made it a free account-enumeration oracle for
+// anyone holding the anon key shipped in this app.
 //
-// We never say whether a contact is registered: the "code sent" screen shows
-// for anything, so this can't be used to test which emails have accounts.
+// The reset creates NO SESSION — the password is written server-side with the
+// service role. That's why this screen ends at "sign in" rather than dropping
+// the user into the app: the old flow signed you in merely for entering a
+// correct code, so it needed a customer-vs-partner check bolted on afterwards
+// to stop a partner-only login landing in the customer app. Sending them
+// through the normal door removes that whole class of mistake.
 // =============================================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -34,12 +40,9 @@ import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { PhoneInput, isPhoneComplete, toE164 } from '@/components/PhoneInput';
 import {
-  accountSides,
-  myPartnerSurface,
   retryAfterSeconds,
   sendPasswordResetCode,
   setNewPassword,
-  logout,
   supabaseConfigured,
   verifyPasswordResetCode,
 } from '@/lib/supabase';
@@ -69,6 +72,8 @@ export default function ForgotPassword() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resendIn, setResendIn] = useState(0);
+  // Password saved. There is no session now, so the only next step is signing in.
+  const [done, setDone] = useState(false);
 
   // The contact we actually sent to — frozen when the code goes out, so editing
   // the field afterwards can't desync the verify call from the send.
@@ -145,44 +150,24 @@ export default function ForgotPassword() {
     }
     setLoading(true);
     try {
-      const res = await setNewPassword(pw1);
+      // Pass the contact + code: the reset runs server-side with no session,
+      // so there's nothing signed in for updateUser to act on.
+      const res = await setNewPassword(pw1, sentTo.current, code);
       if (!res.ok) {
         setError(res.error ?? "Couldn't save that password.");
         return;
       }
-      // ─── The reset must not be a way around the door check ────────────────
-      // Verifying the code creates a real session, so without this a
-      // partner-only account could reset its password on the customer screen
-      // and walk straight into the customer app — and a customer-only account
-      // could do the reverse with ?side=partner and get pushed into partner
-      // onboarding. login() and loginPartner() both gate on registered sides;
-      // this path was the one hole in that.
-      const sides = await accountSides();
-      const allowed = isPartner ? sides.partner : sides.customer;
-      if (!allowed) {
-        await logout();
-        setError(
-          isPartner
-            ? "Password updated — but this login isn't registered as a partner. Tap 'Create your account' on the partner sign-in to register, then sign in."
-            : "Password updated — but this login isn't registered as a customer. Create a customer account to book a move; you can reuse this email.",
-        );
-        return;
-      }
-
+      // ─── No session, so no side check needed here any more ────────────────
+      // The old flow used Supabase's verifyOtp, which SIGNED THE USER IN just
+      // for entering a correct code — so this screen had to check afterwards
+      // whether the account was actually registered for the side they reset
+      // from, or a partner-only login could reset on the customer screen and
+      // walk into the customer app. Movvy's own reset writes the password with
+      // the service role and creates no session at all, so that hole is gone
+      // by construction rather than by a check. Send them through the normal
+      // door, which already enforces which side they belong to.
       haptic.success();
-      // Land them on the surface they're actually registered for. Crew must not
-      // be dropped on the admin dashboard — that's where pricing and dispatch
-      // live, and partner-signin is careful to route crew to (mover).
-      if (!isPartner) {
-        router.replace('/(customer)/(tabs)/home');
-        return;
-      }
-      const membership = await myPartnerSurface();
-      router.replace(
-        membership === 'admin'
-          ? '/(company)/(tabs)/dashboard'
-          : '/(mover)/(tabs)/dashboard',
-      );
+      setDone(true);
     } catch (e: any) {
       setError(e?.message ?? "Couldn't save that password.");
     } finally {
@@ -204,8 +189,34 @@ export default function ForgotPassword() {
           keyboardShouldPersistTaps="handled"
         >
           <View className="flex-1 px-6">
+            {/* ── Done · password saved, sign in with it ──────────────────── */}
+            {done ? (
+              <View className="flex-1 items-center justify-center py-16">
+                <View className="h-16 w-16 rounded-full bg-brand-50 items-center justify-center">
+                  <Ionicons name="checkmark-circle" size={40} color="#047857" />
+                </View>
+                <Text className="mt-4 text-2xl font-bold text-ink-900 text-center">
+                  Password updated
+                </Text>
+                <Text className="mt-2 text-base text-silver-500 text-center leading-6">
+                  Sign in with your new password. Any other devices that were
+                  signed in have been signed out.
+                </Text>
+                <View className="mt-8 w-full">
+                  <Button
+                    label="Sign in"
+                    size="lg"
+                    fullWidth
+                    onPress={() =>
+                      router.replace(isPartner ? '/(auth)/partner-signin' : '/(auth)/login')
+                    }
+                  />
+                </View>
+              </View>
+            ) : null}
+
             {/* ── Step 1 · where to send it ───────────────────────────────── */}
-            {step === 'contact' ? (
+            {!done && step === 'contact' ? (
               <>
                 <Text className="text-3xl font-bold text-ink-900">Reset password</Text>
                 <Text className="mt-2 text-base text-silver-500 leading-6">
@@ -266,7 +277,7 @@ export default function ForgotPassword() {
             ) : null}
 
             {/* ── Step 2 · the code ───────────────────────────────────────── */}
-            {step === 'code' ? (
+            {!done && step === 'code' ? (
               <>
                 <Text className="text-3xl font-bold text-ink-900">Enter the code</Text>
                 <Text className="mt-2 text-base text-silver-500 leading-6">
@@ -330,7 +341,7 @@ export default function ForgotPassword() {
             ) : null}
 
             {/* ── Step 3 · the new password ───────────────────────────────── */}
-            {step === 'password' ? (
+            {!done && step === 'password' ? (
               <>
                 <Text className="text-3xl font-bold text-ink-900">
                   Choose a new password
