@@ -101,10 +101,10 @@ export function ResetPasswordForm() {
   // Bail out of a recovery session without setting a password: drop the
   // session, release the lock, and land on login. This is the escape hatch
   // for "I clicked the link but don't want to reset right now".
-  async function cancelRecovery() {
+  async function cancelRecovery(to: string = '/admin-management/login') {
     clearRecoveryLock();
     await supabase.auth.signOut().catch(() => {});
-    router.push('/admin-management/login');
+    router.push(to);
     router.refresh();
   }
 
@@ -146,12 +146,26 @@ export function ResetPasswordForm() {
         <div className="rounded-2xl bg-red-50 border border-red-100 p-3 text-sm text-red-700">
           {linkError}
         </div>
-        <a
-          href="/admin-management/forgot-password"
-          className="mt-4 block text-center text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+        {/* Both of these go through cancelRecovery rather than being plain
+            links. This screen is exactly where someone was getting stuck: the
+            recovery lock is still set, so a bare <a> to /forgot-password used
+            to be bounced right back here. The proxy now exempts that path, but
+            clearing the flag from this side too means the way out doesn't
+            depend on the proxy getting it right. */}
+        <button
+          type="button"
+          onClick={() => cancelRecovery('/admin-management/forgot-password')}
+          className="mt-4 block w-full text-center text-sm font-semibold text-emerald-700 hover:text-emerald-800"
         >
           Request a new link →
-        </a>
+        </button>
+        <button
+          type="button"
+          onClick={() => cancelRecovery()}
+          className="mt-2 block w-full text-center text-sm text-zinc-500 hover:text-zinc-700"
+        >
+          Back to sign in
+        </button>
       </div>
     );
   }
@@ -223,7 +237,7 @@ export function ResetPasswordForm() {
         You must set a new password to continue.{' '}
         <button
           type="button"
-          onClick={cancelRecovery}
+          onClick={() => cancelRecovery()}
           className="font-semibold text-zinc-600 underline hover:text-zinc-900"
         >
           Cancel &amp; sign out

@@ -10,10 +10,37 @@ export interface AuthResult<T = void> {
   data?: T;
 }
 
+/**
+ * Seconds GoTrue says to wait before asking again, pulled out of its own
+ * message ("For security purposes, you can only request this after 24
+ * seconds."), or null if this isn't that error.
+ *
+ * The client used to hard-code its own cooldown and hope it matched. It didn't:
+ * the reset screen re-enabled Resend after 45s and signup after 30s while the
+ * server was still refusing, so tapping the button that had just gone live
+ * produced a raw server error. Reading the number the server actually sends
+ * means the two can never drift apart again.
+ */
+export function retryAfterSeconds(msg: string | undefined): number | null {
+  if (!msg) return null;
+  const m = /after (\d+) seconds?/i.exec(msg);
+  if (m) return Number(m[1]);
+  // Some paths phrase it as a plain rate limit with no number.
+  if (/rate limit|too many/i.test(msg)) return 60;
+  return null;
+}
+
 // Translate Supabase auth error messages into user-friendly text.
 function friendly(msg: string | undefined): string {
   if (!msg) return 'Something went wrong. Try again.';
   const m = msg.toLowerCase();
+  // GoTrue's own wording is machine-ish ("For security purposes, you can only
+  // request this after 24 seconds.") and it's the first thing a new partner
+  // sees if they tap Resend early. Say it like a person.
+  const wait = retryAfterSeconds(msg);
+  if (wait != null && /after \d+ seconds?/i.test(msg)) {
+    return `Please wait ${wait} more second${wait === 1 ? '' : 's'} before asking for another code.`;
+  }
   if (m.includes('invalid login')) return 'Email/phone or password is incorrect.';
   if (m.includes('email not confirmed')) return 'Please verify your email first.';
   if (m.includes('phone not confirmed')) return 'Please verify your phone first via the SMS code we sent.';

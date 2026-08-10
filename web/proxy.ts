@@ -25,6 +25,7 @@ import { updateSession } from './lib/supabase/middleware';
 const ADMIN_PREFIX = '/admin-management';
 const AUTH_PREFIX = '/admin-management/login';
 const RESET_PATH = '/admin-management/reset-password';
+const FORGOT_PATH = '/admin-management/forgot-password';
 
 // Set by the reset-password page the instant it redeems a recovery link, and
 // cleared only when the new password is actually saved. While present, the
@@ -68,6 +69,12 @@ function signOutTo(request: NextRequest, reason: string) {
       res.cookies.set(c.name, '', { path: '/', maxAge: 0 });
     } else if (c.name === ACTIVITY_COOKIE || c.name === ONSET_COOKIE) {
       res.cookies.set(c.name, '', { path: ADMIN_PREFIX, maxAge: 0 });
+    } else if (c.name === RECOVERY_COOKIE) {
+      // Signing out must release the recovery lock too. Without this, idling
+      // out mid-reset left the flag behind: the sign-out sent you to /login,
+      // and the lock sent you back to a reset form whose session had just been
+      // destroyed. Written at path=/, so cleared at path=/.
+      res.cookies.set(c.name, '', { path: '/', maxAge: 0 });
     }
   }
   return res;
@@ -101,7 +108,24 @@ export async function proxy(request: NextRequest) {
   // pin the user to the reset form — even a valid session is bounced off
   // every other admin route. Cleared by the reset form on a successful save.
   const recoveryPending = request.cookies.get(RECOVERY_COOKIE)?.value === '1';
-  if (recoveryPending && !pathname.startsWith(RESET_PATH)) {
+
+  // ...but escaping a recovery session has to stay possible, and /login and
+  // /forgot-password are the only ways out. Locking those too turned a spent
+  // recovery link into a 30-minute lockout of the whole console: the reset page
+  // shows "this link has expired", its own "Request a new link" points at
+  // /forgot-password, and the lock bounced that straight back to the same
+  // error. /login was covered as well, so there was no way through at all
+  // short of clearing cookies by hand — and the cookie lives for 30 minutes.
+  //
+  // Reaching either page means the reset is being abandoned, so drop the flag
+  // on the way through rather than leaving it to expire.
+  const isRecoveryEscape =
+    pathname.startsWith(AUTH_PREFIX) || pathname.startsWith(FORGOT_PATH);
+  if (recoveryPending && isRecoveryEscape) {
+    // Written by the reset form with path=/, so it has to be cleared at path=/
+    // or the browser simply keeps it.
+    response.cookies.set(RECOVERY_COOKIE, '', { path: '/', maxAge: 0 });
+  } else if (recoveryPending && !pathname.startsWith(RESET_PATH)) {
     return NextResponse.redirect(new URL(RESET_PATH, request.url));
   }
 

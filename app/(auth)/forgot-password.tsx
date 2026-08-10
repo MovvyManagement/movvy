@@ -36,6 +36,7 @@ import { PhoneInput, isPhoneComplete, toE164 } from '@/components/PhoneInput';
 import {
   accountSides,
   myPartnerSurface,
+  retryAfterSeconds,
   sendPasswordResetCode,
   setNewPassword,
   logout,
@@ -47,7 +48,11 @@ import { haptic } from '@/lib/haptics';
 type Method = 'email' | 'phone';
 type Step = 'contact' | 'code' | 'password';
 
-const RESEND_COOLDOWN_SECONDS = 45;
+// Ceiling for our own countdown. GoTrue enforces its own window server-side
+// and we now read that number off the 429 (retryAfterSeconds), so this is only
+// the starting guess — it used to be 45s while the server refused for longer,
+// which meant the button went live before the server would answer.
+const RESEND_COOLDOWN_SECONDS = 60;
 
 export default function ForgotPassword() {
   const { side } = useLocalSearchParams<{ side?: string }>();
@@ -90,6 +95,10 @@ export default function ForgotPassword() {
       const res = await sendPasswordResetCode(contact);
       if (!res.ok) {
         setError(res.error ?? "Couldn't send the code.");
+        // If the server told us how long it wants, run the countdown off THAT
+        // rather than our own guess, so the button can't unlock early again.
+        const wait = retryAfterSeconds(res.error);
+        if (wait != null) setResendIn(wait);
         return;
       }
       sentTo.current = contact;

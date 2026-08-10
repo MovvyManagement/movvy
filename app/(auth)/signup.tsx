@@ -33,7 +33,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { PhoneInput, isPhoneComplete, toE164 } from '@/components/PhoneInput';
-import { registerOtherSide, supabase, supabaseConfigured } from '@/lib/supabase';
+import { registerOtherSide, retryAfterSeconds, supabase, supabaseConfigured } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
 import { TERMS_VERSION } from '@/lib/brand';
 import { haptic } from '@/lib/haptics';
@@ -41,7 +41,10 @@ import { haptic } from '@/lib/haptics';
 type Step = 'form' | 'otp';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const RESEND_COOLDOWN_SECONDS = 30;
+// Starting guess only — the server's own window wins whenever it tells us
+// (retryAfterSeconds below). Was 30s while GoTrue refused for longer, so the
+// button unlocked before a resend could actually succeed.
+const RESEND_COOLDOWN_SECONDS = 60;
 
 export default function Signup() {
   const toast = useToast();
@@ -95,7 +98,7 @@ export default function Signup() {
     return { ok: Object.keys(errs).length === 0, errors: errs };
   }
 
-  // Resend cooldown timer — gives the customer 30s before they can ask for
+  // Resend cooldown timer — gives the customer 60s before they can ask for
   // another code so we don't spam Twilio (or them) with re-sends.
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
@@ -277,7 +280,20 @@ export default function Signup() {
         phone: phoneE164,
       });
       if (rErr) {
-        setError(rErr.message);
+        // GoTrue's raw wording ("For security purposes, you can only request
+        // this after 24 seconds.") is the first thing a brand-new customer sees
+        // if they tap Resend early, which they could — this screen unlocked the
+        // button after 30s while the server was still refusing. Say it plainly
+        // and restart the countdown from the server's own number.
+        const wait = retryAfterSeconds(rErr.message);
+        if (wait != null) {
+          setResendIn(wait);
+          setError(
+            `Please wait ${wait} more second${wait === 1 ? '' : 's'} before asking for another code.`,
+          );
+        } else {
+          setError(rErr.message);
+        }
         return;
       }
       haptic.light();
