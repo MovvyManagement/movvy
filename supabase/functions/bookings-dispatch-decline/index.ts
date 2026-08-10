@@ -36,8 +36,17 @@ const Body = z.object({
 // window the customer's move day is already locked in, so it costs the org a
 // flat fee — the release still goes through (a no-show hurts the customer far
 // more than a re-listing), it just isn't free.
-const FREE_RELEASE_DAYS = 3;
-const LATE_RELEASE_PENALTY_CENTS = 10_000; // $100
+// Releasing is free while there's still time to re-staff the move. Inside this
+// window it strands a customer who has already planned their day.
+const FREE_RELEASE_DAYS = 2;
+// The penalty is the GREATER of 20% of what the crew would have earned on the
+// job and a mandatory $100 floor. Percentage alone lets someone drop a small
+// job for nothing; a flat fee alone is trivial next to a $4,000 long haul.
+const LATE_RELEASE_PENALTY_FRACTION = 0.20;
+const LATE_RELEASE_PENALTY_FLOOR_CENTS = 10_000; // $100 minimum
+// Fallback share if the payout column is somehow unset — matches the engine's
+// 80% driver share, so 20% of it is still 20% of their real earnings.
+const DRIVER_SHARE_OF_TOTAL = 0.80;
 
 handle(async (req) => {
   const cors = corsHeaders(req);
@@ -148,7 +157,25 @@ handle(async (req) => {
         : null;
       let penaltyCents = 0;
       if (hoursBefore != null && hoursBefore < FREE_RELEASE_DAYS * 24) {
-        penaltyCents = LATE_RELEASE_PENALTY_CENTS;
+        // 20% of the crew's own payout on this job, with a $100 floor. Read the
+        // payout column rather than the customer total so the fee is a share of
+        // what THEY would have made, which is also what it's deducted from.
+        const { data: money } = await admin
+          .from('bookings')
+          .select('driver_total_cents, driver_earnings_cents, actual_driver_payout_cents, price_total_cents')
+          .eq('id', booking_id)
+          .maybeSingle();
+        const payoutCents =
+          Number(money?.actual_driver_payout_cents ?? 0) ||
+          Number(money?.driver_total_cents ?? 0) ||
+          Number(money?.driver_earnings_cents ?? 0) ||
+          Math.round(Number(money?.price_total_cents ?? 0) * DRIVER_SHARE_OF_TOTAL);
+
+        penaltyCents = Math.max(
+          LATE_RELEASE_PENALTY_FLOOR_CENTS,
+          Math.round(payoutCents * LATE_RELEASE_PENALTY_FRACTION),
+        );
+
         // Fire-and-forget: a ledger hiccup must never block the release itself,
         // otherwise the crew is stuck holding a move they can't do.
         try {
@@ -157,7 +184,11 @@ handle(async (req) => {
             company_id,
             profile_id: user.id,
             amount_cents: penaltyCents,
-            reason: reason ?? 'Released within 3 days of the move',
+            reason:
+              reason ??
+              `Released within ${FREE_RELEASE_DAYS} days of the move — ` +
+              `${Math.round(LATE_RELEASE_PENALTY_FRACTION * 100)}% of payout, min $` +
+              `${LATE_RELEASE_PENALTY_FLOOR_CENTS / 100}`,
             hours_before_move: Math.round((hoursBefore ?? 0) * 100) / 100,
           });
         } catch (penErr) {

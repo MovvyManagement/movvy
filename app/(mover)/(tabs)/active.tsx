@@ -10,7 +10,7 @@ import { Button } from '@/components/Button';
 import { LiveMap } from '@/components/LiveMap';
 import { EmptyState } from '@/components/EmptyState';
 import { mockBookings } from '@/data/mockBookings';
-import { useMyCurrentJob, useUpdateBookingStatus, useSubmitRating, useCancelBooking, useOpenDispute, useMyMembership, useMyTeamCurrentJob, useMyAssignedJobs, usePhoneProxy, placeProxyCall } from '@/lib/data';
+import { useMyCurrentJob, useUpdateBookingStatus, useSubmitRating, useOpenDispute, useMyMembership, useMyTeamCurrentJob, useMyAssignedJobs, usePhoneProxy, placeProxyCall } from '@/lib/data';
 import { NotificationBell } from '@/components/NotificationBell';
 import { useLiveTrackingBroadcast } from '@/lib/useLiveTrackingBroadcast';
 import { usePendingStatusSync } from '@/lib/usePendingStatusSync';
@@ -1049,19 +1049,30 @@ function ProblemSheet({
   bookingId: string;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const cancel = useCancelBooking();
   const openDispute = useOpenDispute();
 
-  const submit = async (action: 'continue' | 'cancel') => {
+  const submit = async (action: 'continue' | 'support') => {
     if (!selected) return;
     const label = PROBLEM_REASONS.find((r) => r.key === selected)?.label ?? selected;
     try {
-      if (action === 'cancel') {
-        await cancel.mutateAsync({
+      if (action === 'support') {
+        // A blocker, not a note: file it at high severity so it lands at the top
+        // of the ops queue, then send the crew to support. The crew cannot
+        // cancel — only the customer or Movvy can — so this is the real path
+        // rather than a button that always failed.
+        await openDispute.mutateAsync({
           booking_id: bookingId,
-          reason: `Driver-side · ${selected} · ${label}`,
+          kind: 'poor_service',
+          severity: 'high',
+          summary: `Crew says the move can't go ahead: ${selected} · ${label}`,
         });
-        Alert.alert('Job cancelled', "We've notified the customer.");
+        setSelected(null);
+        onClose();
+        Alert.alert(
+          'Support notified',
+          "We've flagged this move for Movvy support and they'll be in touch. Don't abandon the job until you've spoken to them — only Movvy or the customer can cancel a move. You can also reach support from your Profile.",
+        );
+        return;
       } else {
         // Log as a low-severity dispute so ops can see + reach out
         await openDispute.mutateAsync({
@@ -1121,12 +1132,20 @@ function ProblemSheet({
                 Log issue and keep going
               </Text>
             </Pressable>
+            {/* No cancel button. Once a move is underway the crew who took it
+                owns it — bookings-cancel only permits the customer or Movvy, so
+                this button could only ever fail with "Cannot cancel another
+                user's booking", about the job they're standing in front of.
+                Logging the issue above reaches ops; anything that genuinely
+                needs stopping goes through support, who can cancel. */}
             <Pressable
-              onPress={() => submit('cancel')}
+              onPress={() => submit('support')}
               disabled={!selected}
-              className="h-12 rounded-2xl items-center justify-center bg-white border border-danger active:opacity-80"
+              className="h-12 rounded-2xl items-center justify-center bg-white border border-silver-200 active:opacity-80"
             >
-              <Text className="text-sm font-bold text-danger">Cancel this job</Text>
+              <Text className="text-sm font-bold text-ink-900">
+                This move can&apos;t go ahead — contact support
+              </Text>
             </Pressable>
             <Pressable onPress={onClose} className="h-12 items-center justify-center">
               <Text className="text-sm font-semibold text-silver-500">Never mind</Text>

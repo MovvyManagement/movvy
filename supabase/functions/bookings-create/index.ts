@@ -149,11 +149,18 @@ serve(async (req) => {
       throw httpError(403, 'Only customers can create bookings');
     }
 
-    // 2) Rate limit — 5 booking creates per hour per user
+    // 2) Rate limit — 10 booking attempts per hour per user.
+    //
+    // Raised from 5. The counter increments on every ATTEMPT, and backing out of
+    // the Stripe payment sheet is an attempt, so someone fighting a declining
+    // card burned through the old limit in five taps and was then locked out for
+    // up to an hour with "Rate limit exceeded. Please slow down." — at which
+    // point they book with someone else. Ten leaves room for a bad card without
+    // opening the door to scripted abuse.
     await checkRateLimit({
       bucketKey: `user:${user.id}:bookings_create`,
       endpoint: 'bookings-create',
-      limit: 5,
+      limit: 10,
       windowSeconds: 3600,
     });
 

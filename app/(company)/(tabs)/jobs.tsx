@@ -76,6 +76,34 @@ type Tab = (typeof TABS)[number];
 
 const IN_FLIGHT = ['confirmed', 'on_the_way', 'arrived', 'loading', 'in_transit', 'unloading'];
 
+// ── Late-release fee, mirrored from bookings-dispatch-decline ────────────────
+// Releasing is free while there's time to re-staff. Inside FREE_RELEASE_DAYS it
+// costs 20% of this job's payout with a $100 floor, deducted from the crew's
+// balance. Duplicated here ONLY to warn before the tap — the server recomputes
+// it and is the authority, so a stale client can misquote the figure but can
+// never change what's charged.
+const FREE_RELEASE_DAYS = 2;
+const LATE_RELEASE_FRACTION = 0.20;
+const LATE_RELEASE_FLOOR_CENTS = 10_000;
+const DRIVER_SHARE_OF_TOTAL = 0.80;
+
+function lateReleaseFeeCents(row: any): number {
+  const startsAt = row?.scheduled_for_window_starts_at
+    ? new Date(row.scheduled_for_window_starts_at)
+    : row?.scheduled_for_date
+    ? new Date(`${row.scheduled_for_date}T08:00:00Z`)
+    : null;
+  if (!startsAt) return 0;
+  const hoursBefore = (startsAt.getTime() - Date.now()) / 3_600_000;
+  if (hoursBefore >= FREE_RELEASE_DAYS * 24) return 0;
+  const payoutCents =
+    Number(row?.actual_driver_payout_cents ?? 0) ||
+    Number(row?.driver_total_cents ?? 0) ||
+    Number(row?.driver_earnings_cents ?? 0) ||
+    Math.round(Number(row?.price_total_cents ?? 0) * DRIVER_SHARE_OF_TOTAL);
+  return Math.max(LATE_RELEASE_FLOOR_CENTS, Math.round(payoutCents * LATE_RELEASE_FRACTION));
+}
+
 export default function CompanyJobs() {
   const [tab, setTab] = useState<Tab>('Requests');
   const { data: membership, isLoading: memLoading } = useMyMembership();
@@ -313,15 +341,40 @@ export default function CompanyJobs() {
             onPress={() => setDetailId(entry.id)}
             onAssign={() => setAssignTarget(entry.row)}
             onRelease={async () => {
-              try {
-                const res = await decline.mutateAsync({
-                  booking_id: entry.row.id,
-                  company_id: companyId!,
-                });
-                if (res.action === 'released') haptic.warning();
-              } catch (e: any) {
-                Alert.alert('Could not release', e?.message ?? 'Try again.');
+              const doRelease = async () => {
+                try {
+                  const res = await decline.mutateAsync({
+                    booking_id: entry.row.id,
+                    company_id: companyId!,
+                  });
+                  if (res.action === 'released') haptic.warning();
+                } catch (e: any) {
+                  Alert.alert('Could not release', e?.message ?? 'Try again.');
+                }
+              };
+              // Inside the free window the fee is real money — 20% of this job's
+              // payout, minimum $100 — and it's deducted from the crew's
+              // balance. Never let that arrive as a surprise on the statement:
+              // name the exact figure and make them confirm it.
+              const fee = lateReleaseFeeCents(entry.row);
+              if (fee > 0) {
+                Alert.alert(
+                  'Release this move?',
+                  `The move is less than ${FREE_RELEASE_DAYS} days away, so releasing it now costs ` +
+                    `${fmtCurrency(fee / 100)} — 20% of this job's payout, minimum $100. ` +
+                    `It'll be deducted from your balance.`,
+                  [
+                    { text: 'Keep the move', style: 'cancel' },
+                    {
+                      text: `Release · ${fmtCurrency(fee / 100)} fee`,
+                      style: 'destructive',
+                      onPress: doRelease,
+                    },
+                  ],
+                );
+                return;
               }
+              await doRelease();
             }}
           />
         ) : (

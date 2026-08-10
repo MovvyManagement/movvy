@@ -45,7 +45,10 @@ handle(async (req) => {
 
     const { data: booking } = await admin
       .from('bookings')
-      .select('id, short_code, customer_id, city_id, status, move_type, pickup_city, dropoff_city, scheduled_for_date, price_total_cents, driver_total_cents')
+      // pickup_lat/lng are REQUIRED: recipients are chosen by distance from the
+      // pickup now, not by city_id. Omit them and the RPC gets nulls and matches
+      // nobody, so the broadcast would silently go to zero crews.
+      .select('id, short_code, customer_id, city_id, status, move_type, pickup_city, pickup_lat, pickup_lng, dropoff_city, scheduled_for_date, price_total_cents, driver_total_cents')
       .eq('id', booking_id)
       .single();
     if (!booking) throw httpError(404, 'Booking not found');
@@ -61,29 +64,30 @@ handle(async (req) => {
       );
     }
 
-    // Find eligible recipients: verified partner teams + companies in the same city.
-    // For teams → notify both members. For companies → notify owner + dispatchers.
-    const [teamRes, companyRes] = await Promise.all([
-      admin
-        .from('partner_team_members')
-        .select('profile_id, partner_teams!inner(id, primary_city_id, onboarding_status)')
-        .eq('partner_teams.primary_city_id', booking.city_id)
-        .eq('partner_teams.onboarding_status', 'verified')
-        .eq('status', 'active')
-        .is('removed_at', null),
-      admin
-        .from('company_members')
-        .select('profile_id, role, companies!inner(id, primary_city_id, onboarding_status)')
-        .eq('companies.primary_city_id', booking.city_id)
-        .eq('companies.onboarding_status', 'verified')
-        .in('role', ['owner', 'dispatcher'])
-        .eq('status', 'active')
-        .is('removed_at', null),
-    ]);
+    // Recipients = the org admins whose service radius covers this PICKUP.
+    //
+    // This used to match on primary_city_id = booking.city_id, which is a
+    // different rule from the one that decides who can SEE the job (within the
+    // org's own radius of the pickup). The two disagreed in both directions:
+    // Calgary crews 36 km from an Okotoks job had it in their feed but were
+    // never told, and every Calgary partner got pushed about a Canmore pickup
+    // tagged city_id=calgary that RLS then refused to let them open.
+    //
+    // crew_admins_to_notify (0106) uses the same geometry as the RLS policy and
+    // open_jobs_for_me, so notified == eligible by construction. Admins only:
+    // since 0102 only an admin can accept, so telling a crew member about the
+    // open pool would be advertising work they can't take.
+    const { data: targets, error: targetErr } = await admin.rpc('crew_admins_to_notify', {
+      p_lat: booking.pickup_lat,
+      p_lng: booking.pickup_lng,
+    });
+    if (targetErr) {
+      console.error('[partners-broadcast] recipient lookup failed', targetErr);
+      throw httpError(500, 'Could not work out who to notify');
+    }
 
     const recipientIds = new Set<string>();
-    for (const row of teamRes.data ?? []) recipientIds.add((row as any).profile_id);
-    for (const row of companyRes.data ?? []) recipientIds.add((row as any).profile_id);
+    for (const row of targets ?? []) recipientIds.add((row as any).profile_id);
 
     if (recipientIds.size === 0) {
       return jsonResponse({ ok: true, recipients: 0, reason: 'no_eligible_partners' }, { status: 200 }, cors);
