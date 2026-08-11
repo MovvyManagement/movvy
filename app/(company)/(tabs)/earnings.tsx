@@ -105,7 +105,7 @@ export default function CompanyEarnings() {
           )}
         </View>
 
-        {/* Late-release penalties — 20% of the job's payout (minimum $100) each
+        {/* Late-release penalties — a flat $100 each
             time a move was handed back with under 2 days' notice. Shown as
             negative lines tied to the booking so the cost of a late release is
             never a mystery on the statement. */}
@@ -118,7 +118,7 @@ export default function CompanyEarnings() {
                 </Text>
                 <Text className="mt-1 text-xs text-silver-600 leading-4">
                   Released a move less than 2 days before the customer's date —
-                  20% of the payout, minimum $100.
+                  A flat $100 each.
                 </Text>
               </View>
               <Text className="text-2xl font-bold text-danger">
