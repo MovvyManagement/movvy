@@ -27,7 +27,11 @@ const faqs = [
   },
   {
     q: 'Which cities are covered?',
-    a: "Live in Calgary, Edmonton, and Red Deer. Several more Alberta markets are coming this year. Long-distance moves between supported cities are supported too — they're just priced by distance instead of the hour.",
+    // Must match MAJOR_CITIES in src/lib/distance.ts — the app prices and
+    // dispatches against those ten, so any shorter list here turns away
+    // customers Movvy can actually serve. This said "Calgary, Edmonton, and
+    // Red Deer" while the app already covered all ten.
+    a: "Live in Calgary, Edmonton, Red Deer, Lethbridge, Medicine Hat, Grande Prairie, Fort McMurray, Airdrie, St. Albert, and Okotoks. Long-distance moves between supported cities work too — they're just priced by the kilometre instead of by the hour.",
   },
   {
     q: 'How do I get paid as a driver or mover?',

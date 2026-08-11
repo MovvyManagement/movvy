@@ -325,7 +325,14 @@ export function buildReceiptHtml(data: ReceiptData): string {
 
   <div class="footer">
     <div class="bizline">Movvy Technologies Inc.</div>
-    Calgary, AB, Canada · GST/HST #XXXXXXXXX RT0001<br/>
+    <!-- No GST/HST registration number until there is a real one. This line
+         used to read "GST/HST #XXXXXXXXX RT0001" — a literal placeholder on the
+         document customers hand their accountant, which is worse than showing
+         nothing: a made-up registration number on a receipt is a false
+         statement, while its absence is just an omission. The GST amount itself
+         is still itemised in the charges table above. Add the number here once
+         it's issued. -->
+    Calgary, AB, Canada · GST<br/>
     This is your official receipt for accounting and tax purposes. Movvy doesn't
     email receipts — you can always re-download this PDF inside the Movvy app
     under Profile → Receipts. Questions: <a href="mailto:support@movvy.ca" style="color:#047857;text-decoration:none">support@movvy.ca</a>.

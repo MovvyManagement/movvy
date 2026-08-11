@@ -16,6 +16,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { startConsoleSession } from './actions';
 import { supabaseBrowser } from '@/lib/supabase/client';
 
 // Marks the current session as "created by a recovery link, password not yet
@@ -129,8 +130,20 @@ export function ResetPasswordForm() {
       });
       if (updErr) throw updErr;
       // Password is set — the recovery session is now a legitimate session.
-      // Release the lock so the console opens up, then go to the dashboard.
+      // Release the lock so the console opens up...
       clearRecoveryLock();
+      // ...and stamp the console's own session markers. proxy.ts requires
+      // mv_admin_seen + mv_admin_since as well as the Supabase token, and only
+      // the login action used to write them — so this screen's promise of
+      // "you'll be signed in" ended at "Please sign in again." They're
+      // httpOnly, hence the server action.
+      const stamped = await startConsoleSession();
+      if (!stamped.ok) {
+        // No session to stamp. Say so plainly instead of pushing to a dashboard
+        // the proxy will bounce; the password change itself did succeed.
+        setError('Password saved. Please sign in with your new password.');
+        return;
+      }
       router.push('/admin-management/dashboard');
       router.refresh();
     } catch (e: any) {
