@@ -1,9 +1,12 @@
 // =============================================================================
 // /admin-management/payouts — the withdrawal queue.
 //
-// Crews request their earnings once a move has been completed, collected, and
-// held for seven days. There is no automated rail: this page hands you the
-// amount and the destination, you send the e-Transfer, and you record it.
+// Payouts run on a weekly Monday cycle (0109). A crew requests on a Monday, and
+// the request covers completed, collected moves that finished BEFORE the
+// previous Monday — so a 7–14 day lag depending on the day, which leaves room
+// for a dispute to surface before the money is gone. Unclaimed amounts roll into
+// the next Monday. There is no automated rail: this page hands you the amount
+// and the destination, you send the e-Transfer, and you record it.
 //
 // The banking details shown are the ones FROZEN at request time, not whatever
 // the org's profile says today. If a crew account were taken over and the
@@ -62,7 +65,7 @@ export default async function PayoutsPage() {
         <p className="mt-0.5 text-sm text-zinc-500">
           {pending.length > 0
             ? `${pending.length} crew${pending.length === 1 ? '' : 's'} waiting on ${fmtCents(owed)}`
-            : 'No withdrawal requests waiting. Crews can request any money that has been collected from the customer.'}
+            : 'No withdrawal requests waiting. Crews request on Mondays, covering moves finished before the previous Monday.'}
         </p>
       </div>
 
@@ -82,6 +85,7 @@ export default async function PayoutsPage() {
                 <tr className="border-b border-zinc-200">
                   <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">Crew</th>
                   <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Owed now</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Not yet due</th>
                   <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Of which tips</th>
                   <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Requested</th>
                   <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Paid to date</th>
@@ -93,6 +97,9 @@ export default async function PayoutsPage() {
                     <td className="px-4 py-2.5 font-medium text-zinc-900">{b.display_name ?? '—'}</td>
                     <td className="px-4 py-2.5 text-right font-bold text-zinc-900 tabular-nums">
                       {fmtCents(Number(b.owed_cents))}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-zinc-500 tabular-nums">
+                      {Number(b.in_hold_cents) > 0 ? fmtCents(Number(b.in_hold_cents)) : '—'}
                     </td>
                     <td className="px-4 py-2.5 text-right text-zinc-600 tabular-nums">
                       {Number(b.tips_cents) > 0 ? fmtCents(Number(b.tips_cents)) : '—'}
@@ -115,8 +122,10 @@ export default async function PayoutsPage() {
             </table>
           </div>
           <div className="px-4 py-2.5 text-xs text-zinc-500 border-t border-zinc-200 bg-zinc-50">
-            &quot;Owed now&quot; is money collected from the customer and not yet
-            paid out or claimed by an open request. Marking a request sent below
+            &quot;Owed now&quot; is money collected from the customer, from moves
+            finished before the previous Monday, not yet paid out or claimed by an
+            open request. &quot;Not yet due&quot; is earned and collected but too
+            recent for this week&apos;s window. Marking a request sent below
             subtracts it here and in the crew&apos;s own app.
           </div>
         </div>

@@ -102,7 +102,7 @@ export function PayoutCard() {
     if (!open) return;
     Alert.alert(
       'Cancel this request?',
-      `${fmtCurrency(open.amount_cents / 100)} goes back to your available balance. You can request it again any time.`,
+      `${fmtCurrency(open.amount_cents / 100)} goes back to your balance. Requests reopen on Monday — if today is Monday you can ask again straight away.`,
       [
         { text: 'Keep it', style: 'cancel' },
         {
@@ -122,20 +122,44 @@ export function PayoutCard() {
     <View className="mb-4">
       <Card>
         <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500">
-          Available to withdraw
+          {s.is_request_day ? 'Available to withdraw' : 'Ready for Monday'}
         </Text>
         <Text className="mt-1 text-3xl font-bold text-ink-900">
           {fmtCurrency(s.available_cents / 100)}
         </Text>
 
-        {/* The 7-day window is informational now, not a lock — everything
-            earned and collected is withdrawable today, so this says "included
-            above" rather than implying part of the balance is unavailable. */}
+        {/* Payouts run weekly (0109): requests open on Mondays, and cover moves
+            finished before the PREVIOUS Monday. in_hold_cents is money already
+            earned and collected whose move is too recent for this week's window
+            — it is NOT part of the figure above, so say so plainly rather than
+            letting a crew think their balance is short. */}
         {s.in_hold_cents > 0 ? (
           <Text className="mt-1 text-xs text-silver-500 leading-5">
-            includes {fmtCurrency(s.in_hold_cents / 100)} from moves in the last{' '}
-            {s.hold_days} days — withdrawable now
+            {fmtCurrency(s.in_hold_cents / 100)} from recent moves joins a later
+            week — payouts cover moves finished before the previous Monday.
           </Text>
+        ) : null}
+
+        {!s.is_request_day && s.next_request_day ? (
+          <View className="mt-3 rounded-2xl bg-silver-50 border border-silver-100 p-3 flex-row">
+            <Ionicons name="calendar-outline" size={16} color="#71717A" />
+            <Text className="ml-2 flex-1 text-xs text-silver-600 leading-5">
+              Payouts are requested on Mondays. Next one{' '}
+              <Text className="font-semibold text-ink-900">
+                {fmtDateShort(s.next_request_day)}
+              </Text>
+              .
+            </Text>
+          </View>
+        ) : null}
+
+        {s.is_request_day && s.requested_this_week && !open ? (
+          <View className="mt-3 rounded-2xl bg-silver-50 border border-silver-100 p-3 flex-row">
+            <Ionicons name="checkmark-done-outline" size={16} color="#71717A" />
+            <Text className="ml-2 flex-1 text-xs text-silver-600 leading-5">
+              You've already requested this week. The next request opens next Monday.
+            </Text>
+          </View>
         ) : null}
 
         {s.tips_cents > 0 ? (
@@ -169,7 +193,7 @@ export function PayoutCard() {
               </Pressable>
             ) : null}
           </View>
-        ) : s.available_cents > 0 ? (
+        ) : s.available_cents > 0 && s.is_request_day && !s.requested_this_week ? (
           <Pressable
             onPress={choose}
             disabled={busy}

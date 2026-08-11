@@ -28,13 +28,20 @@ export interface PayoutSummary {
    *  admin's banking details, so a crew member is not shown the balance. */
   can_view: boolean;
   hold_days: number;
-  /** Withdrawable right now. Since 0103 this INCLUDES money still inside the
-   *  7-day window — earned and collected means requestable. */
+  /** Payable on the next request day: completed, collected, and finished
+   *  BEFORE the previous Monday (0109). Unclaimed amounts roll forward. */
   available_cents: number;
   /** Always 0 since 0103. Kept so an older build can't double-count it. */
   clearing_cents: number;
-  /** Portion of available_cents still inside the hold window — informational. */
+  /** Earned and collected, but the move finished too recently to be in this
+   *  week's window — informational, NOT included in available_cents. */
   in_hold_cents: number;
+  /** True only on a Monday (Alberta time) — requests are weekly. */
+  is_request_day: boolean;
+  /** The Monday a request can next be made, as YYYY-MM-DD. */
+  next_request_day: string | null;
+  /** A request has already been raised since this week's Monday. */
+  requested_this_week: boolean;
   /** When the oldest held move passes the hold window. Informational only. */
   next_available_at: string | null;
   /** Tips inside available_cents — called out so a crew sees them. */
@@ -52,6 +59,9 @@ const EMPTY: PayoutSummary = {
   available_cents: 0,
   clearing_cents: 0,
   in_hold_cents: 0,
+  is_request_day: false,
+  next_request_day: null,
+  requested_this_week: false,
   next_available_at: null,
   tips_cents: 0,
   penalties_cents: 0,
