@@ -34,6 +34,7 @@ import { MovvyMark } from './MovvyMark';
 import { useToast } from './Toast';
 import { fmtTime } from '@/lib/format';
 import {
+  useChatThread,
   useEnsureBookingThread,
   useThreadMessages,
   useSendChatMessage,
@@ -70,6 +71,9 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
   const ensureThread = useEnsureBookingThread();
   const send = useSendChatMessage();
   const [threadId, setThreadId] = useState<string | null>(threadIdProp ?? null);
+  // Who the customer on this thread is. Everything else in the conversation is
+  // the crew side — see the bubble-side logic further down.
+  const { data: thread } = useChatThread(threadId);
   const [text, setText] = useState('');
   const scrollRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
@@ -253,7 +257,36 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
                     </View>
                   );
                 }
-                const me = showLive ? m.sender_profile_id === user?.id : m.from === 'me';
+                // ── Which SIDE sent this, not which person ──────────────────
+                // This used to be `m.sender_profile_id === user?.id`, i.e. "did
+                // I personally send it". A chat is between the customer and the
+                // CREW, and the crew is several people — the admin who took the
+                // job plus whoever is on it. So a crew member opened a thread
+                // and saw their own admin's message rendered on the left, in
+                // grey, behind the customer's avatar: it read as if the CUSTOMER
+                // had said it. On a thread where the admin had promised
+                // something, that is worse than confusing.
+                //
+                // Sides are decided by the thread's customer: sender is either
+                // the customer or the crew, and so am I. Same side → mine.
+                // While the thread row is still loading, fall back to the old
+                // per-person check so nothing renders wrongly-but-confidently.
+                const customerId = thread?.customer_profile_id;
+                const senderIsCustomer = customerId
+                  ? m.sender_profile_id === customerId
+                  : undefined;
+                const iAmCustomer = customerId ? user?.id === customerId : undefined;
+                const me = showLive
+                  ? senderIsCustomer !== undefined && iAmCustomer !== undefined
+                    ? senderIsCustomer === iAmCustomer
+                    : m.sender_profile_id === user?.id
+                  : m.from === 'me';
+                // Ours, but somebody else on my side wrote it. Worth naming,
+                // because "we already told them X" depends on knowing a
+                // teammate said it. Names aren't available here — profiles RLS
+                // is own-row-only, so a crew member can't read the admin's name
+                // — hence the generic label rather than a wrong one.
+                const fromTeammate = showLive && me && m.sender_profile_id !== user?.id;
                 return (
                   <View
                     key={m.id}
@@ -267,8 +300,15 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
                         </View>
                       </View>
                     ) : (
-                      <View className="rounded-3xl rounded-br-md bg-brand-600 px-4 py-3">
-                        <Text className="text-sm text-white">{m.body}</Text>
+                      <View>
+                        {fromTeammate ? (
+                          <Text className="mb-1 text-[10px] text-silver-500 text-right">
+                            {iAmCustomer ? 'Sent on your behalf' : 'Sent by your crew'}
+                          </Text>
+                        ) : null}
+                        <View className="rounded-3xl rounded-br-md bg-brand-600 px-4 py-3">
+                          <Text className="text-sm text-white">{m.body}</Text>
+                        </View>
                       </View>
                     )}
                     <Text

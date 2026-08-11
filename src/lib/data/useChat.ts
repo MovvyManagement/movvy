@@ -39,6 +39,35 @@ export function useMyThreads() {
   });
 }
 
+/**
+ * A single thread row — needed to work out WHICH SIDE of the conversation each
+ * message came from.
+ *
+ * A chat is between two sides (the customer, and the crew), not between two
+ * people. The crew side can be several people: the admin who took the job and
+ * whichever members are on it. So "did I send this" is the wrong question for
+ * deciding how a bubble looks — the right one is "is the sender on my side",
+ * and `customer_profile_id` is what answers it.
+ *
+ * Readable by an assigned crew member: chat_threads_participant (0005) allows
+ * select when is_assigned_to_booking(booking_id).
+ */
+export function useChatThread(threadId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['chat', 'thread', threadId],
+    enabled: !!threadId,
+    queryFn: async (): Promise<ChatThread | null> => {
+      const { data, error } = await supabase
+        .from('chat_threads')
+        .select('*')
+        .eq('id', threadId!)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as ChatThread | null;
+    },
+  });
+}
+
 /** Realtime-backed list of messages for a thread. */
 export function useThreadMessages(threadId: string | undefined) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
