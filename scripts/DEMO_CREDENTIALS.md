@@ -1,131 +1,105 @@
 # Movvy demo credentials
 
-Use these to walk through every surface end-to-end. **One password for all four
-accounts:**
+**These are the accounts that actually exist in the live project**, verified by
+signing in with each one. One password for all four:
 
 ```
 MovvyDemo2026!
 ```
 
-Run the seed first to create them:
-
-```bash
-npm install @supabase/supabase-js
-node scripts/seed-demo.mjs
-```
-
-The script prints the generated team / company invite codes at the end. Paste
-those into the partner sign-in screen alongside the email + password below.
+> **Why this file was rewritten (2026-08-11).** It used to document four
+> `*-demo@movvy.app` accounts created by `scripts/seed-demo.mjs`. Only one of
+> those was ever in the live database, and that script refuses to run against
+> production by design — so the documented logins didn't work and the working
+> logins weren't documented. The set below is the real one, and it matches the
+> merged crew model (`companies` + `company_members`), not the retired
+> `partner_teams` model the old seed built.
 
 ---
 
-## 👤 Customer — book + track + chat + rate
+## The four accounts
 
-| Field | Value |
-|---|---|
-| Email | `customer-demo@movvy.app` |
-| Password | `MovvyDemo2026!` |
-| Sign-in entry | Welcome → **"I already have an account"** |
+| Email | Name | Signs in as | Org |
+|---|---|---|---|
+| `demo.customer@movvy.ca` | Demo Customer | Customer | — |
+| `demo.driver@movvy.ca` | Dan Driver | **Crew admin** | Adam Crew |
+| `demo.crew1@movvy.ca` | Chris Crew | Crew member | Adam Crew |
+| `demo.crew2@movvy.ca` | Casey Crew | Crew member | Adam Crew |
 
-**What you'll see:**
-- Home with the booking widget + active-move badge
-- Notification inbox (bell tap)
-- A `searching` booking is pre-seeded so the Moves tab has something on it
-- Review-prompt modal fires the moment a driver completes the move
+Invite code for **Adam Crew**: `CO-R5AMHB`
+(Movvy's own org, `Movvy Management`, is `CO-TX5AJX` — that's `management@movvy.ca`,
+the real owner account. Don't use it for demos.)
 
----
+**Where to sign in**
 
-## 🚛 Driver — solo 2-person team ("Demo Crew")
-
-| Field | Value |
-|---|---|
-| Email | `driver-demo@movvy.app` |
-| Password | `MovvyDemo2026!` |
-| Team invite code | **`TM-XXXXXX`** *(printed by seed script — copy from terminal)* |
-| Sign-in entry | Welcome → **"Already a partner? Partner sign-in"** |
-
-**What you'll see:**
-- Jobs tab (briefcase icon) — open feed + accept button
-- Active tab — flag stops (left HQ → arrived → completed)
-- Earnings tab — cold-state copy until first move
-- Profile — your driver stats, availability calendar, refer-a-driver
+- Customer → Welcome → *"I already have an account"*
+- Crew admin and crew members → Welcome → *"Already a partner? Partner sign-in"*
 
 ---
 
-## 🏋️ Mover — passenger view on the same team
+## What each account is for
 
-| Field | Value |
-|---|---|
-| Email | `mover-demo@movvy.app` |
-| Password | `MovvyDemo2026!` |
-| Team invite code | **`TM-XXXXXX`** *(same code as the driver)* |
-| Sign-in entry | Welcome → **"Already a partner? Partner sign-in"** |
+### `demo.customer@movvy.ca` — the customer side
+Book a move, watch the live tracker, chat with the crew, download a receipt PDF,
+rate the crew afterwards. Also the account to use for the **modify** flow: change
+a booked address and confirm the estimate re-prices and the crew gets notified.
 
-**What you'll see:**
-- Read-only mirror of whatever Diego (the driver) is doing
-- Chat with the customer still works
-- No accept / decline / flag buttons (the driver owns those)
+### `demo.driver@movvy.ca` — the crew ADMIN
+The only account that can **accept** a job from the open pool, and the only one
+that can **assign** it to a crew member. Also the only one that sees the payout
+balance and can request a payout (Mondays only). Bank details live on this
+account's profile — they write to `companies`, which is the table the payouts
+console reads.
 
----
+### `demo.crew1@movvy.ca` / `demo.crew2@movvy.ca` — crew MEMBERS
+Deliberately limited, and that's the product rule, not a bug:
 
-## 🏢 Company owner — "Demo Movers Co." dispatch fleet
+- **No open job feed.** They see only what the admin assigned them, under "My Jobs".
+- **Cannot accept jobs.** The server refuses, with a message telling them their
+  admin has to take it first.
+- **No payout balance.** The card says their crew admin handles payouts.
+- They *can* flag stops on an assigned move (left HQ → arrived → … → complete),
+  including correcting a missed tap with the time picker.
 
-| Field | Value |
-|---|---|
-| Email | `company-demo@movvy.app` |
-| Password | `MovvyDemo2026!` |
-| Company invite code | **`CO-XXXXXX`** *(printed by seed script — copy from terminal)* |
-| Sign-in entry | Welcome → **"Already a partner? Partner sign-in"** |
-
-**What you'll see:**
-- Dashboard with live utilization + today's revenue
-- **Dispatch** — accept incoming requests, assign drivers, decline
-- Jobs — Inbox / Assigned / Completed buckets
-- Earnings (mocked; will populate after real moves complete)
-- Company tab — driver roster (live), brand info, support
+Use `demo.crew2` as the second person on a two-person crew to check the
+passenger view — they should see the move their colleague is driving.
 
 ---
 
-## 📍 Test addresses for the booking flow
+## Test addresses
 
-The address autocomplete uses real geocoding (Nominatim → Google when wired)
-so any real Alberta address works. Quick copy-pastes:
+Address autocomplete uses real geocoding, so any Alberta address works. Useful pairs:
 
 | Pickup | Drop-off | What it exercises |
 |---|---|---|
-| 425 1 Ave NE, Calgary | 2020 Memorial Dr NW, Calgary | Intra-Calgary residential (~6 km) — typical move |
-| 1234 Kensington Rd NW, Calgary | 999 8 St SW, Calgary | Short cross-river run — quick demo |
-| 5500 Macleod Trail SW, Calgary | 425 1 Ave NE, Calgary | Across-town — exercises higher travel hours |
-| 600 Centre St N, Calgary | 333 96 Ave NE, Calgary | Same neighborhood → minimum 4-hr billing rule |
-| 100 Stephen Ave SW, Calgary | 10180 101 St NW, Edmonton | **Cross-city** — triggers long-haul surcharge banner |
+| 425 1 Ave NE, Calgary | 2020 Memorial Dr NW, Calgary | Intra-Calgary residential (~6 km) — the typical move |
+| 600 Centre St N, Calgary | 333 96 Ave NE, Calgary | Same neighbourhood → the 4-hour minimum |
+| 5500 Macleod Trail SW, Calgary | 425 1 Ave NE, Calgary | Across town — higher travel hours |
+| 100 Stephen Ave SW, Calgary | 10180 101 St NW, Edmonton | **Long haul** — per-km transit + the amber banner |
 
-The "cross-city" pair (Calgary → Edmonton) is the only one that exercises the
-new long-haul pricing engine + the amber "Long-distance move" banner on the
-confirm screen. Use it to validate the surcharge math.
+The Calgary → Edmonton pair is the one that exercises the long-haul engine, the
+GPS transit measurement and its coverage test. Use it to check the surcharge math.
 
 ---
 
-## 🔁 Re-running the seed
+## Housekeeping
 
-The script is **idempotent** — running it twice is safe. It checks for
-existing accounts/teams/companies and skips re-creation. If you want a
-clean slate, delete the rows from Supabase Studio first:
+There is one orphan left from the old seed: **`customer-demo@movvy.app`**
+("Casey Customer"). It has no org and duplicates `demo.customer@movvy.ca`. Safe
+to delete; left in place only because deleting real auth rows isn't something to
+do casually.
 
-```sql
-delete from auth.users where email like '%@movvy.app' and email like '%-demo%';
--- profiles, partner_team_members, company_members cascade automatically
-```
-
-Then re-run the script.
+`scripts/seed-demo.mjs` still builds the OLD `partner_teams` model and refuses to
+run against production. Don't run it expecting these accounts — it would create a
+parallel set that the app can't use.
 
 ---
 
-## ⚠️ Production note
+## ⚠️ Before going live
 
-These are **demo accounts** with intentionally weak credentials. Before going
-live:
+1. Delete every `demo.*@movvy.ca` and `customer-demo@movvy.app` user
+2. Rotate or delete the `Adam Crew` org and its invite code `CO-R5AMHB`
+3. Remove this file from the repo and `.gitignore` it
+4. Confirm `SUPABASE_SERVICE_ROLE_KEY` is never bundled into the client
 
-1. Delete every `*-demo@movvy.app` user from `auth.users`
-2. Rotate the team + company invite codes (or delete those entities entirely)
-3. Remove `scripts/DEMO_CREDENTIALS.md` from the repo and `.gitignore` it
-4. Confirm `SUPABASE_SERVICE_ROLE_KEY` is never bundled in the client
+Keep `management@movvy.ca` — that's the real owner account.
