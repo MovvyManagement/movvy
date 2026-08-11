@@ -10,8 +10,6 @@
 //   • Service area         → EditServiceAreaSheet  (partner_teams: city + radius)
 //   • My availability      → /(mover)/availability  (existing)
 //   • Crew                 → /(mover)/crew          (existing, operator only)
-//   • Bank account         → EditTeamBankSheet     (partner_teams bank metadata)
-//   • Tax info             → EditTaxInfoSheet      (partner_teams.gst_number)
 //   • Refer a driver       → /(mover)/referrals    (existing)
 //   • Safety               → /(mover)/safety        (new — mirrors company)
 //   • Terms & Privacy      → https://movvy.ca/legal
@@ -52,8 +50,6 @@ import { EditPhoneSheet } from '@/components/EditPhoneSheet';
 import { EditDriverVehicleSheet } from '@/components/EditDriverVehicleSheet';
 import { EditDriverDocumentsSheet } from '@/components/EditDriverDocumentsSheet';
 import { EditServiceAreaSheet } from '@/components/EditServiceAreaSheet';
-import { EditTeamBankSheet } from '@/components/EditTeamBankSheet';
-import { EditTaxInfoSheet } from '@/components/EditTaxInfoSheet';
 
 interface Row {
   // Use keyof typeof Ionicons.glyphMap — the deep submodule path was wrong
@@ -104,8 +100,6 @@ export default function MoverProfile() {
   const [vehicleOpen, setVehicleOpen] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(false);
   const [serviceAreaOpen, setServiceAreaOpen] = useState(false);
-  const [bankOpen, setBankOpen] = useState(false);
-  const [taxOpen, setTaxOpen] = useState(false);
 
   // ─── Row labels — derived from live data ─────────────────────────────────
   const vehicleLabel = (() => {
@@ -130,11 +124,7 @@ export default function MoverProfile() {
     ? `${teamFull.service_radius_km} km radius`
     : 'Set city + radius';
 
-  const bankLabel = teamFull?.bank_account_last4
-    ? `•••• ${teamFull.bank_account_last4}`
-    : 'Add account';
 
-  const taxLabel = teamFull?.gst_number ? 'On file' : 'Add GST/HST';
 
   // ─── Sections ────────────────────────────────────────────────────────────
   //
@@ -220,35 +210,24 @@ export default function MoverProfile() {
     {
       title: 'Payouts',
       rows: [
-        // Bank + tax editors only make sense for operators — the payout
-        // recipient. Hourly workers are paid through their team/company; we
-        // tell them so instead of leaving an inert row.
-        ...(isOperator
-          ? [
-              {
-                icon: 'card-outline' as const,
-                label: 'Bank account',
-                value: bankLabel,
-                onPress: () => setBankOpen(true),
-              },
-              {
-                icon: 'receipt-outline' as const,
-                label: 'Tax info',
-                value: taxLabel,
-                onPress: () => setTaxOpen(true),
-              },
-            ]
-          : [
-              {
-                icon: 'card-outline' as const,
-                label: 'Payouts',
-                value:
-                  membership?.kind === 'company'
-                    ? 'Paid through your company'
-                    : 'Paid through your team',
-                staticRow: true,
-              },
-            ]),
+        // No bank or tax editor here, for anyone. Payouts belong to the crew
+        // ADMIN and settle to the admin's banking details, so this screen has no
+        // business collecting them — the same call already made for the payout
+        // balance itself.
+        //
+        // It also removes a real trap: the row wrote through useUpdateTeam to
+        // `partner_teams`, retired and empty since 0068. Bank details entered
+        // here saved successfully, displayed as saved, and were invisible to the
+        // payouts console forever. An admin enters them on the company profile,
+        // which writes to `companies` — the table the console actually reads.
+        {
+          icon: 'card-outline' as const,
+          label: 'Payouts',
+          value: isOperator
+            ? 'Set up in your crew admin profile'
+            : 'Paid through your crew',
+          staticRow: true,
+        },
         {
           icon: 'gift-outline',
           label: 'Refer a driver · $100 each',
@@ -524,16 +503,6 @@ export default function MoverProfile() {
         visible={serviceAreaOpen}
         teamId={teamId}
         onClose={() => setServiceAreaOpen(false)}
-      />
-      <EditTeamBankSheet
-        visible={bankOpen}
-        teamId={teamId}
-        onClose={() => setBankOpen(false)}
-      />
-      <EditTaxInfoSheet
-        visible={taxOpen}
-        teamId={teamId}
-        onClose={() => setTaxOpen(false)}
       />
       <DeleteAccountSheet visible={deleteOpen} onClose={() => setDeleteOpen(false)} />
 

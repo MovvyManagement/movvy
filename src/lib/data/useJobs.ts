@@ -133,22 +133,27 @@ export function useMyTeamCurrentJob() {
     enabled: !!user,
     refetchInterval: 12_000,
     queryFn: async (): Promise<DbBooking | null> => {
-      // 1) find the team this profile belongs to (driver OR mover)
+      // 1) find the org this profile belongs to. company_members, not
+      //    partner_team_members — the latter was retired with the merged org
+      //    model (0068) and is empty, so this returned null for everyone and
+      //    the passenger view never worked: the second crew member on a move
+      //    saw nothing at all while their driver was mid-job.
       const { data: membership } = await supabase
-        .from('partner_team_members')
-        .select('team_id')
+        .from('company_members')
+        .select('company_id')
         .eq('profile_id', user!.id)
         .eq('status', 'active')
         .is('removed_at', null)
         .limit(1)
         .maybeSingle();
-      if (!membership?.team_id) return null;
+      if (!membership?.company_id) return null;
 
-      // 2) the team's in-flight booking
+      // 2) the org's in-flight booking, by assigned_company_id — jobs are
+      //    accepted by companies now, so assigned_team_id is never set.
       const { data } = await supabase
         .from('bookings')
         .select('*')
-        .eq('assigned_team_id', membership.team_id)
+        .eq('assigned_company_id', membership.company_id)
         .in('status', ['assigned', 'confirmed', 'on_the_way', 'arrived', 'loading', 'in_transit', 'unloading'])
         .order('scheduled_for_window_starts_at', { ascending: true })
         .limit(1)

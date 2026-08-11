@@ -10,53 +10,35 @@ interface CreateTeamArgs {
 }
 
 /**
- * Create a partner_teams row + 2 partner_team_members in a single round-trip.
- * Uses a Postgres RPC (`create_partner_team`) — see migration 0007 (next session).
- * For now we do client-side multi-step with rollback on error.
+ * RETIRED. Do not use.
+ *
+ * This created a `partner_teams` row plus `partner_team_members`, the model that
+ * was replaced by `companies` + `company_members` when the org model merged
+ * (0068). Both old tables are empty in production and nothing reads them.
+ *
+ * Its only caller is /(mover)/onboarding/documents.tsx, and that flow is
+ * unreachable: app/partner.tsx routes EVERY partner signup — solo crew and
+ * company alike — to /(company)/onboarding/operator. The comment there still
+ * mentioning /(mover)/onboarding/personal is stale.
+ *
+ * It is not repointed at `companies` on purpose. Doing so would half-migrate an
+ * orphaned flow — the member insert targets a different table with a different
+ * shape — and produce an org that exists but doesn't behave like one. Instead it
+ * now throws, so if anything ever does reach this path we hear about it rather
+ * than silently creating a partner nobody can see, pay, or dispatch.
  */
 export function useCreatePartnerTeam() {
-  const { user } = useAuth();
-  const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ citySlug, driver, mover }: CreateTeamArgs) => {
-      if (!user) throw new Error('Not signed in');
-
-      const { data: city, error: cityErr } = await supabase
-        .from('cities').select('id').eq('slug', citySlug).single();
-      if (cityErr || !city) throw new Error('City not found');
-
-      // Insert + read back the auto-generated invite_code (set by the
-      // partner_teams_invite_code trigger in migration 0016).
-      const { data: team, error: teamErr } = await supabase
-        .from('partner_teams')
-        .insert({
-          display_name: `${driver.fullName.split(' ')[0]} & ${mover.fullName.split(' ')[0]}`,
-          primary_city_id: city.id,
-          onboarding_status: 'in_progress',
-        })
-        .select('id, invite_code')
-        .single();
-      if (teamErr || !team) throw teamErr ?? new Error('Could not create team');
-
-      // The signed-in user is the driver by convention (they're the one
-      // signing up). The mover is invited separately via partners-invite-send.
-      const { error: ptmErr } = await supabase
-        .from('partner_team_members')
-        .insert([
-          {
-            team_id: team.id,
-            profile_id: user.id,
-            role: 'driver',
-            driver_license_number: driver.licenseNumber,
-          },
-        ]);
-      if (ptmErr) throw ptmErr;
-
-      qc.invalidateQueries({ queryKey: ['my-teams'] });
-      return team as { id: string; invite_code: string };
+    mutationFn: async (_args: CreateTeamArgs): Promise<{ id: string; invite_code: string }> => {
+      throw new Error(
+        'Partner signup has moved. This screen writes to the retired partner_teams ' +
+        'model — use the company onboarding flow instead.',
+      );
     },
   });
 }
+
+
 
 interface CreateCompanyArgs {
   legal_name: string;
@@ -144,10 +126,14 @@ export function useMyDriverStats() {
     queryKey: ['my-driver-stats', user?.id],
     enabled: !!user?.id && supabaseConfigured,
     queryFn: async (): Promise<DriverStats> => {
-      // 1) Find the team(s) this profile belongs to.
+      // 1) Find the org this profile belongs to. Reads company_members +
+      //    companies: this used to join partner_team_members → partner_teams,
+      //    both retired and empty since 0068, so `membership` was ALWAYS null
+      //    and every crew member saw the zeroed fallback below — no rating, no
+      //    trip count, no crew name — as though they'd never done a move.
       const { data: membership, error: mErr } = await supabase
-        .from('partner_team_members')
-        .select('team_id, partner_teams!inner(id, display_name, rating_avg, rating_count, onboarding_status)')
+        .from('company_members')
+        .select('company_id, companies!inner(id, display_name, rating_avg, rating_count, onboarding_status)')
         .eq('profile_id', user!.id)
         .eq('status', 'active')
         .is('removed_at', null)
@@ -155,18 +141,21 @@ export function useMyDriverStats() {
         .maybeSingle();
       if (mErr) throw mErr;
 
-      // No team yet (still onboarding) — show zeroed stats so UI renders fine.
+      // No org yet (still onboarding) — show zeroed stats so UI renders fine.
       if (!membership) {
         return { rating_avg: null, rating_count: 0, trip_count: 0, team_name: null, onboarding_status: null };
       }
-      const team = (membership as any).partner_teams;
+      const team = (membership as any).companies;
 
       // 2) Count completed bookings assigned to this team. We use a head-count
       //    query so we don't pull row data we don't need.
       const { count, error: cErr } = await supabase
         .from('bookings')
         .select('id', { count: 'exact', head: true })
-        .eq('assigned_team_id', team.id)
+        // assigned_company_id, not assigned_team_id — jobs are accepted by
+        // companies now, so the old column is never set and the trip count was
+        // permanently zero.
+        .eq('assigned_company_id', team.id)
         .eq('status', 'completed');
       if (cErr) throw cErr;
 
@@ -183,11 +172,10 @@ export function useMyDriverStats() {
 
 // ─── Team profile editor (operator-side) ───────────────────────────────────
 //
-// The 2-person team's editable settings. Mirror of useCompany / useUpdateCompany
-// for the partner_teams table. Used by the mover-profile Service area / Bank /
-// Tax editors. RLS allows any team member to read; partner_teams_member_update
-// allows any team member to write, so the driver/operator can edit without
-// extra plumbing.
+// The org's editable settings, read and written against `companies`. Named
+// "Team" for history only — partner_teams is retired (0068). Used by the
+// Service area editor; the Bank and Tax editors it also fed have been removed
+// from the mover profile, because payouts settle to the crew ADMIN's details.
 
 export interface TeamRow {
   id: string;
@@ -206,7 +194,8 @@ export interface TeamRow {
   bank_transit_number: string | null;
   bank_account_last4: string | null;
   bank_updated_at: string | null;
-  gst_number: string | null;
+  /** companies has no gst_number — the tax editor that used it is retired. */
+  etransfer_email: string | null;
 }
 
 const TEAM_KEY = (id: string | null | undefined) => ['team-full', id] as const;
@@ -216,10 +205,16 @@ export function useTeam(teamId: string | null | undefined) {
     queryKey: TEAM_KEY(teamId),
     enabled: !!teamId && supabaseConfigured,
     queryFn: async (): Promise<TeamRow | null> => {
+      // `companies`, not `partner_teams`. The teams table was retired when the
+      // org model merged (0068) and is empty in production — every read here
+      // returned null, so the crew's own bank details, service area and rating
+      // rendered blank on a screen that looked like it had simply never been
+      // filled in. `gst_number` is dropped from the select: it exists only on
+      // the old table, and the tax editor that used it is gone.
       const { data, error } = await supabase
-        .from('partner_teams')
+        .from('companies')
         .select(
-          'id, display_name, invite_code, primary_city_id, service_radius_km, onboarding_status, verified_at, rating_avg, rating_count, stripe_account_id, payout_currency, bank_holder_name, bank_institution_number, bank_transit_number, bank_account_last4, bank_updated_at, gst_number',
+          'id, display_name, invite_code, primary_city_id, service_radius_km, onboarding_status, verified_at, rating_avg, rating_count, stripe_account_id, payout_currency, bank_holder_name, bank_institution_number, bank_transit_number, bank_account_last4, bank_updated_at, etransfer_email',
         )
         .eq('id', teamId!)
         .maybeSingle();
@@ -234,7 +229,11 @@ export function useUpdateTeam(teamId: string | null | undefined) {
   return useMutation({
     mutationFn: async (patch: Partial<TeamRow>) => {
       if (!teamId) throw new Error('No team id');
-      const { error } = await supabase.from('partner_teams').update(patch).eq('id', teamId);
+      // Writes went to the retired, empty `partner_teams` table: the update
+      // matched zero rows, reported success, and the data was gone. That is how
+      // a crew could enter their banking details, see them saved, and have them
+      // never reach the payouts console.
+      const { error } = await supabase.from('companies').update(patch).eq('id', teamId);
       if (error) throw error;
     },
     onSuccess: () => {

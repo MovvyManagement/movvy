@@ -141,17 +141,16 @@ export function useAdminPendingVerifications() {
     queryKey: ['admin', 'pending-verifications'],
     enabled: !!user,
     queryFn: async () => {
-      const [{ data: teams }, { data: companies }] = await Promise.all([
-        supabase
-          .from('partner_teams')
-          .select('id, display_name, primary_city_id, onboarding_status, created_at')
-          .in('onboarding_status', ['in_review', 'docs_uploaded', 'in_progress']),
-        supabase
-          .from('companies')
-          .select('id, legal_name, display_name, primary_city_id, onboarding_status, created_at')
-          .in('onboarding_status', ['in_review', 'docs_uploaded', 'in_progress']),
-      ]);
-      return { teams: teams ?? [], companies: companies ?? [] };
+      // Only `companies`. This used to query `partner_teams` alongside it, but
+      // that table was retired with the merged org model (0068) and is empty —
+      // so the `teams` half was a guaranteed empty array driving an empty
+      // section in the approvals UI. Kept as [] in the return shape so existing
+      // consumers don't break; nothing will ever populate it.
+      const { data: companies } = await supabase
+        .from('companies')
+        .select('id, legal_name, display_name, primary_city_id, onboarding_status, created_at')
+        .in('onboarding_status', ['in_review', 'docs_uploaded', 'in_progress']);
+      return { teams: [] as any[], companies: companies ?? [] };
     },
   });
 }

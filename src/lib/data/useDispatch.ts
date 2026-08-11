@@ -359,16 +359,18 @@ export interface MyTeam {
   verified_at: string | null;
 }
 
-// The operator's own team row — readable directly via the
-// partner_teams_member_read RLS policy (any team member can read their team).
-// Surfaces display_name + invite_code for the Crew screen header.
+// The org's own row — surfaces display_name + invite_code for the Crew screen
+// header. Reads `companies`: the old `partner_teams` table was retired with the
+// merged org model (0068) and is empty, so this returned null and the Crew
+// screen header showed no crew name and, worse, no invite code — the code
+// members need in order to join.
 export function useMyTeam(teamId: string | null | undefined) {
   return useQuery({
     queryKey: ['my-team', teamId],
     enabled: !!teamId && supabaseConfigured,
     queryFn: async (): Promise<MyTeam | null> => {
       const { data, error } = await supabase
-        .from('partner_teams')
+        .from('companies')
         .select('id, display_name, invite_code, rating_avg, rating_count, verified_at')
         .eq('id', teamId!)
         .maybeSingle();
