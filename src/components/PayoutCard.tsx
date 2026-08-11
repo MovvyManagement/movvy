@@ -25,6 +25,19 @@ import {
   type PayoutMethod,
 } from '@/lib/data/usePayouts';
 
+/** "Monday, August 17" from a YYYY-MM-DD string.
+ *  Parsed part-by-part on purpose: new Date('2026-08-17') is UTC midnight,
+ *  which formats as the 16th in every North American timezone. */
+function fmtWeekday(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  if (!y || !m || !d) return ymd;
+  return new Date(y, m - 1, d).toLocaleDateString('en-CA', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
 export function PayoutCard() {
   const { data: s, isLoading } = usePayoutSummary();
   const request = useRequestPayout();
@@ -118,6 +131,16 @@ export function PayoutCard() {
     );
   };
 
+  // Why the button is off, in the order a crew would ask. null = enabled.
+  const nextDay = s.next_request_day ? fmtWeekday(s.next_request_day) : null;
+  const blockedReason = !s.is_request_day
+    ? `Payouts are requested on Mondays.${nextDay ? ` Next one: ${nextDay}.` : ''}`
+    : s.requested_this_week
+      ? "You've already requested this week — the next one opens next Monday."
+      : s.available_cents <= 0
+        ? 'Nothing ready yet. A move becomes payable the second Monday after it finishes.'
+        : null;
+
   return (
     <View className="mb-4">
       <Card>
@@ -140,27 +163,7 @@ export function PayoutCard() {
           </Text>
         ) : null}
 
-        {!s.is_request_day && s.next_request_day ? (
-          <View className="mt-3 rounded-2xl bg-silver-50 border border-silver-100 p-3 flex-row">
-            <Ionicons name="calendar-outline" size={16} color="#71717A" />
-            <Text className="ml-2 flex-1 text-xs text-silver-600 leading-5">
-              Payouts are requested on Mondays. Next one{' '}
-              <Text className="font-semibold text-ink-900">
-                {fmtDateShort(s.next_request_day)}
-              </Text>
-              .
-            </Text>
-          </View>
-        ) : null}
 
-        {s.is_request_day && s.requested_this_week && !open ? (
-          <View className="mt-3 rounded-2xl bg-silver-50 border border-silver-100 p-3 flex-row">
-            <Ionicons name="checkmark-done-outline" size={16} color="#71717A" />
-            <Text className="ml-2 flex-1 text-xs text-silver-600 leading-5">
-              You've already requested this week. The next request opens next Monday.
-            </Text>
-          </View>
-        ) : null}
 
         {s.tips_cents > 0 ? (
           <Text className="mt-1 text-xs text-brand-700">
@@ -193,28 +196,45 @@ export function PayoutCard() {
               </Pressable>
             ) : null}
           </View>
-        ) : s.available_cents > 0 && s.is_request_day && !s.requested_this_week ? (
-          <Pressable
-            onPress={choose}
-            disabled={busy}
-            className={`mt-4 h-12 rounded-2xl items-center justify-center flex-row ${
-              busy ? 'bg-silver-300' : 'bg-brand-600 active:opacity-90'
-            }`}
-          >
-            {busy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="cash-outline" size={16} color="#fff" />
-                <Text className="ml-2 text-sm font-bold text-white">Request payout</Text>
-              </>
-            )}
-          </Pressable>
         ) : (
-          <Text className="mt-3 text-xs text-silver-500 leading-5">
-            Money from a completed move becomes available {s.hold_days} days after the customer
-            pays. Nothing ready to withdraw yet.
-          </Text>
+          <>
+            {/* The button is always here, just disabled off-cycle, with the
+                reason underneath. A control that vanishes reads as a bug — a
+                crew looking for their money finds no button and assumes the app
+                is broken, rather than learning when payday is. */}
+            <Pressable
+              onPress={choose}
+              disabled={busy || !!blockedReason}
+              className={`mt-4 h-12 rounded-2xl items-center justify-center flex-row ${
+                busy || blockedReason ? 'bg-silver-200' : 'bg-brand-600 active:opacity-90'
+              }`}
+            >
+              {busy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons
+                    name="cash-outline"
+                    size={16}
+                    color={blockedReason ? '#A1A1AA' : '#fff'}
+                  />
+                  <Text
+                    className={`ml-2 text-sm font-bold ${
+                      blockedReason ? 'text-silver-400' : 'text-white'
+                    }`}
+                  >
+                    Request payout
+                  </Text>
+                </>
+              )}
+            </Pressable>
+
+            {blockedReason ? (
+              <Text className="mt-2 text-xs text-silver-500 leading-5 text-center">
+                {blockedReason}
+              </Text>
+            ) : null}
+          </>
         )}
 
         {s.lifetime_paid_cents > 0 ? (
