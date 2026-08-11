@@ -103,9 +103,12 @@ handle(async (req) => {
     const { data: booking, error: bErr } = await admin
       .from('bookings')
       .select(
-        'id, customer_id, status, scheduled_for_date, scheduled_for_window_starts_at, ' +
+        'id, short_code, customer_id, status, scheduled_for_date, scheduled_for_window_starts_at, ' +
         'details, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, ' +
-        'deposit_cents, price_total_cents',
+        'deposit_cents, price_total_cents, ' +
+        // Who is on the hook for this move — they have to be told when the job
+        // they accepted changes underneath them.
+        'assigned_company_id, assigned_driver_profile_id, pickup_city, dropoff_city',
       )
       .eq('id', input.booking_id)
       .maybeSingle();
@@ -250,6 +253,78 @@ handle(async (req) => {
       .single();
     if (uErr || !data) throw httpError(500, 'Could not save changes — try again.');
 
+    // ── Tell the crew their job changed ─────────────────────────────────────
+    // If a crew has already taken this move, it is no longer just the
+    // customer's booking — someone has planned a day around it. A silent change
+    // meant a crew could accept a $2,586 Calgary→Calgary job, have the customer
+    // move the drop-off to Edmonton, and discover a $4,067 long haul on the
+    // morning. Worse, the new address may be outside their service radius or
+    // need a bigger truck, in which case they need to act, not be surprised.
+    //
+    // Fire-and-forget: a notification failure must never undo a saved change.
+    // Goes to the assigned performer AND the org's admins — the admin owns the
+    // decision to keep or release it, the performer is the one driving.
+    if (booking.assigned_company_id || booking.assigned_driver_profile_id) {
+      try {
+        const priceBefore = Number(booking.price_total_cents ?? 0);
+        const priceAfter = Number(data.price_total_cents ?? 0);
+        const delta = priceAfter - priceBefore;
+        const money = (c: number) => `$${(Math.abs(c) / 100).toFixed(2)}`;
+
+        const changed: string[] = [];
+        if (input.pickup) changed.push('pickup address');
+        if (input.dropoff !== undefined) changed.push('drop-off address');
+        if (input.scheduled_for_date) changed.push('date');
+        if (input.scheduled_for_window) changed.push('arrival window');
+        if (input.details) changed.push('move details');
+        const what = changed.length ? changed.join(', ') : 'booking details';
+
+        const priceLine =
+          delta === 0
+            ? 'The price is unchanged.'
+            : `The estimate ${delta > 0 ? 'went up' : 'went down'} by ${money(delta)} to ${money(priceAfter)}.`;
+
+        // Recipients: the performer, plus every active admin of the org.
+        const ids = new Set<string>();
+        if (booking.assigned_driver_profile_id) ids.add(booking.assigned_driver_profile_id);
+        if (booking.assigned_company_id) {
+          const { data: admins } = await admin
+            .from('company_members')
+            .select('profile_id')
+            .eq('company_id', booking.assigned_company_id)
+            .eq('org_role', 'admin')
+            .eq('status', 'active')
+            .is('removed_at', null);
+          for (const a of admins ?? []) if (a.profile_id) ids.add(a.profile_id);
+        }
+
+        if (ids.size > 0) {
+          const rows = [...ids].map((profile_id) => ({
+            profile_id,
+            channel: 'in_app' as const,
+            category: 'booking.modified',
+            title: `Move ${booking.short_code} changed`,
+            body:
+              `The customer updated the ${what}. ${priceLine} ` +
+              `Check the new route still works for your crew and truck.`,
+            data: {
+              booking_id: input.booking_id,
+              short_code: booking.short_code,
+              changed,
+              price_before_cents: priceBefore,
+              price_after_cents: priceAfter,
+            },
+          }));
+          const { error: nErr } = await admin.from('notifications').insert(rows);
+          // supabase-js RETURNS errors rather than throwing, so this would have
+          // been swallowed by the try/catch alone.
+          if (nErr) console.error('[bookings-modify] crew notify failed', nErr);
+        }
+      } catch (nErr) {
+        console.warn('[bookings-modify] crew notify failed (non-fatal)', nErr);
+      }
+    }
+
     await audit({
       actorId: user.id,
       actorRole: user.role,
@@ -258,7 +333,12 @@ handle(async (req) => {
       entityId: input.booking_id,
       ip: clientIp(req),
       ua: req.headers.get('user-agent') ?? undefined,
-      payload: { patched_keys: Object.keys(patch) },
+      payload: {
+        patched_keys: Object.keys(patch),
+        price_before_cents: Number(booking.price_total_cents ?? 0),
+        price_after_cents: Number(data.price_total_cents ?? 0),
+        was_assigned: !!(booking.assigned_company_id || booking.assigned_driver_profile_id),
+      },
     });
 
     return jsonResponse({ ok: true, booking: data }, { status: 200 }, cors);
