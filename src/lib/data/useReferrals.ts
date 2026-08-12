@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase, useAuth } from '@/lib/supabase';
+import { supabase, useAuth, supabaseConfigured } from '@/lib/supabase';
 
 // =============================================================================
 // Referral codes — client-generated, server-persisted
@@ -142,6 +142,66 @@ export function useMyReferralStats() {
           .filter((r) => r.status === 'applied')
           .reduce((s, r) => s + (r.credit_cents ?? 0), 0),
       };
+    },
+  });
+}
+
+/** One line of the credit ledger. */
+export interface CreditEntry {
+  id: string;
+  amount_cents: number;
+  kind: 'referral_referrer' | 'referral_referred' | 'adjustment' | 'redemption';
+  note: string | null;
+  created_at: string;
+}
+
+export interface CreditBalance {
+  balance_cents: number;
+  earned_cents: number;
+  spent_cents: number;
+  entry_count: number;
+}
+
+/**
+ * The signed-in user's credit balance, from the ledger (0110).
+ *
+ * Deliberately NOT derived from `referrals.credit_cents` the way
+ * useMyReferralStats does it. That column is what a referral is WORTH; the
+ * ledger is what was actually PAID, and only the ledger knows about manual
+ * adjustments or (later) redemptions. Showing someone a balance computed from
+ * the wrong table is how a number in an app stops matching the money behind it.
+ */
+export function useMyCreditBalance() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ['credit-balance', user?.id],
+    enabled: !!user && supabaseConfigured,
+    queryFn: async (): Promise<CreditBalance> => {
+      const { data, error } = await supabase.rpc('my_credit_balance');
+      if (error) throw error;
+      return {
+        balance_cents: 0, earned_cents: 0, spent_cents: 0, entry_count: 0,
+        ...((data ?? {}) as Partial<CreditBalance>),
+      };
+    },
+  });
+}
+
+/** The individual credit lines, newest first — so "where did this come from?"
+ *  has an answer inside the app rather than through support. */
+export function useMyCreditHistory(limit = 25) {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ['credit-history', user?.id, limit],
+    enabled: !!user && supabaseConfigured,
+    queryFn: async (): Promise<CreditEntry[]> => {
+      const { data, error } = await supabase
+        .from('account_credits')
+        .select('id, amount_cents, kind, note, created_at')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return (data ?? []) as CreditEntry[];
     },
   });
 }

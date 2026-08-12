@@ -10,7 +10,7 @@
 //   • Service area         → EditServiceAreaSheet  (partner_teams: city + radius)
 //   • My availability      → /(mover)/availability  (existing)
 //   • Crew                 → /(mover)/crew          (existing, operator only)
-//   • Refer a driver       → /(mover)/referrals    (existing)
+//   • Refer a crew member  → /(mover)/referrals
 //   • Safety               → /(mover)/safety        (new — mirrors company)
 //   • Terms & Privacy      → https://movvy.ca/legal
 //
@@ -230,7 +230,7 @@ export default function MoverProfile() {
         },
         {
           icon: 'gift-outline',
-          label: 'Refer a driver · $100 each',
+          label: 'Refer a crew member · $50 each',
           value: 'Earn',
           href: '/(mover)/referrals',
         },

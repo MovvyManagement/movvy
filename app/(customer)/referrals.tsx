@@ -1,15 +1,14 @@
 // =============================================================================
-// /(mover)/referrals — invite another crew member.
+// /(customer)/referrals — invite a friend to move with Movvy.
 //
-// $50 each side, paid when the person you invited COMPLETES THEIR FIRST JOB.
-// Not when they sign up, not when they're approved — the reward exists to
-// produce working crew, so it pays on work being done.
+// $75 each side, paid when the person you invited BOOKS AND PAYS for their
+// first move. Not on signup, and not on the booking being created — a booking
+// is a draft until the deposit is captured, and paying out on drafts would mean
+// paying for abandoned checkouts.
 //
-// This screen used to promise "$100 each after 5 moves", which was wrong twice
-// over: the amount had changed and the five-move rule never existed in the
-// database. Everything visible here now comes from ReferralPanel, which reads
-// the same constants the award function uses — so the copy can't drift from
-// the rule again.
+// There was no customer-facing referral screen at all before this: customers
+// had a referral code on their profile row that nothing in the app ever showed
+// them.
 // =============================================================================
 
 import React from 'react';
@@ -19,15 +18,15 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { MaxWidth } from '@/components/MaxWidth';
 import { ReferralPanel } from '@/components/ReferralPanel';
 
-export default function MoverReferrals() {
+export default function CustomerReferrals() {
   return (
     <SafeAreaView className="flex-1 bg-silver-50 dark:bg-night-900" edges={['top']}>
       <View className="bg-white dark:bg-night-100">
-        <ScreenHeader title="Refer a crew member" />
+        <ScreenHeader title="Invite a friend" />
       </View>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
         <MaxWidth>
-          <ReferralPanel side="driver" />
+          <ReferralPanel side="customer" />
         </MaxWidth>
       </ScrollView>
     </SafeAreaView>

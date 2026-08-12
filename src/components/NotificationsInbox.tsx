@@ -7,8 +7,8 @@
 // tapped row deep-links to, so that a driver never gets dropped into a
 // customer screen (and vice-versa). That routing is driven by `surface`:
 //
-//   customer → booking/move rows open /(customer)/(tabs)/bookings
-//              (customer referrals were pulled pre-launch — no such screen)
+//   customer → booking/move rows open /(customer)/(tabs)/bookings,
+//              promo/credit/referral rows open /(customer)/referrals
 //   mover    → job/booking rows open /(mover)/(tabs)/jobs,
 //              promo/credit/referral rows open /(mover)/referrals
 //   company  → job/booking rows open /(company)/(tabs)/jobs
@@ -114,9 +114,9 @@ export function NotificationsInbox({ surface }: { surface: NotificationSurface }
         .some((k) => cat.includes(k));
 
     if (surface === 'customer') {
-      // Customer referrals were pulled pre-launch — there is no
-      // /(customer)/referrals screen. Booking activity opens the bookings
-      // tab; anything else just stays on the notifications list.
+      // The referrals screen exists again (0110), so a "you earned credit"
+      // notification now lands somewhere that explains itself.
+      if (isReferral) return void router.push('/(customer)/referrals' as any);
       if (isBookingLike) router.push('/(customer)/(tabs)/bookings');
       return;
     }

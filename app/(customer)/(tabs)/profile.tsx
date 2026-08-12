@@ -116,14 +116,19 @@ export default function Profile() {
       value: 'View PDFs',
       onPress: () => router.push('/(customer)/receipts'),
     },
-    // The "Referral code" + "Invite friends · $50 off" rows were pulled
-    // pre-launch: the referral pipeline TRACKED credits (referrals table,
-    // migration 0032 applies them on the friend's first booking) but nothing
-    // ever redeemed them against a booking — bookings-create has no credit
-    // logic, so the screen promised $50 that could never be spent. Restore
-    // the rows (screen was app/(customer)/referrals.tsx, sheet was
-    // components/PromoCodeSheet.tsx — both in git history) once redemption
-    // is wired into the booking/invoice math.
+    {
+      // Restored (0110). These rows were pulled pre-launch because credits were
+      // tracked but could never be SPENT — the screen promised $50 that didn't
+      // exist anywhere. There's now a real ledger behind the number, and the
+      // screen says Movvy applies it rather than implying self-serve checkout
+      // redemption, which still isn't built. Honest about what it is.
+      icon: 'gift-outline',
+      label: 'Invite a friend · $75 each',
+      value: 'Earn credit',
+      // `as any`: expo-router's generated route union is stale until the dev
+      // server regenerates it. Same pattern as the other new routes here.
+      onPress: () => router.push('/(customer)/referrals' as any),
+    },
   ];
 
   // Single "Customer service" entry replaces the old Help & support +
