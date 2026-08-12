@@ -47,6 +47,8 @@ export interface ReceiptData {
   basis?: 'actual' | 'estimate';
   /** Deposit already collected at booking (against the estimate). */
   depositPaidDollars?: number;
+  /** Referral credit applied to this move. */
+  creditAppliedDollars?: number;
   /** Charged on completion — total less the deposit, tip included. */
   balanceDollars?: number;
 }
@@ -112,6 +114,9 @@ export function buildReceiptHtml(data: ReceiptData): string {
       ? `<table style="margin-top:14px">
           <tbody>
             <tr><td>Deposit paid at booking</td><td style="text-align:right">−${fmtCurrency(data.depositPaidDollars)}</td></tr>
+            ${data.creditAppliedDollars && data.creditAppliedDollars > 0
+              ? `<tr><td>Movvy credit applied</td><td style="text-align:right">−${fmtCurrency(data.creditAppliedDollars)}</td></tr>`
+              : ''}
             <tr><td style="font-weight:700">Charged on completion</td><td style="text-align:right;font-weight:700">${fmtCurrency(data.balanceDollars ?? data.totalDollars - data.depositPaidDollars)}</td></tr>
           </tbody>
         </table>`

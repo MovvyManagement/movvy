@@ -67,6 +67,8 @@ interface ReceiptBookingInput {
 
   hourly_rate_customer_cents?: number | null;
   deposit_cents?: number | null;
+  /** Referral credit spent on this move (0112). */
+  credit_applied_cents?: number | null;
   tip_cents?: number | null;
 }
 
@@ -196,7 +198,11 @@ export function bookingToReceiptData(
   // real bill came to, less that deposit. Never read balance_due_cents here —
   // it's the estimate-era figure and goes stale the moment actual billing runs.
   const depositCents = Math.min(c(booking.deposit_cents), totalCents);
-  const balanceCents = Math.max(0, totalCents - depositCents);
+  // Referral credit spent on this move. Shown as its own line: a customer
+  // comparing the total against what their card was charged needs to see where
+  // the difference went, or the receipt looks wrong.
+  const creditCents = Math.min(c(booking.credit_applied_cents), Math.max(0, totalCents - depositCents));
+  const balanceCents = Math.max(0, totalCents - depositCents - creditCents);
 
   return {
     shortCode: booking.short_code,
@@ -218,6 +224,7 @@ export function bookingToReceiptData(
     totalDollars: (totalCents + tipCents) / 100,
     basis: isFinal ? 'actual' : 'estimate',
     depositPaidDollars: depositCents / 100,
+    creditAppliedDollars: creditCents / 100,
     balanceDollars: (balanceCents + tipCents) / 100,
   };
 }

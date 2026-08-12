@@ -91,6 +91,7 @@ handle(async (req) => {
     let moveCents: number;   // the portion of THIS charge that is move revenue
     let tipCents = 0;
     let depositApplied = 0;
+    let creditApplied = 0;   // referral credit spent on this charge
 
     if (kind === 'deposit') {
       if (booking.deposit_status === 'paid') throw httpError(409, 'Deposit already paid.');
@@ -113,6 +114,33 @@ handle(async (req) => {
       depositApplied = booking.deposit_status === 'paid' ? (booking.deposit_cents ?? 0) : 0;
       moveCents = Math.max(bill - depositApplied, 0);
 
+      // ── Referral credit ───────────────────────────────────────────────────
+      // Applied HERE and not to the deposit: the deposit is the commitment gate
+      // that turns a draft into a booking a crew can see, so it has to cost
+      // real money — otherwise someone with $150 of credit books two moves with
+      // no card charged and no-shows both.
+      //
+      // redeem_credit_for_booking is idempotent by unique index: this endpoint
+      // gets called again on a retry, a second device, or a dismissed sheet,
+      // and every call must land on the SAME number rather than spending the
+      // balance twice. It returns the already-applied amount in that case.
+      if (moveCents > 0) {
+        const { data: applied, error: creditErr } = await supabase
+          .rpc('redeem_credit_for_booking', {
+            p_booking_id: booking_id,
+            p_max_cents: moveCents,
+          });
+        if (creditErr) {
+          // Never block a payment over credit. Charging full price is
+          // recoverable — the balance is still there and we can apply it by
+          // hand; a customer who cannot pay at all is not.
+          console.error('[stripe-create-payment-intent] credit redemption failed', creditErr);
+        } else {
+          creditApplied = Number(applied ?? 0);
+          moveCents = Math.max(moveCents - creditApplied, 0);
+        }
+      }
+
       // Tip is 100% the crew's. Cap it at the bill amount (or $1000) to stop
       // fat-finger / abuse, but otherwise honour the customer's choice.
       tipCents = Math.max(0, Math.min(parsed.data.tip_cents ?? 0, Math.min(bill, 100000)));
@@ -124,14 +152,34 @@ handle(async (req) => {
     // was already captured, confirmed by the signature-verified webhook) and
     // return a distinct state the app treats as success, not an error dialog.
     if (total < 50) {
-      if (kind === 'final' && depositApplied > 0) {
+      // Credit counts as settlement too: a bill fully covered by deposit +
+      // referral credit leaves nothing to charge, and the move is paid. Without
+      // creditApplied in this condition, a credit-covered move would fall
+      // through and try to create a sub-minimum PaymentIntent, which Stripe
+      // rejects — the customer would see a payment error on a move they owe
+      // nothing on.
+      if (kind === 'final' && (depositApplied > 0 || creditApplied > 0)) {
         await adminClient().from('bookings').update({
           payment_status: 'captured',
           amount_paid_cents: depositApplied,
+          credit_applied_cents: creditApplied,
           paid_at: new Date().toISOString(),
         }).eq('id', booking.id);
       }
-      return jsonResponse({ settled: true, amount_cents: 0, deposit_applied_cents: depositApplied }, { status: 200 }, cors);
+      return jsonResponse({
+        settled: true,
+        amount_cents: 0,
+        deposit_applied_cents: depositApplied,
+        credit_applied_cents: creditApplied,
+      }, { status: 200 }, cors);
+    }
+
+    // Record what the credit covered so the receipt can show it without
+    // re-deriving it from the ledger.
+    if (creditApplied > 0) {
+      await adminClient().from('bookings')
+        .update({ credit_applied_cents: creditApplied })
+        .eq('id', booking.id);
     }
 
     // Reuse/create a Stripe customer for this profile (service role — the
