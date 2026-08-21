@@ -17,7 +17,7 @@
 import { redirect } from 'next/navigation';
 import { supabaseServer } from '@/lib/supabase/server';
 import { getAdminAccess } from '@/lib/adminAccess';
-import { fmtCents, fmtDateTime, fmtRelative } from '@/lib/format';
+import { fmtCents, fmtDate, fmtDateTime, fmtRelative } from '@/lib/format';
 import { PayoutActions } from './PayoutActions';
 
 export const dynamic = 'force-dynamic';
@@ -39,6 +39,11 @@ export default async function PayoutsPage() {
     .select(
       'id, company_id, amount_cents, method, status, created_at, processed_at, reference, admin_note, ' +
       'etransfer_email, bank_holder_name, bank_institution_number, bank_transit_number, bank_account_last4, ' +
+      // Snapshot of the WORK the request covers (0114). Frozen at request time
+      // for the same reason the destination is: a roster and a booking list
+      // both move on, and whoever approves this a week later has to be able to
+      // see what they are paying for without re-deriving it.
+      'crew_size, tips_cents, jobs_count, period_start, period_end, ' +
       'companies(display_name, legal_name, email, phone, etransfer_email, bank_account_last4), ' +
       'profiles:requested_by(full_name, email)',
     )
@@ -156,6 +161,42 @@ export default async function PayoutsPage() {
                   <div className="mt-0.5 text-xs text-zinc-500">
                     Requested {fmtRelative(r.created_at)} by {who?.full_name ?? who?.email ?? 'crew admin'}
                     {co?.phone ? ` · ${co.phone}` : ''}
+                    {co?.email ? ` · ${co.email}` : ''}
+                  </div>
+
+                  {/* What the money is for. Without this the page showed a name
+                      and a number and asked you to trust both. */}
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-600">
+                    {r.period_start && r.period_end ? (
+                      <span>
+                        <span className="text-zinc-400">Covers</span>{' '}
+                        <span className="font-semibold text-zinc-800">
+                          {fmtDate(r.period_start)} – {fmtDate(r.period_end)}
+                        </span>
+                      </span>
+                    ) : null}
+                    {r.jobs_count != null ? (
+                      <span>
+                        <span className="text-zinc-400">Moves</span>{' '}
+                        <span className="font-semibold text-zinc-800">{r.jobs_count}</span>
+                      </span>
+                    ) : null}
+                    {r.crew_size != null ? (
+                      <span>
+                        <span className="text-zinc-400">Crew</span>{' '}
+                        <span className="font-semibold text-zinc-800">
+                          {r.crew_size} {r.crew_size === 1 ? 'person' : 'people'}
+                        </span>
+                      </span>
+                    ) : null}
+                    {Number(r.tips_cents ?? 0) > 0 ? (
+                      <span>
+                        <span className="text-zinc-400">Of which tips</span>{' '}
+                        <span className="font-semibold text-emerald-700">
+                          {fmtCents(r.tips_cents)}
+                        </span>
+                      </span>
+                    ) : null}
                   </div>
 
                   <div className="mt-3 rounded-xl bg-zinc-50 border border-zinc-200 p-3 text-xs">
@@ -172,6 +213,12 @@ export default async function PayoutsPage() {
                         <Field label="Institution" value={r.bank_institution_number} />
                         <Field label="Transit" value={r.bank_transit_number} />
                         <Field label="Account" value={r.bank_account_last4 ? `••••${r.bank_account_last4}` : null} />
+                        {/* The other rail, when they also have one on file —
+                            useful the moment a deposit bounces and you need a
+                            second way to reach them without leaving the page. */}
+                        {r.etransfer_email ? (
+                          <Field label="e-Transfer (also on file)" value={r.etransfer_email} />
+                        ) : null}
                       </div>
                     )}
                     {changed ? (

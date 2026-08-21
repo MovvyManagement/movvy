@@ -110,6 +110,7 @@ export default async function AdminLayout({
     ...(isManagement
       ? [
           { href: '/admin-management/payouts', label: 'Payouts', badge: pendingPayouts || undefined },
+          { href: '/admin-management/crews', label: 'Crews' },
           { href: '/admin-management/revenue', label: 'Revenue' },
           { href: '/admin-management/payments', label: 'Payments' },
           { href: '/admin-management/team', label: 'Team' },
@@ -182,6 +183,10 @@ export default async function AdminLayout({
                 icon="revenue"
                 badge={pendingPayouts || undefined}
               />
+              {/* Sits under Payouts because it answers the other half of the
+                  same question: Payouts is what was asked for, Crews is who
+                  you'd be paying and where the money goes. */}
+              <NavLink href="/admin-management/crews" label="Crews" icon="team" />
               <NavLink href="/admin-management/payments" label="Payments" icon="revenue" />
               <NavLink href="/admin-management/team" label="Team" icon="team" />
               <NavLink href="/admin-management/settings" label="Settings" icon="settings" />

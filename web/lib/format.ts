@@ -17,10 +17,23 @@ export function fmtCents(cents: number | null | undefined): string {
   return fmtCurrency((cents ?? 0) / 100);
 }
 
-/** Short date: "Jun 29, 2026" */
+/**
+ * Short date: "Jun 29, 2026"
+ *
+ * Accepts a timestamp OR a bare `YYYY-MM-DD` date column. The distinction
+ * matters: `new Date('2026-08-17')` is parsed as UTC midnight, which is 6:00 PM
+ * on the 16th in Alberta, so a date-only value rendered through the naive path
+ * comes out a day early — a payout period ending "Aug 16" when the column says
+ * the 17th. A calendar date has no time zone; build it as a local date so it
+ * survives the trip.
+ */
 export function fmtDate(iso: string | null | undefined): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-CA', {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.exec(iso);
+  const d = dateOnly
+    ? new Date(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10)))
+    : new Date(iso);
+  return d.toLocaleDateString('en-CA', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',

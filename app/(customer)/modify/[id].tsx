@@ -172,10 +172,15 @@ export default function ModifyBooking() {
               <Ionicons name="alert-circle" size={20} color="#B45309" />
               <View className="ml-2 flex-1">
                 <Text className="text-sm font-bold text-amber-900">Modifications closed</Text>
+                {/* State the actual choice and what it costs. "Contact support"
+                    on its own sends someone into a chat to be told the rule —
+                    they can read it here and decide. Inside 24 hours is also
+                    inside the 48-hour refund window, so cancelling now forfeits
+                    the deposit; that's the whole decision, so say it. */}
                 <Text className="text-xs text-amber-800 mt-1 leading-4">
                   {inFlight
                     ? 'This booking is already in progress or completed and can no longer be edited.'
-                    : 'Your move is less than 24 hours away. Contact support if you need to make changes.'}
+                    : 'Your move is less than 24 hours away, so the details are locked in. Your only option now is to cancel, and this close to the move the 20% deposit is not refunded — it goes to the crew who held the slot. Message us if something has gone wrong and we\'ll see what we can do.'}
                 </Text>
               </View>
             </View>
