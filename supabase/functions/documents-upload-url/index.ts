@@ -32,7 +32,9 @@ const Body = z.object({
   bucket: z.enum(['verifications', 'profile-photos', 'move-photos', 'company-photos']),
   kind: DocKind.optional(),
   // For verifications: scope = profile / team / company. Path inferred from subject.
-  subject_type: z.enum(['profile', 'team', 'company', 'booking']),
+  // 'vehicle' added in 0116: registration and insurance name a specific truck,
+  // so they attach to one rather than to the whole company.
+  subject_type: z.enum(['profile', 'team', 'company', 'booking', 'vehicle']),
   subject_id: z.string().uuid(),
   file_ext: z.string().regex(/^[a-z0-9]{1,5}$/),
 });
@@ -71,6 +73,19 @@ handle(async (req) => {
         .select('company_id, role').eq('company_id', subject_id).eq('profile_id', user.id).eq('status', 'active').is('removed_at', null).maybeSingle();
       if (!data || !['owner','dispatcher'].includes(data.role)) throw httpError(403, 'Not a company admin');
     }
+    if (subject_type === 'vehicle') {
+      // The uploader must run the company that owns the truck. Same bar as a
+      // company-level document, because that is what this replaces.
+      const { data: v } = await admin.from('vehicles')
+        .select('company_id').eq('id', subject_id).maybeSingle();
+      if (!v?.company_id) throw httpError(404, 'Truck not found');
+      const { data: m } = await admin.from('company_members')
+        .select('role').eq('company_id', v.company_id).eq('profile_id', user.id)
+        .eq('status', 'active').is('removed_at', null).maybeSingle();
+      if (!m || !['owner', 'dispatcher'].includes(m.role)) {
+        throw httpError(403, 'Only a crew admin can upload truck paperwork');
+      }
+    }
     if (subject_type === 'booking') {
       const { data } = await admin.from('bookings')
         .select('customer_id, assigned_driver_profile_id').eq('id', subject_id).single();
@@ -83,8 +98,20 @@ handle(async (req) => {
     // Path convention: bucket/<subject_id>/<kind>-<uuid>.<ext>
     // The leading segment matches storage RLS policy lookups
     const id = crypto.randomUUID();
+    // Vehicle documents live under the OWNING COMPANY's folder, not the
+    // vehicle's. Storage RLS matches on the first path segment, and every
+    // existing policy is written against company/team/profile ids — filing
+    // them under a vehicle id would put them in a folder no policy grants.
+    let vehicleCompanyId: string | null = null;
+    if (subject_type === 'vehicle') {
+      const { data: v } = await admin.from('vehicles')
+        .select('company_id').eq('id', subject_id).maybeSingle();
+      vehicleCompanyId = (v as any)?.company_id ?? null;
+    }
     const segmentOne = subject_type === 'team' || subject_type === 'company'
       ? subject_id
+      : subject_type === 'vehicle'
+      ? (vehicleCompanyId ?? user.id)
       : (subject_type === 'booking' ? subject_id : user.id);
     const filename = kind ? `${kind}-${id}.${file_ext}` : `${id}.${file_ext}`;
     const path = `${segmentOne}/${filename}`;
@@ -126,11 +153,17 @@ handle(async (req) => {
     let documentId: string | null = null;
     if (kind && (bucket === 'verifications')) {
       const insertCol: Record<string, string | null> = {
-        profile_id: null, team_id: null, company_id: null,
+        profile_id: null, team_id: null, company_id: null, vehicle_id: null,
       };
       if (subject_type === 'profile') insertCol.profile_id = subject_id;
       if (subject_type === 'team') insertCol.team_id = subject_id;
       if (subject_type === 'company') insertCol.company_id = subject_id;
+      if (subject_type === 'vehicle') {
+        insertCol.vehicle_id = subject_id;
+        // Keep company_id populated too: the approvals console groups by
+        // company, and the legacy fallback in vehicle_is_road_ready reads it.
+        insertCol.company_id = vehicleCompanyId;
+      }
 
       const { data: doc } = await admin.from('verification_documents').insert({
         ...insertCol,

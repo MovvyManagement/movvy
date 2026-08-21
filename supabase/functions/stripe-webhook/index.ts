@@ -90,8 +90,43 @@ Deno.serve(async (req: Request): Promise<Response> => {
     switch (event.type) {
       case 'payment_intent.succeeded': {
         const bookingId = obj.metadata?.booking_id ?? null;
-        const kind = obj.metadata?.kind === 'deposit' ? 'deposit' : 'final';
+        // THREE kinds now, not two. A standalone tip charge (tips-charge) is
+        // neither the deposit nor the move payment, and mapping it to 'final'
+        // — which is what "anything that isn't a deposit" did — would flip the
+        // booking to captured and overwrite amount_paid_cents with the tip.
+        const rawKind = obj.metadata?.kind;
+        const kind = rawKind === 'deposit' ? 'deposit' : rawKind === 'tip' ? 'tip' : 'final';
         const amount = obj.amount_received ?? obj.amount ?? 0;
+
+        // ── Standalone tip ────────────────────────────────────────────────
+        // Recorded only here, never optimistically by the app: the payout
+        // trigger pays a crew from tip_driver_cents, so the number has to mean
+        // "Stripe took this money", not "someone tapped 20%". Off-session
+        // charges are written by tips-charge itself; this branch is the
+        // Payment-Sheet path, where the app never learns the outcome.
+        if (bookingId && kind === 'tip') {
+          const { data: bk } = await admin.from('bookings')
+            .select('tip_cents').eq('id', bookingId).maybeSingle();
+          const priorTip = Number((bk as any)?.tip_cents ?? 0);
+          const newTotal = priorTip + amount;
+          await admin.from('bookings').update({
+            tip_cents: newTotal,
+            tip_movvy_cut_cents: 0,   // tips are 100% the crew's
+            tip_driver_cents: newTotal,
+            tipped_at: new Date().toISOString(),
+          }).eq('id', bookingId);
+          await admin.from('payments').insert({
+            booking_id: bookingId,
+            stripe_payment_intent_id: obj.id,
+            amount_cents: amount,
+            tip_cents: amount,
+            currency: obj.currency ?? 'cad',
+            status: 'succeeded',
+            kind: 'tip',
+            raw_event_type: event.type,
+          });
+          break;
+        }
         // Tip travels in PI metadata (set by stripe-create-payment-intent). It's
         // 100% the crew's, so we store it separately for the admin payout math.
         const tipCents = Number(obj.metadata?.tip_cents ?? 0) || 0;

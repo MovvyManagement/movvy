@@ -49,6 +49,9 @@ export interface ReceiptData {
   depositPaidDollars?: number;
   /** Referral credit applied to this move. */
   creditAppliedDollars?: number;
+  /** Overpayment returned to the card — the crew finished under the estimate
+   *  the deposit was taken against, so the deposit exceeded the final bill. */
+  refundDueDollars?: number;
   /** Charged on completion — total less the deposit, tip included. */
   balanceDollars?: number;
 }
@@ -118,6 +121,9 @@ export function buildReceiptHtml(data: ReceiptData): string {
               ? `<tr><td>Movvy credit applied</td><td style="text-align:right">−${fmtCurrency(data.creditAppliedDollars)}</td></tr>`
               : ''}
             <tr><td style="font-weight:700">Charged on completion</td><td style="text-align:right;font-weight:700">${fmtCurrency(data.balanceDollars ?? data.totalDollars - data.depositPaidDollars)}</td></tr>
+            ${data.refundDueDollars && data.refundDueDollars > 0
+              ? `<tr><td style="font-weight:700;color:#047857">Refunded to your card</td><td style="text-align:right;font-weight:700;color:#047857">−${fmtCurrency(data.refundDueDollars)}</td></tr>`
+              : ''}
           </tbody>
         </table>`
       : '';
@@ -132,7 +138,11 @@ export function buildReceiptHtml(data: ReceiptData): string {
            move takes and may differ from the figures above.
          </div>`
       : data.basis === 'actual'
-        ? `<div class="muted" style="margin-top:10px">Billed on the actual time the move took, not the booking estimate.</div>`
+        ? `<div class="muted" style="margin-top:10px">Billed on the actual time the move took, not the booking estimate.${
+      data.refundDueDollars && data.refundDueDollars > 0
+        ? ' Your crew finished under the estimate, so the difference between your deposit and the final bill goes back to the card you paid with.'
+        : ''
+    }</div>`
         : '';
 
   return `<!DOCTYPE html>

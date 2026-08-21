@@ -80,7 +80,7 @@ handle(async (req) => {
     const supabase = userClient(req.headers.get('Authorization'));
     const { data: booking, error } = await supabase
       .from('bookings')
-      .select('id, short_code, status, payment_status, actual_total_cents, price_total_cents, stripe_payment_intent_id, customer_id, deposit_cents, deposit_status')
+      .select('id, short_code, status, payment_status, actual_total_cents, price_total_cents, stripe_payment_intent_id, customer_id, deposit_cents, deposit_status, deposit_refunded_cents')
       .eq('id', booking_id)
       .maybeSingle();
 
@@ -110,8 +110,14 @@ handle(async (req) => {
       const bill = booking.actual_total_cents ?? booking.price_total_cents;
       if (!bill || bill <= 0) throw httpError(409, 'No amount to charge on this move.');
 
-      // Credit the deposit the customer already paid at booking.
-      depositApplied = booking.deposit_status === 'paid' ? (booking.deposit_cents ?? 0) : 0;
+      // Credit the deposit the customer already paid at booking — NET of any
+      // part of it already returned. When a crew finishes under the estimate,
+      // bookings-update-status refunds the surplus at completion (0115);
+      // crediting the gross deposit here would credit money the customer is
+      // already holding, and undercharge the move by exactly that amount.
+      depositApplied = booking.deposit_status === 'paid'
+        ? Math.max(0, (booking.deposit_cents ?? 0) - (booking.deposit_refunded_cents ?? 0))
+        : 0;
       moveCents = Math.max(bill - depositApplied, 0);
 
       // ── Referral credit ───────────────────────────────────────────────────
@@ -215,6 +221,13 @@ handle(async (req) => {
       amount: String(total),
       currency: 'cad',
       'automatic_payment_methods[enabled]': 'true',
+      // Keep the card on file for later off-session charges. Without this,
+      // nothing in Movvy could ever charge a customer again without them
+      // re-entering a card — which is why post-move tipping could not work:
+      // tips-submit could only RECORD a tip that had already been collected,
+      // and no second collection path existed. Requires `customer` to be set
+      // below; Stripe ignores it otherwise, so the guard is the customer id.
+      ...(customerId ? { setup_future_usage: 'off_session' } : {}),
       description: kind === 'deposit'
         ? `Movvy move #${booking.short_code} — 20% deposit`
         : `Movvy move #${booking.short_code}`,
@@ -256,9 +269,32 @@ handle(async (req) => {
         : { stripe_payment_intent_id: pi.id })
       .eq('id', booking.id);
 
+    // Ephemeral key lets the native Payment Sheet list the customer's saved
+    // cards instead of asking for the number again every time. Optional: if the
+    // call fails the sheet still works, it just starts empty.
+    let ephemeralKeySecret: string | null = null;
+    if (customerId) {
+      try {
+        const ekRes = await fetch('https://api.stripe.com/v1/ephemeral_keys', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${secretKey}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Stripe-Version': '2024-06-20',
+          },
+          body: form({ customer: customerId }),
+        });
+        if (ekRes.ok) ephemeralKeySecret = (await ekRes.json()).secret ?? null;
+        else console.warn('[stripe-create-payment-intent] ephemeral key failed', await ekRes.text());
+      } catch (e) {
+        console.warn('[stripe-create-payment-intent] ephemeral key threw', e);
+      }
+    }
+
     return jsonResponse({
       client_secret: pi.client_secret,
       payment_intent_id: pi.id,
+      ephemeral_key_secret: ephemeralKeySecret,
       kind,
       amount_cents: total,      // what the customer is charged now
       move_cents: moveCents,

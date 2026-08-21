@@ -188,7 +188,7 @@ handle(async (req) => {
       .from('bookings')
       .update(stamp)
       .eq('id', booking_id)
-      .select('id, short_code, status, customer_id, started_at, completed_at, hourly_rate_customer_cents, materials_cents, fuel_cents, is_long_haul, transit_cents, transit_km')
+      .select('id, short_code, status, customer_id, started_at, completed_at, hourly_rate_customer_cents, materials_cents, fuel_cents, is_long_haul, transit_cents, transit_km, deposit_cents, deposit_status, deposit_refunded_cents, credit_applied_cents, stripe_deposit_payment_intent_id')
       .single();
 
     if (error) {
@@ -296,6 +296,21 @@ handle(async (req) => {
         // see the booking as completed. The actual_* columns can be
         // backfilled via a recompute endpoint if needed.
       }
+
+      // ─── Give back an over-collected deposit ──────────────────────────
+      // The deposit is 20% of the ESTIMATE; the bill is the ACTUAL time. Beat
+      // the estimate by enough and the deposit covers the entire move with
+      // money left over. That surplus is the customer's, and nothing used to
+      // return it: the receipt clamped the deposit line down so the arithmetic
+      // still looked right, the final-charge path saw a zero balance and marked
+      // the move captured, and the difference simply stayed with Movvy.
+      //
+      // Refunded here rather than at final-payment time because a fully covered
+      // move never reaches the payment sheet — that is exactly the case where
+      // the customer is owed money, so it cannot be the one path that skips it.
+      if (!billErr) {
+        await refundDepositOverpayment(booking_id, data, actualBill.actualTotalCents);
+      }
     }
 
     await audit({
@@ -400,3 +415,87 @@ handle(async (req) => {
     return jsonResponse({ error: 'Internal server error' }, { status: 500 }, cors);
   }
 });
+
+/**
+ * Return the part of the deposit that exceeded the final bill.
+ *
+ * Deliberately non-fatal in every failure branch: the move is finished and the
+ * crew is waiting on this response. A refund that doesn't go through leaves
+ * money owed, which is recoverable by hand from the console; a 500 here leaves
+ * a completed move stuck in `unloading`, which is not.
+ *
+ * Idempotent through Stripe's Idempotency-Key, keyed on the booking and the
+ * exact amount, so a retried completion cannot refund twice.
+ */
+async function refundDepositOverpayment(
+  bookingId: string,
+  booking: any,
+  actualTotalCents: number,
+): Promise<void> {
+  try {
+    if (booking.deposit_status !== 'paid') return;
+    const piId = booking.stripe_deposit_payment_intent_id;
+    if (!piId) return;
+
+    const depositPaid = Number(booking.deposit_cents ?? 0);
+    const alreadyBack = Number(booking.deposit_refunded_cents ?? 0);
+    const credit = Number(booking.credit_applied_cents ?? 0);
+    // Credit counts toward covering the bill, so it makes the cash surplus
+    // bigger, not smaller.
+    const surplus = depositPaid + credit - actualTotalCents - alreadyBack;
+    // Stripe's floor is $0.50; below that a refund costs more than it returns.
+    if (surplus < 50) return;
+    // Never hand back more cash than was taken as cash.
+    const refundCents = Math.min(surplus, depositPaid - alreadyBack);
+    if (refundCents < 50) return;
+
+    const secretKey = Deno.env.get('STRIPE_SECRET_KEY');
+    if (!secretKey) {
+      console.error('[bookings-update-status] overpayment owed but Stripe unset', {
+        bookingId, refundCents,
+      });
+      return;
+    }
+
+    const res = await fetch('https://api.stripe.com/v1/refunds', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Idempotency-Key': `movvy_overpay_${bookingId}_${refundCents}`,
+      },
+      body: new URLSearchParams({
+        payment_intent: piId,
+        amount: String(refundCents),
+        reason: 'requested_by_customer',
+        'metadata[booking_id]': bookingId,
+        'metadata[kind]': 'deposit_overpayment',
+      }).toString(),
+    });
+
+    if (!res.ok) {
+      console.error('[bookings-update-status] overpayment refund refused',
+        res.status, await res.text());
+      return;
+    }
+
+    // Record it so the final-charge path stops crediting a deposit that is no
+    // longer held, and the receipt can show the customer where it went. The
+    // charge.refunded webhook confirms this independently.
+    await adminClient()
+      .from('bookings')
+      .update({ deposit_refunded_cents: alreadyBack + refundCents })
+      .eq('id', bookingId);
+
+    await adminClient().from('notifications').insert({
+      profile_id: booking.customer_id,
+      channel: 'in_app',
+      category: 'booking.refund',
+      title: 'Money back on your move',
+      body: `Your crew finished under the estimate, so $${(refundCents / 100).toFixed(2)} of your deposit is on its way back to your card.`,
+      data: { booking_id: bookingId, refund_cents: refundCents },
+    });
+  } catch (e) {
+    console.error('[bookings-update-status] overpayment refund threw', e);
+  }
+}

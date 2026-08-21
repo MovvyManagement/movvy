@@ -22,6 +22,7 @@ import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { MaxWidth } from '@/components/MaxWidth';
 import { haptic } from '@/lib/haptics';
 import { usePayForMove } from '@/lib/data/usePayForMove';
+import { muteNotificationBanners } from '@/components/NotificationBannerHost';
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
@@ -220,6 +221,12 @@ export default function ConfirmStep() {
 
       if (result.status === 'paid' || result.status === 'settled') {
         haptic.success();
+        // The deposit landing flips the booking to `searching`, and that
+        // trigger writes a "Booking confirmed" notification — which the global
+        // banner host would toast on top of the takeover below, telling the
+        // customer the same thing twice at once. Mute banners for this booking
+        // while the takeover is the thing on screen saying it.
+        muteNotificationBanners(8000, created.id);
         // Snapshot BEFORE reset() clears the draft — the confirmed takeover
         // renders from this state, not the store. Navigation to the Moves tab
         // happens when the customer dismisses the modal (goToMoves).

@@ -197,12 +197,25 @@ export function bookingToReceiptData(
   // Deposit taken at booking against the ESTIMATE; the balance is whatever the
   // real bill came to, less that deposit. Never read balance_due_cents here —
   // it's the estimate-era figure and goes stale the moment actual billing runs.
-  const depositCents = Math.min(c(booking.deposit_cents), totalCents);
+  //
+  // Report the deposit AS PAID. This used to clamp it to the total
+  // (Math.min(deposit, total)), which quietly rewrote history whenever a crew
+  // finished faster than the estimate assumed: a customer who paid $517.20 on a
+  // $2,586 estimate and ran up a $110 actual bill saw "Deposit paid at booking
+  // −$110.00" and "Charged on completion $0.00" — a receipt that balanced
+  // perfectly while hiding the $407.20 it owed them. The clamp existed to keep
+  // the balance from going negative; the negative IS the information.
+  const depositCents = c(booking.deposit_cents);
   // Referral credit spent on this move. Shown as its own line: a customer
   // comparing the total against what their card was charged needs to see where
   // the difference went, or the receipt looks wrong.
   const creditCents = Math.min(c(booking.credit_applied_cents), Math.max(0, totalCents - depositCents));
-  const balanceCents = Math.max(0, totalCents - depositCents - creditCents);
+  // Signed on purpose: positive = still to pay, negative = we owe them back.
+  // The tip is part of the settlement, so it offsets an overpayment before any
+  // refund is due — someone who overpaid $400 and tipped $100 is owed $300.
+  const balanceCents = totalCents - depositCents - creditCents;
+  const settlementCents = balanceCents + c(booking.tip_cents);
+  const refundDueCents = settlementCents < 0 ? -settlementCents : 0;
 
   return {
     shortCode: booking.short_code,
@@ -225,6 +238,10 @@ export function bookingToReceiptData(
     basis: isFinal ? 'actual' : 'estimate',
     depositPaidDollars: depositCents / 100,
     creditAppliedDollars: creditCents / 100,
-    balanceDollars: (balanceCents + tipCents) / 100,
+    refundDueDollars: refundDueCents / 100,
+    // Never negative on the invoice line — an overpayment shows as its own
+    // refund row instead, which is what a customer scanning for 'what did I
+    // pay' actually looks for.
+    balanceDollars: Math.max(0, settlementCents) / 100,
   };
 }

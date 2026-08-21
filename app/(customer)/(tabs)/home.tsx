@@ -145,8 +145,11 @@ export default function CustomerHome() {
           always is when the move ends. Safe to be mounted here even if the
           user is briefly on another tab; React Query keeps the booking state
           fresh and the modal will pop the next time they return to home. */}
-      <ReviewPromptHost />
       <SafeAreaView edges={['top']} className="bg-white">
+        {/* Inside the safe area, not above it. Rendered outside, this banner
+            drew under the Dynamic Island — the top of the card sat behind the
+            cutout, so "Rate your move" was clipped and largely unreadable. */}
+        <ReviewPromptHost />
         <View className="px-5 pt-2 pb-4 flex-row items-center justify-between bg-white">
           <View>
             <Text className="text-xs text-silver-500">Hi {firstName}</Text>

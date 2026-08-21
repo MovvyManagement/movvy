@@ -9,7 +9,8 @@ type DocKind = 'gov_id' | 'driver_license' | 'vehicle_registration' | 'insurance
 interface UploadArgs {
   bucket: Bucket;
   kind?: DocKind;
-  subject_type: 'profile' | 'team' | 'company' | 'booking';
+  // 'vehicle' (0116): registration and insurance name a specific truck.
+  subject_type: 'profile' | 'team' | 'company' | 'booking' | 'vehicle';
   subject_id: string;
   fileUri: string;       // local file:// URI from expo-image-picker
   fileName: string;
@@ -122,6 +123,45 @@ export function useFleetReadiness() {
       const { data, error } = await supabase.rpc('my_fleet_readiness');
       if (error) throw error;
       return { ...EMPTY_FLEET, ...((data ?? {}) as Partial<FleetReadiness>) };
+    },
+  });
+}
+
+// ─── Per-truck document state (0116) ────────────────────────────────────────
+// One row per truck with its own registration and insurance status, replacing
+// the single company-wide pair that useFleetReadiness returns. `is_legacy` marks
+// a document that predates per-truck paperwork and still covers the vehicle
+// under the fallback in vehicle_is_road_ready.
+
+export interface FleetDocRow {
+  vehicle_id: string;
+  make: string | null;
+  model: string | null;
+  year: number | null;
+  plate: string | null;
+  length_ft: number | null;
+  capacity_cu_ft: number | null;
+  /** True when THIS truck may be put on a job. */
+  road_ready: boolean;
+  registration_status: 'pending' | 'approved' | 'rejected' | null;
+  registration_rejection: string | null;
+  registration_is_legacy: boolean;
+  insurance_status: 'pending' | 'approved' | 'rejected' | null;
+  insurance_rejection: string | null;
+  insurance_is_legacy: boolean;
+}
+
+export function useFleetDocuments() {
+  return useQuery({
+    queryKey: ['fleet-documents'],
+    enabled: supabaseConfigured,
+    // Same reasoning as useFleetReadiness: an approval landing while the
+    // partner is on this screen should unlock the truck without a restart.
+    refetchInterval: 60_000,
+    queryFn: async (): Promise<FleetDocRow[]> => {
+      const { data, error } = await supabase.rpc('my_fleet_documents');
+      if (error) throw error;
+      return (data ?? []) as FleetDocRow[];
     },
   });
 }

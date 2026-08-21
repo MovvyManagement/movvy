@@ -105,7 +105,7 @@ export function ReviewPromptHost() {
       setTarget({
         bookingId: b.id,
         shortCode: b.short_code,
-        totalDollars: b.price_total_cents / 100,
+        totalDollars: tipBaseDollars(b),
       });
       haptic.success();
       break; // one prompt at a time
@@ -149,13 +149,25 @@ export function ReviewPromptHost() {
             setTarget({
               bookingId: bannerBooking.id,
               shortCode: bannerBooking.short_code,
-              totalDollars: bannerBooking.price_total_cents / 100,
+              totalDollars: tipBaseDollars(bannerBooking),
             })
           }
         />
       ) : null}
     </>
   );
+}
+
+/**
+ * What the tip percentage should be a share of.
+ *
+ * The ESTIMATE is the wrong base and was the one being used. A move quoted at
+ * $2,586 that actually billed $110 offered a "20%" chip of $517 — five times
+ * the entire move, and rejected by the tip endpoint for exactly that reason.
+ * Tip on what the customer actually paid.
+ */
+function tipBaseDollars(b: { actual_total_cents?: number | null; price_total_cents: number }): number {
+  return (b.actual_total_cents ?? b.price_total_cents) / 100;
 }
 
 // ─── persistent banner ─────────────────────────────────────────────────────
@@ -229,11 +241,31 @@ function ReviewModal({
         overall: stars,
         comment: comment.trim() || undefined,
       });
+      // The rating is saved. From here on, a tip problem must not read as
+      // "your rating failed" — that's what the old catch-all did, and it sent
+      // people back to re-rate a crew they'd already rated.
       if (tipDollars > 0) {
-        await submitTip.mutateAsync({
-          booking_id: target.bookingId,
-          amount_cents: tipDollars * 100,
-        });
+        try {
+          const res = await submitTip.mutateAsync({
+            booking_id: target.bookingId,
+            amount_cents: tipDollars * 100,
+          });
+          if ((res as any)?.canceled) {
+            // They backed out of the payment sheet. Not an error — the rating
+            // stands and they can tip later from My Moves.
+            haptic.success();
+            onSubmitted();
+            return;
+          }
+        } catch (tipErr: any) {
+          haptic.success();
+          onSubmitted();
+          Alert.alert(
+            'Rating saved — tip not charged',
+            `${tipErr?.message ?? 'The tip could not be charged.'}\n\nYou can tip from My Moves any time in the next 24 hours.`,
+          );
+          return;
+        }
       }
       haptic.success();
       onSubmitted();

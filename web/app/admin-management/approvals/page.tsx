@@ -46,7 +46,10 @@ export default async function ApprovalsPage() {
     // 'pending' forever and the crew can never accept a job.
     supabase
       .from('verification_documents')
-      .select('id, kind, status, created_at, company_id, companies(display_name, legal_name)')
+      // vehicle join added in 0116: a registration now names one truck, so the
+      // reviewer has to be able to see WHICH truck they're approving. Without
+      // it a crew with three trucks presents three identical-looking rows.
+      .select('id, kind, status, created_at, company_id, vehicle_id, companies(display_name, legal_name), vehicles(make, model, year, plate, length_ft)')
       .in('kind', ['vehicle_registration', 'insurance'])
       .eq('status', 'pending')
       .not('company_id', 'is', null)
@@ -64,24 +67,40 @@ export default async function ApprovalsPage() {
     if (d.status === 'approved') docMap[key].approved++;
   });
 
-  // One row per org with pending truck paperwork.
+  // One row per org with pending truck paperwork — now naming the trucks.
+  // Documents attach to a vehicle (0116), so a crew can have three
+  // registrations pending and the reviewer needs to know which vehicle each
+  // one is for before approving. Grouped by company still, because that's the
+  // page the row links to.
   const truckQueue = Object.values(
     (truckDocs ?? []).reduce((acc: Record<string, any>, d: any) => {
       const cid = d.company_id as string;
       const co = Array.isArray(d.companies) ? d.companies[0] : d.companies;
+      const veh = Array.isArray(d.vehicles) ? d.vehicles[0] : d.vehicles;
       if (!acc[cid]) {
         acc[cid] = {
           company_id: cid,
           name: co?.display_name ?? co?.legal_name ?? 'Partner',
           kinds: [] as string[],
+          trucks: new Set<string>(),
           created_at: d.created_at,
         };
       }
       acc[cid].kinds.push(d.kind);
+      if (veh) {
+        const label = [veh.make, veh.model].filter(Boolean).join(' ').trim();
+        acc[cid].trucks.add(
+          [label || 'Truck', veh.length_ft ? `${veh.length_ft} ft` : null, veh.plate ? `plate ${veh.plate}` : null]
+            .filter(Boolean)
+            .join(' · '),
+        );
+      }
       if (d.created_at < acc[cid].created_at) acc[cid].created_at = d.created_at;
       return acc;
     }, {}),
-  ) as { company_id: string; name: string; kinds: string[]; created_at: string }[];
+  ).map((t: any) => ({ ...t, trucks: Array.from(t.trucks) as string[] })) as {
+    company_id: string; name: string; kinds: string[]; trucks: string[]; created_at: string;
+  }[];
 
   const total = (teams?.length ?? 0) + (companies?.length ?? 0);
 
@@ -159,6 +178,11 @@ export default async function ApprovalsPage() {
                   .join(' · ')}{' '}
                 · uploaded {fmtDate(t.created_at)}
               </div>
+              {t.trucks.length > 0 ? (
+                <div className="text-xs text-zinc-400 mt-0.5 truncate">
+                  {t.trucks.join('  ·  ')}
+                </div>
+              ) : null}
             </div>
             <div className="text-xs text-zinc-400 whitespace-nowrap shrink-0">
               {fmtRelative(t.created_at)}

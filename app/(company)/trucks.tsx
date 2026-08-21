@@ -23,7 +23,8 @@ import { Badge } from '@/components/Badge';
 import { EmptyState } from '@/components/EmptyState';
 import { CardSkeleton } from '@/components/Skeleton';
 import { AddTruckSheet } from '@/components/AddTruckSheet';
-import { TruckDocsCard } from '@/components/TruckDocsCard';
+import { TruckDocsRows } from '@/components/TruckDocsRows';
+import { useFleetDocuments } from '@/lib/data';
 import {
   useMyMembership,
   useCompanyVehicles,
@@ -52,6 +53,15 @@ export default function CompanyTrucks() {
   const { data: trucks, isLoading, refetch, isRefetching } = useCompanyVehicles(companyId);
   const del = useDeleteCompanyVehicle(companyId);
   const toast = useToast();
+
+  // Per-truck document state (0116). Keyed by vehicle so each truck card can
+  // render its own registration and insurance instead of one company-wide pair
+  // that said nothing about which vehicle it covered.
+  const { data: fleetDocs } = useFleetDocuments();
+  const docFor = React.useCallback(
+    (vehicleId: string) => (fleetDocs ?? []).find((d) => d.vehicle_id === vehicleId) ?? null,
+    [fleetDocs],
+  );
 
   const [addOpen, setAddOpen] = useState(false);
 
@@ -135,31 +145,37 @@ export default function CompanyTrucks() {
             />
           }
         >
-          {/* Registration + insurance review state — the gate on accepting any
-              job, and the only place to re-upload after a rejection. */}
-          {isDispatcher ? <TruckDocsCard companyId={companyId} /> : null}
-
           <View className="flex-row gap-3 mb-4">
             <Card className="flex-1">
               <Text className="text-xs text-silver-500 uppercase font-semibold">Fleet size</Text>
               <Text className="text-2xl font-bold text-ink-900 mt-1">{trucks.length}</Text>
             </Card>
             <Card className="flex-1">
-              <Text className="text-xs text-silver-500 uppercase font-semibold">Largest</Text>
+              {/* "Largest" means largest you can actually be dispatched in.
+                  Showing an unapproved 26-footer here told a crew they could
+                  take jobs the gate would refuse. */}
+              <Text className="text-xs text-silver-500 uppercase font-semibold">Largest approved</Text>
               <Text className="text-base font-bold text-ink-900 mt-2">
-                {TYPE_LABELS[
-                  trucks.reduce((max, t) => {
-                    const order = [
-                      'pickup_truck',
-                      'cargo_van',
-                      'cube_van_16',
-                      'box_truck_24',
-                      'box_truck_26',
-                      'other',
-                    ];
-                    return order.indexOf(t.type) > order.indexOf(max) ? t.type : max;
-                  }, 'pickup_truck')
-                ] ?? '—'}
+                {(() => {
+                  const order = [
+                    'pickup_truck',
+                    'cargo_van',
+                    'cube_van_16',
+                    'box_truck_24',
+                    'box_truck_26',
+                    'other',
+                  ];
+                  const ready = trucks.filter((t) => docFor(t.id)?.road_ready !== false);
+                  if (ready.length === 0) return 'None yet';
+                  return (
+                    TYPE_LABELS[
+                      ready.reduce(
+                        (max, t) => (order.indexOf(t.type) > order.indexOf(max) ? t.type : max),
+                        'pickup_truck',
+                      )
+                    ] ?? '—'
+                  );
+                })()}
               </Text>
             </Card>
           </View>
@@ -190,6 +206,11 @@ export default function CompanyTrucks() {
                   </View>
                   <Badge label={TYPE_LABELS[t.type] ?? t.type} tone="neutral" />
                 </View>
+                {/* This truck's own paperwork, under this truck. */}
+                {docFor(t.id) ? (
+                  <TruckDocsRows truck={docFor(t.id)!} canEdit={isDispatcher} />
+                ) : null}
+
                 {isDispatcher ? (
                   <Pressable
                     onPress={() =>
