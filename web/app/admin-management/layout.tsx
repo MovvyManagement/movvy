@@ -67,7 +67,7 @@ export default async function AdminLayout({
   const isManagement = access === 'management';
 
   // Fetch live counts for sidebar badges
-  const [pendingApprovals, openSupport, openDisputes, pendingPayouts] = await Promise.all([
+  const [pendingApprovals, openSupport, openDisputes, pendingPayouts, owedRefunds] = await Promise.all([
     supabase
       .from('partner_teams')
       .select('id', { count: 'exact', head: true })
@@ -96,6 +96,14 @@ export default async function AdminLayout({
       .select('id', { count: 'exact', head: true })
       .eq('status', 'pending')
       .then((r) => r.count ?? 0),
+    // Customers owed money back. Counted rather than derived in SQL here
+    // because the RPC is management-only and this layout also renders for
+    // staff — a staff session gets an empty list and therefore no badge,
+    // which is correct: they can't action it either.
+    supabase
+      .rpc('admin_refunds_owed')
+      .then((r) => (Array.isArray(r.data) ? r.data.length : 0))
+      .then((n) => n, () => 0),
   ]);
 
   // Flat link list for the mobile drawer (same gating as the sidebar).
@@ -111,6 +119,7 @@ export default async function AdminLayout({
       ? [
           { href: '/admin-management/payouts', label: 'Payouts', badge: pendingPayouts || undefined },
           { href: '/admin-management/crews', label: 'Crews' },
+          { href: '/admin-management/refunds', label: 'Refunds', badge: owedRefunds || undefined },
           { href: '/admin-management/revenue', label: 'Revenue' },
           { href: '/admin-management/payments', label: 'Payments' },
           { href: '/admin-management/team', label: 'Team' },
@@ -187,6 +196,13 @@ export default async function AdminLayout({
                   same question: Payouts is what was asked for, Crews is who
                   you'd be paying and where the money goes. */}
               <NavLink href="/admin-management/crews" label="Crews" icon="team" />
+              {/* Money owed BACK, as opposed to Payouts' money owed out. */}
+              <NavLink
+                href="/admin-management/refunds"
+                label="Refunds"
+                icon="revenue"
+                badge={owedRefunds || undefined}
+              />
               <NavLink href="/admin-management/payments" label="Payments" icon="revenue" />
               <NavLink href="/admin-management/team" label="Team" icon="team" />
               <NavLink href="/admin-management/settings" label="Settings" icon="settings" />

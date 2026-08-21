@@ -349,13 +349,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
               .update({ payment_status: fully ? 'refunded' : 'partially_refunded' })
               .eq('id', (bk as any).id);
           }
-          // Deposit refund (>48h cancellation) → flips deposit_status instead.
+          // Deposit refund. Two shapes now:
+          //   • FULL — a >48h cancellation, the whole deposit goes back and the
+          //     deposit's own status becomes 'refunded'.
+          //   • PARTIAL — an over-collected deposit on a move that came in
+          //     under its estimate. The deposit is still 'paid'; what changed
+          //     is how much of it Movvy still holds.
+          // Recording the amount either way is what clears the move out of the
+          // console's Refunds queue and lets the receipt say "issued" instead
+          // of "due" — both read deposit_refunded_cents, and both must reflect
+          // Stripe rather than anyone's intention to refund.
           const { data: depBk } = await admin.from('bookings')
             .select('id').eq('stripe_deposit_payment_intent_id', piId).maybeSingle();
-          if (depBk && fully) {
-            await admin.from('bookings')
-              .update({ deposit_status: 'refunded' })
-              .eq('id', (depBk as any).id);
+          if (depBk) {
+            const patch: Record<string, unknown> = { deposit_refunded_cents: refunded };
+            if (fully) patch.deposit_status = 'refunded';
+            await admin.from('bookings').update(patch).eq('id', (depBk as any).id);
           }
           await admin.from('payments').update({
             status: fully ? 'refunded' : 'partially_refunded',

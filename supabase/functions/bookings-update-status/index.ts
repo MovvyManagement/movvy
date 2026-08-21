@@ -297,19 +297,18 @@ handle(async (req) => {
         // backfilled via a recompute endpoint if needed.
       }
 
-      // ─── Give back an over-collected deposit ──────────────────────────
+      // ─── Flag an over-collected deposit for review ────────────────────
       // The deposit is 20% of the ESTIMATE; the bill is the ACTUAL time. Beat
       // the estimate by enough and the deposit covers the entire move with
-      // money left over. That surplus is the customer's, and nothing used to
-      // return it: the receipt clamped the deposit line down so the arithmetic
-      // still looked right, the final-charge path saw a zero balance and marked
-      // the move captured, and the difference simply stayed with Movvy.
+      // money left over. That surplus is the customer's.
       //
-      // Refunded here rather than at final-payment time because a fully covered
-      // move never reaches the payment sheet — that is exactly the case where
-      // the customer is owed money, so it cannot be the one path that skips it.
+      // Movvy issues it by hand from the console rather than automatically:
+      // completion is the moment a bill is most likely to be wrong — a crew
+      // taps Finish early, forgets a status, or backdates a step — and a refund
+      // that has already left is far harder to walk back than one still
+      // waiting in a queue. So this only raises the flag.
       if (!billErr) {
-        await refundDepositOverpayment(booking_id, data, actualBill.actualTotalCents);
+        await flagDepositOverpayment(booking_id, data, actualBill.actualTotalCents);
       }
     }
 
@@ -417,85 +416,67 @@ handle(async (req) => {
 });
 
 /**
- * Return the part of the deposit that exceeded the final bill.
+ * Raise a flag when the deposit came in over the final bill.
  *
- * Deliberately non-fatal in every failure branch: the move is finished and the
- * crew is waiting on this response. A refund that doesn't go through leaves
- * money owed, which is recoverable by hand from the console; a 500 here leaves
- * a completed move stuck in `unloading`, which is not.
+ * Notifies Movvy staff and leaves the money where it is. Nothing here charges
+ * or refunds — the console's Refunds queue lists the move and an admin issues
+ * it through admin-refund-booking, which does the Stripe work and records what
+ * went back.
  *
- * Idempotent through Stripe's Idempotency-Key, keyed on the booking and the
- * exact amount, so a retried completion cannot refund twice.
+ * Non-fatal throughout: the move is finished and the crew is waiting on this
+ * response. A missed notification means a refund sits in the queue a while
+ * longer, which the queue itself will still show; a 500 here leaves a completed
+ * move stuck in `unloading`.
  */
-async function refundDepositOverpayment(
+async function flagDepositOverpayment(
   bookingId: string,
   booking: any,
   actualTotalCents: number,
 ): Promise<void> {
   try {
     if (booking.deposit_status !== 'paid') return;
-    const piId = booking.stripe_deposit_payment_intent_id;
-    if (!piId) return;
 
     const depositPaid = Number(booking.deposit_cents ?? 0);
     const alreadyBack = Number(booking.deposit_refunded_cents ?? 0);
     const credit = Number(booking.credit_applied_cents ?? 0);
-    // Credit counts toward covering the bill, so it makes the cash surplus
-    // bigger, not smaller.
     const surplus = depositPaid + credit - actualTotalCents - alreadyBack;
-    // Stripe's floor is $0.50; below that a refund costs more than it returns.
+    // Stripe's floor is $0.50 — below that a refund costs more than it returns,
+    // so it isn't worth an admin's attention either.
     if (surplus < 50) return;
-    // Never hand back more cash than was taken as cash.
-    const refundCents = Math.min(surplus, depositPaid - alreadyBack);
-    if (refundCents < 50) return;
 
-    const secretKey = Deno.env.get('STRIPE_SECRET_KEY');
-    if (!secretKey) {
-      console.error('[bookings-update-status] overpayment owed but Stripe unset', {
-        bookingId, refundCents,
-      });
-      return;
+    const admin = adminClient();
+    const { data: staff } = await admin
+      .from('profiles')
+      .select('id')
+      .in('role', ['movvy_admin', 'movvy_support'])
+      .is('deleted_at', null);
+
+    const amount = `$${(surplus / 100).toFixed(2)}`;
+    if (staff?.length) {
+      await admin.from('notifications').insert(
+        staff.map((p: any) => ({
+          profile_id: p.id,
+          channel: 'in_app' as const,
+          category: 'admin.refund_owed',
+          title: 'Refund owed on a move',
+          body: `#${booking.short_code ?? bookingId.slice(0, 8)} finished under its estimate — ${amount} of the deposit is owed back.`,
+          data: { booking_id: bookingId, refund_cents: surplus },
+        })),
+      );
     }
 
-    const res = await fetch('https://api.stripe.com/v1/refunds', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${secretKey}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Idempotency-Key': `movvy_overpay_${bookingId}_${refundCents}`,
-      },
-      body: new URLSearchParams({
-        payment_intent: piId,
-        amount: String(refundCents),
-        reason: 'requested_by_customer',
-        'metadata[booking_id]': bookingId,
-        'metadata[kind]': 'deposit_overpayment',
-      }).toString(),
-    });
-
-    if (!res.ok) {
-      console.error('[bookings-update-status] overpayment refund refused',
-        res.status, await res.text());
-      return;
-    }
-
-    // Record it so the final-charge path stops crediting a deposit that is no
-    // longer held, and the receipt can show the customer where it went. The
-    // charge.refunded webhook confirms this independently.
-    await adminClient()
-      .from('bookings')
-      .update({ deposit_refunded_cents: alreadyBack + refundCents })
-      .eq('id', bookingId);
-
-    await adminClient().from('notifications').insert({
+    // The customer is told a person is looking at it — not that money is on the
+    // way. Promising a refund we have not issued is the same lie the receipt
+    // used to tell, moved into a notification.
+    await admin.from('notifications').insert({
       profile_id: booking.customer_id,
       channel: 'in_app',
-      category: 'booking.refund',
-      title: 'Money back on your move',
-      body: `Your crew finished under the estimate, so $${(refundCents / 100).toFixed(2)} of your deposit is on its way back to your card.`,
-      data: { booking_id: bookingId, refund_cents: refundCents },
+      category: 'booking.refund_pending',
+      title: 'Your crew finished early',
+      body: `Your move came in under the estimate, so ${amount} of your deposit is coming back. We're processing it now.`,
+      data: { booking_id: bookingId, refund_cents: surplus },
     });
   } catch (e) {
-    console.error('[bookings-update-status] overpayment refund threw', e);
+    console.error('[bookings-update-status] overpayment flag threw', e);
   }
 }
