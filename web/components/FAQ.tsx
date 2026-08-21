@@ -11,7 +11,14 @@ import { useState } from 'react';
 const faqs = [
   {
     q: 'How much does a Movvy move cost?',
-    a: "Honest hourly pricing — you pay for the actual time the crew spends on site, plus a small travel and materials fee. A typical 2-bedroom Calgary move runs $400–$700 all-in. You see a live estimate the moment you enter your addresses.",
+    // The old copy promised "$400–$700 all-in" for this exact move. The engine
+    // has never produced a number in that range: the cheapest quote it can
+    // generate for anything is $1,300 (a 1-bedroom apartment), and a 2-bedroom
+    // prices at $1,667 — 8.5 hours at $175/hr for a two-person crew, plus fuel,
+    // materials and GST. Advertising less than half the real figure gets people
+    // to the estimate screen and loses them there. Keep this in step with
+    // lookupResidential() in src/lib/pricing.ts.
+    a: "Honest hourly pricing — you pay for the actual time the crew spends on site, plus travel, materials and GST. A two-person crew is $175/hr, and a typical 2-bedroom Calgary move works out around $1,650 all-in for about eight and a half hours. You see a live estimate the moment you enter your addresses, and you're billed on the real time the move takes.",
   },
   {
     q: 'Can I cancel after I book?',
@@ -19,7 +26,11 @@ const faqs = [
   },
   {
     q: 'Are the movers insured?',
-    a: 'Every Movvy crew carries $2M commercial liability insurance and is background-checked before their first job. If something ever goes wrong, the in-app claim flow opens a real ticket with our support team within minutes.',
+    // "the in-app claim flow" no longer exists — the claim, dispute and audit
+    // screens were removed and Customer Service now opens a chat with a person,
+    // who raises the claim from the thread. Describe the door that's actually
+    // there.
+    a: 'Every Movvy crew carries $2M commercial liability insurance and is background-checked before their first job. If something ever goes wrong, open Customer Service in the app — it puts you straight into a chat with our support team, and they handle the claim from there.',
   },
   {
     q: "What if I don't need a full move — just one heavy item?",

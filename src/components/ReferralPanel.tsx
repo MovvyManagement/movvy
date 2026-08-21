@@ -11,8 +11,8 @@
 // the code, so a stale build can misquote the figure but can never change it.
 // =============================================================================
 
-import React from 'react';
-import { View, Text, Pressable, Share, Platform } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, Pressable, Share, Platform, TextInput } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { Card } from './Card';
@@ -23,6 +23,7 @@ import {
   useMyReferralCode,
   useMyReferralStats,
   useMyCreditBalance,
+  useApplyReferralCode,
 } from '@/lib/data';
 
 /** Kept in step with award_referral_credit() in migration 0110. */
@@ -33,6 +34,8 @@ export function ReferralPanel({ side }: { side: 'customer' | 'driver' }) {
   const { data: code, isLoading } = useMyReferralCode();
   const { data: stats } = useMyReferralStats();
   const { data: credit } = useMyCreditBalance();
+  const apply = useApplyReferralCode();
+  const [entered, setEntered] = useState('');
 
   const rewardCents = REFERRAL_REWARD_CENTS[side];
   const reward = fmtCurrency(rewardCents / 100);
@@ -122,6 +125,66 @@ export function ReferralPanel({ side }: { side: 'customer' | 'driver' }) {
           credit {qualifier}. Nothing is paid before that.
         </Text>
       </Card>
+
+      {/* ── Enter someone else's code ─────────────────────────────────────
+          This card did not exist. The whole back half of the programme was
+          built — ledger, award rules, triggers, collision-free codes — and
+          there was no field anywhere in the app to type a code into, so not
+          one referral was ever created. A share button with nothing on the
+          receiving end is just a share button. */}
+      {(stats?.referred_by ?? null) === null ? (
+        <Card>
+          <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500">
+            Got a code from someone?
+          </Text>
+          <Text className="mt-1 text-xs text-silver-500 leading-5">
+            Enter it before your first {side === 'customer' ? 'paid move' : 'job'} and you
+            both get credit when it qualifies.
+          </Text>
+          <View className="mt-3 flex-row items-center">
+            <View className="flex-1 rounded-2xl border border-silver-200 bg-white px-4 py-3">
+              <TextInput
+                value={entered}
+                onChangeText={(t) => setEntered(t.toUpperCase())}
+                placeholder="MOVXXXXX"
+                placeholderTextColor="#A1A1AA"
+                autoCapitalize="characters"
+                autoCorrect={false}
+                maxLength={12}
+                editable={!apply.isPending}
+                className="text-base font-bold tracking-widest text-ink-900"
+              />
+            </View>
+            <Pressable
+              onPress={async () => {
+                try {
+                  await apply.mutateAsync(entered);
+                  haptic.success();
+                  toast.success("Code applied — credit lands when it qualifies.");
+                  setEntered('');
+                } catch (e: any) {
+                  toast.error(e?.message ?? "That code couldn't be applied.");
+                }
+              }}
+              // Every Movvy code is MOV + 4 or 5 characters. Gating on 7 stops
+              // an obviously-incomplete submission without inventing a rule the
+              // customer can't see — the placeholder shows the shape.
+              disabled={apply.isPending || entered.trim().length < 7}
+              className={`ml-2 rounded-2xl px-5 py-3.5 ${
+                apply.isPending || entered.trim().length < 7 ? 'bg-silver-200' : 'bg-ink-900'
+              }`}
+            >
+              <Text
+                className={`text-sm font-bold ${
+                  apply.isPending || entered.trim().length < 7 ? 'text-silver-500' : 'text-white'
+                }`}
+              >
+                {apply.isPending ? 'Checking…' : 'Apply'}
+              </Text>
+            </Pressable>
+          </View>
+        </Card>
+      ) : null}
 
       {/* ── Where their invites are up to ───────────────────────────────── */}
       <Card>

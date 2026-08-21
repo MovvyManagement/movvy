@@ -162,9 +162,29 @@ handle(async (req) => {
       stamp.cancellation_reason = reason ?? 'Cancelled by crew';
     }
 
-    // RLS + the status-transition trigger are the security gates here.
-    // If the user isn't assigned or the transition is invalid, this returns an error.
-    const { data, error } = await supabase
+    // ── Authorization, then the write ───────────────────────────────────────
+    // This used to run the UPDATE through the caller's own client and lean on
+    // the `bookings_partner_update` RLS policy as the gate. Migration 0101 then
+    // narrowed non-admin writes on bookings to `status` + `updated_at` only —
+    // and every stamp above except 'arrived'/'loading' touches a second column.
+    // The result: "We've left HQ", "Finish Move" and crew-side cancel all
+    // failed with "Bookings are server-owned", so a crew could not start, end,
+    // or cancel a single move. Nothing downstream ran either — no billing
+    // window, no live meter, no payout, no receipt.
+    //
+    // So: check the SAME predicate the RLS policy used — is_assigned_to_booking
+    // is a security-definer function evaluated against the caller's auth.uid()
+    // — and then write with the service role, which 0101 exempts. The gate is
+    // unchanged; only the client doing the write is. The status-transition
+    // trigger still fires for the service role (it is not role-aware), so the
+    // state machine remains the second gate.
+    const { data: mayUpdate, error: gateErr } = await supabase
+      .rpc('is_assigned_to_booking', { p_booking_id: booking_id });
+    if (gateErr || mayUpdate !== true) {
+      throw httpError(403, 'Not authorized to update this booking');
+    }
+
+    const { data, error } = await adminClient()
       .from('bookings')
       .update(stamp)
       .eq('id', booking_id)

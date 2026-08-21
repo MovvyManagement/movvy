@@ -68,6 +68,20 @@ export default function ForgotPassword() {
   const [code, setCode] = useState('');
   const [pw1, setPw1] = useState('');
   const [pw2, setPw2] = useState('');
+
+  // What still stands between the customer and a saved password. Rendered
+  // beside the button so the disabled state is never unexplained.
+  const pwHint =
+    pw1.length === 0
+      ? null
+      : pw1.length < 8
+      ? `${8 - pw1.length} more character${8 - pw1.length === 1 ? '' : 's'} needed.`
+      : pw2.length === 0
+      ? 'Type it once more to confirm.'
+      : pw1 !== pw2
+      ? "Those two don't match yet."
+      : null;
+  const pwReady = pw1.length >= 8 && pw1 === pw2;
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -386,13 +400,24 @@ export default function ForgotPassword() {
                   />
                 </View>
 
+                {/* Say what's missing, live. The button below goes dead until
+                    both fields are long enough, and a dead control with no
+                    adjacent reason is the same trap that made the old dispute
+                    form unsubmittable — the rule was real, it just wasn't
+                    anywhere the person looking at the button could see it.
+                    The mismatch case is worth surfacing here too: it used to
+                    let you tap and only then told you they differ. */}
+                {pwHint ? (
+                  <Text className="mt-3 text-xs text-silver-500">{pwHint}</Text>
+                ) : null}
+
                 <View className="mt-6">
                   <Button
                     label="Save password"
                     size="lg"
                     fullWidth
                     loading={loading}
-                    disabled={pw1.length < 8 || pw2.length < 8}
+                    disabled={!pwReady}
                     onPress={savePassword}
                   />
                 </View>

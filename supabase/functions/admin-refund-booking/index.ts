@@ -5,19 +5,31 @@
 //
 // Contract:
 //   POST { booking_id: string (uuid), amount_cents: int > 0, reason?: string }
-//   -> 200 { ok: true, refunded_cents, refund_cents_total }
+//   -> 200 { ok: true, refunded_cents, refundable_remaining_cents, refund_id }
 //   -> 4xx { error: string }
 //
-// Access: management only. We resolve the caller's tier via the same RPC the
-// web app uses (movvy_admin_access -> 'management' | 'staff' | null), running
-// as the caller so RLS + policy stay in effect.
+// Access: management only, resolved via movvy_admin_access() running as the
+// caller so RLS and policy stay in effect.
 //
-// TODAY (pre-Stripe): a refund is bookkeeping only. We add amount_cents to the
-// booking's refund_cents column (capped at the booking total). No money moves.
+// WHAT CHANGED, AND WHY IT MATTERED
+// ---------------------------------
+// This endpoint never worked. It read `bookings.refund_cents` — a column that
+// lives on `disputes`, not on `bookings`. Postgres returned 42703, the error
+// fell into the `if (bErr || !booking)` branch, and the console's Issue Refund
+// button reported "Booking not found." for every booking that existed. The
+// header also claimed Stripe wasn't connected and left the actual refund as a
+// TODO, so even a fixed column would only have written a number while no money
+// moved.
 //
-// WHEN STRIPE IS CONNECTED: perform the real refund inside the clearly-marked
-// STRIPE REFUND block below (refund the stored payment_intent / charge for
-// amount_cents) BEFORE writing refund_cents, and abort on gateway failure.
+// Stripe IS connected. This now issues a real refund, and deliberately does NOT
+// reintroduce a local refund_cents column: STRIPE is asked what is still
+// refundable on the payment intent (amount_received minus amount_refunded).
+// A local counter would be a second source of truth that drifts the first time
+// a refund is issued from the Stripe dashboard, or a webhook is missed.
+//
+// Bookkeeping is left to the existing `charge.refunded` webhook branch, which
+// already flips payment_status to refunded / partially_refunded and updates
+// payments.refunded_cents. One writer, not two.
 // =============================================================================
 
 import { z } from 'https://esm.sh/zod@3.23.8';
@@ -66,44 +78,84 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (tierErr) return json({ error: 'Could not verify access.' }, 500);
   if (tier !== 'management') return json({ error: 'Refunds are management-only.' }, 403);
 
+  const secretKey = Deno.env.get('STRIPE_SECRET_KEY');
+  if (!secretKey) return json({ error: 'Payments are not configured.' }, 503);
+
   // --- Load booking ----------------------------------------------------------
+  // Distinguish "not found" from "the query broke", so a schema mistake can
+  // never again present itself to an admin as a missing booking.
   const { data: booking, error: bErr } = await supabase
     .from('bookings')
-    .select('id, price_total_cents, refund_cents, status')
+    .select(
+      'id, short_code, status, payment_status, deposit_status, ' +
+      'stripe_payment_intent_id, stripe_deposit_payment_intent_id',
+    )
     .eq('id', input.booking_id)
-    .single();
-  if (bErr || !booking) return json({ error: 'Booking not found.' }, 404);
+    .maybeSingle();
+  if (bErr) {
+    console.error('[admin-refund-booking] booking lookup failed', bErr);
+    return json({ error: 'Could not read that booking.' }, 500);
+  }
+  if (!booking) return json({ error: 'Booking not found.' }, 404);
 
-  const total = Number(booking.price_total_cents ?? 0);
-  const already = Number(booking.refund_cents ?? 0);
-  const remaining = Math.max(0, total - already);
-  if (remaining <= 0) return json({ error: 'This booking is already fully refunded.' }, 409);
+  // Refund the FINAL payment when there is one, otherwise the deposit. A move
+  // that was cancelled before completion has only ever taken a deposit.
+  const piId: string | null =
+    (booking as any).stripe_payment_intent_id ??
+    (booking as any).stripe_deposit_payment_intent_id ??
+    null;
+  if (!piId) return json({ error: 'No payment on file to refund.' }, 409);
+
+  // --- Ask Stripe what is still refundable -----------------------------------
+  const piRes = await fetch(
+    `https://api.stripe.com/v1/payment_intents/${piId}?expand[]=latest_charge`,
+    { headers: { Authorization: `Bearer ${secretKey}` } },
+  );
+  if (!piRes.ok) {
+    console.error('[admin-refund-booking] PI fetch failed', piRes.status, await piRes.text());
+    return json({ error: 'Could not reach the payment gateway.' }, 502);
+  }
+  const pi = await piRes.json();
+  const received = Number(pi.amount_received ?? 0);
+  if (received <= 0) return json({ error: 'That payment was never captured.' }, 409);
+  const alreadyRefunded = Number(pi.latest_charge?.amount_refunded ?? 0);
+  const remaining = Math.max(0, received - alreadyRefunded);
+  if (remaining <= 0) return json({ error: 'This payment is already fully refunded.' }, 409);
 
   const refundNow = Math.min(input.amount_cents, remaining);
 
-  // ===========================================================================
-  // STRIPE REFUND (TODO — wire when Stripe is connected)
-  // ---------------------------------------------------------------------------
-  // Stripe is not integrated yet, so this is bookkeeping only for now. Once the
-  // payment_intent / charge id is stored on the booking, do the real refund
-  // here and bail out on failure BEFORE writing refund_cents below:
-  //
-  //   const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!);
-  //   const pi = booking.stripe_payment_intent_id;
-  //   if (!pi) return json({ error: 'No payment on file to refund.' }, 409);
-  //   try {
-  //     await stripe.refunds.create({ payment_intent: pi, amount: refundNow });
-  //   } catch (e) {
-  //     return json({ error: 'Payment gateway refused the refund.' }, 502);
-  //   }
-  // ===========================================================================
+  // --- Issue the refund ------------------------------------------------------
+  // Idempotency-Key is keyed on the booking + amount so a double-clicked button
+  // or a retried server action reuses the same refund instead of issuing two.
+  const refRes = await fetch('https://api.stripe.com/v1/refunds', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Idempotency-Key': `movvy_refund_${booking.id}_${alreadyRefunded}_${refundNow}`,
+    },
+    body: new URLSearchParams({
+      payment_intent: piId,
+      amount: String(refundNow),
+      'metadata[booking_id]': booking.id,
+      'metadata[short_code]': (booking as any).short_code ?? '',
+      'metadata[reason]': input.reason ?? '',
+    }).toString(),
+  });
+  if (!refRes.ok) {
+    const detail = await refRes.text();
+    console.error('[admin-refund-booking] refund failed', refRes.status, detail);
+    return json({ error: 'The payment gateway refused the refund.' }, 502);
+  }
+  const refund = await refRes.json();
 
-  const newRefundTotal = already + refundNow;
-  const { error: uErr } = await supabase
-    .from('bookings')
-    .update({ refund_cents: newRefundTotal })
-    .eq('id', input.booking_id);
-  if (uErr) return json({ error: 'Failed to record refund.' }, 500);
-
-  return json({ ok: true, refunded_cents: refundNow, refund_cents_total: newRefundTotal });
+  // No local write here on purpose. The signature-verified `charge.refunded`
+  // webhook sets payment_status and payments.refunded_cents — writing them here
+  // too would race it and give two answers for the same question.
+  return json({
+    ok: true,
+    refunded_cents: refundNow,
+    refundable_remaining_cents: remaining - refundNow,
+    refund_id: refund.id ?? null,
+  });
 });

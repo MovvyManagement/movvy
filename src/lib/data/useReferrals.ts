@@ -130,17 +130,28 @@ export function useMyReferralStats() {
     queryKey: ['referral-stats', user?.id],
     enabled: !!user,
     queryFn: async () => {
-      const { data } = await supabase
-        .from('referrals')
-        .select('id, status, credit_cents, created_at')
-        .eq('referrer_profile_id', user!.id);
-      const all = data ?? [];
+      const [sent, received] = await Promise.all([
+        supabase
+          .from('referrals')
+          .select('id, status, credit_cents, created_at')
+          .eq('referrer_profile_id', user!.id),
+        // Whether the caller has themselves used someone's code. Drives the
+        // "Got a code from someone?" card — a code can only be applied once
+        // per account, so once there's a row the field has nothing left to do.
+        supabase
+          .from('referrals')
+          .select('referral_code_used, status')
+          .eq('referred_profile_id', user!.id)
+          .maybeSingle(),
+      ]);
+      const all = sent.data ?? [];
       return {
         invited: all.length,
         applied: all.filter((r) => r.status === 'applied').length,
         creditsEarnedCents: all
           .filter((r) => r.status === 'applied')
           .reduce((s, r) => s + (r.credit_cents ?? 0), 0),
+        referred_by: received.data?.referral_code_used ?? null,
       };
     },
   });
@@ -206,41 +217,53 @@ export function useMyCreditHistory(limit = 25) {
   });
 }
 
-/** Apply a code to the signed-in user's account (during or after signup). */
+/**
+ * Apply someone else's referral code to the signed-in account.
+ *
+ * This used to resolve the referrer with a direct `profiles` select filtered by
+ * referral_code. RLS on profiles only ever returns the CALLER's own row, so
+ * that lookup found nothing for every code but your own — every valid code came
+ * back "Invalid referral code", and your own came back "You can't refer
+ * yourself". Nobody could ever enter a referral, which is why `referrals` and
+ * `account_credits` were empty in production.
+ *
+ * apply_referral_code (migration 0113) does the lookup with definer rights and
+ * returns a verdict, so each outcome gets an honest sentence instead of one
+ * catch-all error. It deliberately returns nothing about the referrer but
+ * whether the code is real.
+ *
+ * The amount isn't decided here. 0110 stamps `kind` and `credit_cents` when the
+ * reward is AWARDED, from what the invitee actually did — join as a customer,
+ * end up completing moves, and you earn the crew reward.
+ */
 export function useApplyReferralCode() {
-  const { user } = useAuth();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (code: string) => {
-      if (!user) throw new Error('Sign in first');
-      const clean = code.trim().toUpperCase();
-      // Find the referrer
-      const { data: referrer, error: refErr } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('referral_code', clean)
-        .maybeSingle();
-      if (refErr) throw new Error(refErr.message);
-      if (!referrer) throw new Error('Invalid referral code');
-      if (referrer.id === user.id) throw new Error("You can't refer yourself");
-
-      const { error } = await supabase.from('referrals').insert({
-        referrer_profile_id: referrer.id,
-        referred_profile_id: user.id,
-        referral_code_used: clean,
-        credit_cents: 5000,
-        status: 'pending',
+      const { data, error } = await supabase.rpc('apply_referral_code', {
+        p_code: code.trim().toUpperCase(),
       });
-      if (error) {
-        // Unique-pair violation = already applied
-        if ((error as any).code === '23505') throw new Error("You've already used this referral");
-        throw new Error(error.message);
-      }
-      return { ok: true, credit_cents: 5000 };
+      if (error) throw new Error(error.message);
+      const res = (data ?? {}) as { ok?: boolean; status?: string };
+      if (res.ok) return { ok: true as const };
+      throw new Error(APPLY_MESSAGES[res.status ?? ''] ?? "That code couldn't be applied.");
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['referral-stats'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['referral-stats'] });
+      qc.invalidateQueries({ queryKey: ['credit-balance'] });
+    },
   });
 }
+
+/** One sentence per verdict the RPC can return — see migration 0113. */
+const APPLY_MESSAGES: Record<string, string> = {
+  unknown_code: "That code doesn't match anyone. Check the spelling and try again.",
+  self: "That's your own code — share it with someone else.",
+  already: "You've already used a referral code on this account.",
+  too_late:
+    'Referral codes have to be entered before your first paid move. Message support if you think that\'s wrong.',
+  unauthenticated: 'Sign in first.',
+};
 
 export function useDeleteAccount() {
   return useMutation({

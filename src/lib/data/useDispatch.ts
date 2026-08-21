@@ -447,25 +447,13 @@ export function useSetMyPresence() {
   });
 }
 
-// Read the driver's server-side online flag so the Jobs-tab toggle reflects
-// the actual partner_drivers.is_online value on cold start — not just a
-// hardcoded `useState(true)` that silently flips offline shifts back on.
-export function useMyOnlineState() {
-  return useQuery({
-    queryKey: ['my-online-state'],
-    enabled: supabaseConfigured,
-    queryFn: async (): Promise<boolean> => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return false;
-      const { data } = await supabase
-        .from('partner_drivers')
-        .select('is_online')
-        .eq('profile_id', user.id)
-        .maybeSingle();
-      return data?.is_online ?? false;
-    },
-  });
-}
+// `useMyOnlineState` lived here. It read `partner_drivers.is_online`, and that
+// table does not exist in this database — the query returns PGRST205 and the
+// hook swallowed it into a bare `false`, so anything wired to it would have
+// shown every crew member permanently offline. Nothing consumed it, so nothing
+// broke; it is deleted rather than repaired because presence is already served
+// correctly by company_drivers_roster(), which derives is_online from
+// last_online_at within the last 30 minutes.
 
 // ─── Company-wide jobs (for the Jobs tab) ──────────────────────────────────
 // Returns every booking the company has touched, regardless of status.

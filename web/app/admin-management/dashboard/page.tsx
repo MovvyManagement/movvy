@@ -34,19 +34,72 @@ const ACTIVE_STATUSES = [
 
 export const dynamic = 'force-dynamic';
 
+const ALBERTA_TZ = 'America/Edmonton';
+
+/**
+ * The instant Alberta's calendar day containing `d` began.
+ *
+ * Derived from the zone rather than assumed, so this is correct on a UTC server
+ * and correct across the daylight-saving switch (when a "day" is 23 or 25 hours
+ * long, which is exactly when a hardcoded -6 or -7 offset silently lies).
+ */
+function albertaDayStart(d: Date): Date {
+  const [y, m, day] = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ALBERTA_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(d).split('-').map(Number);
+  // Guess at UTC midnight, then correct by however far that lands from local
+  // midnight. One correction is always enough: the error is the zone offset.
+  const guess = Date.UTC(y, m - 1, day);
+  const off = zoneOffsetMs(new Date(guess));
+  return new Date(guess + off);
+}
+
+/** The instant the current Alberta calendar month began. */
+function albertaMonthStart(d: Date): Date {
+  const [y, m] = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ALBERTA_TZ, year: 'numeric', month: '2-digit',
+  }).format(d).split('-').map(Number);
+  const guess = Date.UTC(y, m - 1, 1);
+  return new Date(guess + zoneOffsetMs(new Date(guess)));
+}
+
+/** How far Alberta is behind UTC at instant `d`, in ms (positive). */
+function zoneOffsetMs(d: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: ALBERTA_TZ, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(d).reduce<Record<string, number>>((a, p) => {
+    if (p.type !== 'literal') a[p.type] = Number(p.value);
+    return a;
+  }, {});
+  const asUtc = Date.UTC(
+    parts.year, parts.month - 1, parts.day,
+    parts.hour % 24, parts.minute, parts.second,
+  );
+  return d.getTime() - asUtc;
+}
+
 export default async function DashboardPage() {
   const supabase = await supabaseServer();
 
   // Revenue figures are management-only. Staff still see live ops, just no money.
   const isManagement = (await getAdminAccess(supabase)) === 'management';
 
+  // ── Day boundaries, in ALBERTA time ────────────────────────────────────────
+  // These were computed with setUTCHours(0,0,0,0), i.e. midnight UTC — which is
+  // 6:00 PM Mountain the PREVIOUS day. "Bookings today", "Revenue today", the
+  // cancellation rate and every month figure therefore started counting from
+  // last evening, and the 7-day chart labelled its bars in local time while
+  // filtering them in UTC, so the labels and the data disagreed and tonight's
+  // revenue fell outside the chart entirely.
+  //
+  // Movvy operates in one province. The day that matters is the Alberta day,
+  // and it has to be derived rather than assumed, because the server this runs
+  // on is not in Alberta and the offset changes with daylight saving.
   const now = new Date();
-  const startOfToday = new Date(now);
-  startOfToday.setUTCHours(0, 0, 0, 0);
-
-  const startOfMonth = new Date(startOfToday);
-  startOfMonth.setUTCDate(1);
-
+  const startOfToday = albertaDayStart(now);
+  const startOfMonth = albertaMonthStart(now);
   const startOf7Days = new Date(startOfToday.getTime() - 6 * 86_400_000);
 
   // ── Parallel data fetch ────────────────────────────────────────────────────
@@ -221,12 +274,22 @@ export default async function DashboardPage() {
   const dayLabels: string[] = [];
   const dayRevenue: number[] = [];
   for (let i = 6; i >= 0; i--) {
-    const d = new Date(startOfToday.getTime() - i * 86_400_000);
-    dayLabels.push(d.toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }));
-    const dayStart = d.toISOString().slice(0, 10);
-    const dayEnd = new Date(d.getTime() + 86_400_000).toISOString().slice(0, 10);
+    // Each bucket is a real Alberta day: [local midnight, next local midnight).
+    // Compare instants, not date strings — the previous version sliced a UTC
+    // date out of the timestamp and compared it as text, which shifted every
+    // bar by six hours and dropped anything after 6 PM off the end.
+    const start = albertaDayStart(new Date(startOfToday.getTime() - i * 86_400_000));
+    const end = albertaDayStart(new Date(start.getTime() + 36 * 3_600_000));
+    dayLabels.push(
+      start.toLocaleDateString('en-CA', {
+        weekday: 'short', month: 'short', day: 'numeric', timeZone: ALBERTA_TZ,
+      }),
+    );
     const sum = notCancelled(bookingsAllTime.data ?? [])
-      .filter((b) => b.created_at >= dayStart + 'T00:00:00' && b.created_at < dayEnd + 'T00:00:00')
+      .filter((b) => {
+        const t = new Date(b.created_at).getTime();
+        return t >= start.getTime() && t < end.getTime();
+      })
       .reduce((s, b) => s + (b.price_total_cents ?? 0), 0);
     dayRevenue.push(sum);
   }
