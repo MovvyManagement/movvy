@@ -52,6 +52,9 @@ export interface ReceiptData {
   /** Overpayment returned to the card — the crew finished under the estimate
    *  the deposit was taken against, so the deposit exceeded the final bill. */
   refundDueDollars?: number;
+  /** How much of that refund has actually been sent. Drives "issued" vs "due"
+   *  wording — a receipt must not claim money moved before it did. */
+  refundIssuedDollars?: number;
   /** Charged on completion — total less the deposit, tip included. */
   balanceDollars?: number;
 }
@@ -112,6 +115,22 @@ export function buildReceiptHtml(data: ReceiptData): string {
   // Deposit / balance split. The customer pays 20% up front against the
   // estimate and the rest when the crew finishes, so a total on its own reads
   // as if the whole amount were charged at the end.
+  // The bottom line is SIGNED: what changed hands when the move ended.
+  // Positive is charged, negative is refunded. A move whose deposit covered
+  // more than the final bill closes on a negative number — that is the whole
+  // point, and flooring it at zero is what let an overpaid move print a tidy
+  // $0.00 while saying nothing about the money owed.
+  const balance = data.balanceDollars ?? data.totalDollars - (data.depositPaidDollars ?? 0);
+  const isRefund = balance < 0;
+  const refundIssued = (data.refundIssuedDollars ?? 0) > 0;
+  // Only claim a refund was ISSUED once Stripe has taken it. A receipt is kept
+  // for tax and dispute purposes; "refund issued" on a refund that hasn't left
+  // yet is a false statement on a financial record.
+  const closingLabel = isRefund
+    ? (refundIssued ? 'Refund issued to your card' : 'Refund due to your card')
+    : 'Charged on completion';
+  const closingColour = isRefund ? '#047857' : '#0A0A0A';
+
   const settlement =
     data.depositPaidDollars != null && data.depositPaidDollars > 0
       ? `<table style="margin-top:14px">
@@ -120,12 +139,21 @@ export function buildReceiptHtml(data: ReceiptData): string {
             ${data.creditAppliedDollars && data.creditAppliedDollars > 0
               ? `<tr><td>Movvy credit applied</td><td style="text-align:right">−${fmtCurrency(data.creditAppliedDollars)}</td></tr>`
               : ''}
-            <tr><td style="font-weight:700">Charged on completion</td><td style="text-align:right;font-weight:700">${fmtCurrency(data.balanceDollars ?? data.totalDollars - data.depositPaidDollars)}</td></tr>
-            ${data.refundDueDollars && data.refundDueDollars > 0
-              ? `<tr><td style="font-weight:700;color:#047857">Refunded to your card</td><td style="text-align:right;font-weight:700;color:#047857">−${fmtCurrency(data.refundDueDollars)}</td></tr>`
-              : ''}
+            <tr>
+              <td style="font-weight:700;color:${closingColour}">${closingLabel}</td>
+              <td style="text-align:right;font-weight:700;color:${closingColour}">${
+                isRefund ? `−${fmtCurrency(Math.abs(balance))}` : fmtCurrency(balance)
+              }</td>
+            </tr>
           </tbody>
-        </table>`
+        </table>
+        ${isRefund
+          ? `<p style="margin-top:8px;font-size:12px;color:${refundIssued ? '#047857' : '#B45309'}">${
+              refundIssued
+                ? 'Refund issued — it lands back on the card you paid with, typically within 5–10 business days.'
+                : 'Your refund is being processed and will go back to the card you paid with.'
+            }</p>`
+          : ''}`
       : '';
 
   // Say plainly which bill this is. An estimate-basis receipt is not a record
@@ -140,7 +168,7 @@ export function buildReceiptHtml(data: ReceiptData): string {
       : data.basis === 'actual'
         ? `<div class="muted" style="margin-top:10px">Billed on the actual time the move took, not the booking estimate.${
       data.refundDueDollars && data.refundDueDollars > 0
-        ? ' Your crew finished under the estimate, so the difference between your deposit and the final bill goes back to the card you paid with.'
+        ? ' Your crew finished under the estimate, so your deposit covered the whole move with money left over.'
         : ''
     }</div>`
         : '';
@@ -330,7 +358,7 @@ export function buildReceiptHtml(data: ReceiptData): string {
       <tbody>${lineRows}${tipRow}</tbody>
     </table>
     <div class="total">
-      <div class="k">${data.basis === 'estimate' ? 'Estimated Total' : 'Total Charged'}</div>
+      <div class="k">${data.basis === 'estimate' ? 'Estimated Total' : 'Total for this move'}</div>
       <div class="v">${fmtCurrency(data.totalDollars)}</div>
     </div>
     ${settlement}

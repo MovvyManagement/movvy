@@ -67,6 +67,9 @@ interface ReceiptBookingInput {
 
   hourly_rate_customer_cents?: number | null;
   deposit_cents?: number | null;
+  /** How much of the deposit has actually been refunded (0115). Distinguishes
+   *  "we owe you this" from "this has been sent back". */
+  deposit_refunded_cents?: number | null;
   /** Referral credit spent on this move (0112). */
   credit_applied_cents?: number | null;
   tip_cents?: number | null;
@@ -214,8 +217,14 @@ export function bookingToReceiptData(
   // The tip is part of the settlement, so it offsets an overpayment before any
   // refund is due — someone who overpaid $400 and tipped $100 is owed $300.
   const balanceCents = totalCents - depositCents - creditCents;
-  const settlementCents = balanceCents + c(booking.tip_cents);
+  const settlementCents = balanceCents + tipCents;
   const refundDueCents = settlementCents < 0 ? -settlementCents : 0;
+  // Has the money actually gone back, or is it still owed? A receipt is a
+  // financial record — saying "refund issued" before Stripe has issued one
+  // would be a false statement on a document people keep for their taxes.
+  // bookings-update-status writes deposit_refunded_cents once Stripe accepts
+  // the refund, so this is the honest test.
+  const refundedCents = Math.min(c(booking.deposit_refunded_cents), refundDueCents);
 
   return {
     shortCode: booking.short_code,
@@ -239,9 +248,11 @@ export function bookingToReceiptData(
     depositPaidDollars: depositCents / 100,
     creditAppliedDollars: creditCents / 100,
     refundDueDollars: refundDueCents / 100,
-    // Never negative on the invoice line — an overpayment shows as its own
-    // refund row instead, which is what a customer scanning for 'what did I
-    // pay' actually looks for.
-    balanceDollars: Math.max(0, settlementCents) / 100,
+    refundIssuedDollars: refundedCents / 100,
+    // SIGNED. The bottom line of a receipt is what changed hands at the end:
+    // positive means charged, negative means refunded. Flooring this at zero
+    // (which it used to do) is what let an overpaid move print a tidy $0.00 and
+    // say nothing about the money owed.
+    balanceDollars: settlementCents / 100,
   };
 }
