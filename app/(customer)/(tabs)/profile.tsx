@@ -12,6 +12,7 @@ import { MaxWidth } from '@/components/MaxWidth';
 import { EditNameSheet } from '@/components/EditNameSheet';
 import { EditPhoneSheet } from '@/components/EditPhoneSheet';
 import { DeleteAccountSheet } from '@/components/DeleteAccountSheet';
+import { EmergencyContactSheet } from '@/components/EmergencyContactSheet';
 import { NotificationBell } from '@/components/NotificationBell';
 import { useToast } from '@/components/Toast';
 import { fmtPhone } from '@/lib/format';
@@ -42,6 +43,9 @@ export default function Profile() {
   // Alert.prompt, which is iOS-only, so Android customers could never
   // complete the type-to-confirm step (a Google Play policy requirement).
   const [deleteOpen, setDeleteOpen] = React.useState(false);
+  // Emergency contact — the person SOS texts. Lived on the support hub until
+  // that screen became a straight chat; this is its home again.
+  const [emergencyOpen, setEmergencyOpen] = React.useState(false);
 
   // Fallback display values for the not-yet-wired demo case.
   const displayName = profile?.full_name ?? (user?.user_metadata as any)?.full_name ?? 'Welcome';
@@ -131,19 +135,25 @@ export default function Profile() {
     },
   ];
 
-  // Single "Customer service" entry replaces the old Help & support +
-  // Emergency contact split. The support hub already bundles SOS, claims,
-  // disputes, audit export, and the emergency-contact editor — so collapsing
-  // both rows here makes the profile cleaner and keeps every safety/support
-  // path one tap away.
+  // Customer Service is now a single door: it opens the support chat, and a
+  // human handles claims, disputes and audit requests from inside the thread.
+  // The emergency-contact editor used to live behind that hub — with the hub
+  // gone it comes back here, because SOS on the live tracker texts whoever is
+  // set here and there'd otherwise be no way to set them.
   const support: Row[] = [
     {
       icon: 'headset-outline',
       label: 'Customer Service',
-      // The hub, not chat directly — it's the only route into insurance
-      // claims, disputes and the audit-log export.
-      value: 'Chat, claims, disputes',
+      value: 'Chat with a human',
       onPress: () => router.push('/(customer)/support'),
+    },
+    {
+      icon: 'person-add-outline',
+      label: profile?.emergency_contact_phone
+        ? 'Emergency contact'
+        : 'Set an emergency contact',
+      value: profile?.emergency_contact_name ?? 'Texted if you hit SOS',
+      onPress: () => setEmergencyOpen(true),
     },
     {
       icon: 'document-text-outline',
@@ -359,6 +369,11 @@ export default function Profile() {
           control, not a personal-info field. */}
       <EditNameSheet visible={editNameOpen} onClose={() => setEditNameOpen(false)} />
       <EditPhoneSheet visible={editPhoneOpen} onClose={() => setEditPhoneOpen(false)} />
+      <EmergencyContactSheet
+        visible={emergencyOpen}
+        onClose={() => setEmergencyOpen(false)}
+      />
+
       <DeleteAccountSheet visible={deleteOpen} onClose={() => setDeleteOpen(false)} />
     </SafeAreaView>
   );

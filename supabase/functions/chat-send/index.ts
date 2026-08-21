@@ -109,12 +109,21 @@ handle(async (req) => {
 
     // Bump thread last_message_at so the inbox sorts correctly, and read back
     // the flags that decide whether the AI assistant should reply.
-    const { data: thread } = await supabase
+    //
+    // SERVICE ROLE, not the caller's client. Participants can read and post to
+    // a thread but have no UPDATE policy on chat_threads, so this ran as a
+    // zero-row update for every customer and partner message: last_message_at
+    // stayed NULL, the console's Support Inbox (which sorts
+    // last_message_at desc nullslast) buried the newest question at the
+    // BOTTOM of the list, and `.single()` on the empty result threw — leaving
+    // `thread` null, so the first-line AI reply never fired either. Only
+    // admin-sent messages, which do have an update policy, ever bumped it.
+    const { data: thread } = await adminClient()
       .from('chat_threads')
       .update({ last_message_at: new Date().toISOString() })
       .eq('id', thread_id)
       .select('kind, ai_enabled, needs_human')
-      .single();
+      .maybeSingle();
 
     // First-line AI support: when a customer/partner (not an admin) posts to an
     // active AI support thread, fire support-ai-reply in the BACKGROUND so it

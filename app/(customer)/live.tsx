@@ -200,18 +200,12 @@ export default function LiveMove() {
   // Chat sheet — slide-up modal that replaces the deleted /chat/[id] route
   const [showChat, setShowChat] = useState(false);
 
-  // Customer-service entry — route into the support hub (same screen the
-  // Profile → Customer Service row opens). The hub bundles "Message Movvy
-  // support" (live chat), Trigger SOS, insurance claim, dispute, audit
-  // export, and emergency contact — so every safety/support path is one
-  // tap from the live tracker. Headset icon in the header AND "Report an
-  // issue" button both come here.
-  // Land on the support HUB, not straight into chat. The hub is what carries
-  // insurance claims, disputes and the audit-log export, and nothing else in
-  // the app navigated to it — those three screens existed but were
-  // unreachable. "Report an issue" during a move is exactly when someone needs
-  // a claim or a dispute, not only a chat window; live chat is the first row
-  // on the hub, so it's still one extra tap away.
+  // Customer-service entry — same screen the Profile → Customer Service row
+  // opens, which is now the support chat itself rather than a menu. Someone
+  // hitting "Report an issue" mid-move wants to tell a person what's wrong,
+  // not pick a form; damage claims and disputes are raised in the thread and
+  // handled by whoever answers in the console. Headset icon in the header AND
+  // the "Report an issue" button both come here.
   const openSupportHub = () => router.push('/(customer)/support');
 
   // Cancel-booking flow — opens CancelMoveSheet (bottom of this file).

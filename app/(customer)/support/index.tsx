@@ -1,19 +1,24 @@
 // =============================================================================
-// /(customer)/support — Help & Support hub
+// /(customer)/support — Customer Service
 //
-// Single entry point for every "I need a human" path:
-//   • Open chat with Movvy support (kind='support' thread, lives forever)
-//   • Trigger SOS mid-move
-//   • File an insurance claim against a completed move
-//   • File a damage / theft / dispute against a move
-//   • Export the audit trail of a move as a tamper-evident PDF
+// This used to be a hub: a wall of tiles for insurance claims, disputes, audit
+// exports and the emergency-contact editor, with live chat as one row among
+// them. Every one of those paths ends with a human at Movvy reading it, so the
+// menu made the customer categorise their own problem before they were allowed
+// to describe it — and got it wrong often enough that ops had to re-file it.
 //
-// Reached from the customer profile's Help row + a floating SOS shortcut
-// on the live tracker.
+// Now the screen IS the chat. Tapping Customer Service bootstraps the
+// (booking-independent, permanent) support thread via `ensure_support_thread`
+// and drops straight into it. Claims, disputes and audit requests all arrive
+// as messages in the same thread, which lands in the web console's Support
+// Inbox (/admin-management/support) where a human answers.
+//
+// The email/phone fallback only renders if the thread can't be opened — an
+// unreachable customer is the one failure mode this screen must not have.
 // =============================================================================
 
-import React, { useState } from 'react';
-import { View, Text, ScrollView, Pressable, Linking } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, Pressable, ActivityIndicator, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,71 +26,57 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { Card } from '@/components/Card';
 import { ChatSheet } from '@/components/ChatSheet';
 import { MaxWidth } from '@/components/MaxWidth';
-import { EmergencyContactSheet } from '@/components/EmergencyContactSheet';
-import { useEnsureSupportThread, useActiveBooking, useProfile } from '@/lib/data';
-import { useToast } from '@/components/Toast';
+import { useEnsureSupportThread } from '@/lib/data';
 
-type Tile = {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  body: string;
-  tone: 'sos' | 'brand' | 'silver';
-  onPress: () => void;
-};
+const SUPPORT_PHONE = '+16134163426';
+const SUPPORT_EMAIL = 'support@movvy.ca';
 
-export default function SupportHub() {
+export default function SupportScreen() {
   const ensure = useEnsureSupportThread();
-  const toast = useToast();
-  const { data: active } = useActiveBooking();
-  const { data: profile } = useProfile();
-  const [chatThreadId, setChatThreadId] = useState<string | null>(null);
-  // Emergency contact lives here now (instead of as its own Profile row) so
-  // every safety control sits behind the single Customer Service entry.
-  const [emergencyOpen, setEmergencyOpen] = useState(false);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
-  const openSupportChat = async () => {
-    try {
-      const id = await ensure.mutateAsync();
-      setChatThreadId(id);
-    } catch (e: any) {
-      toast.error(e?.message ?? "Couldn't open support chat.");
-    }
-  };
+  // Open the thread on mount. `ensure_support_thread` is idempotent — it
+  // returns the customer's existing thread if they've messaged before, so the
+  // history is still there rather than a fresh empty window every visit.
+  const open = React.useCallback(() => {
+    setFailed(false);
+    ensure
+      .mutateAsync()
+      .then((id) => setThreadId(id))
+      .catch(() => setFailed(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const tiles: Tile[] = [
-    {
-      icon: 'shield-checkmark',
-      title: 'File an insurance claim',
-      body: 'Up to $5,000 coverage on every completed move — submit with photos.',
-      tone: 'brand',
-      onPress: () => router.push('/(customer)/support/claim'),
-    },
-    {
-      icon: 'document-text',
-      title: 'Open a dispute',
-      body: 'Damage, theft, poor service — formal evidence track, reviewed by humans.',
-      tone: 'silver',
-      onPress: () => router.push('/(customer)/support/dispute'),
-    },
-    {
-      icon: 'archive',
-      title: 'Export move audit log',
-      body: "Tamper-evident PDF of every event on a move's record. Useful for legal disputes.",
-      tone: 'silver',
-      onPress: () => router.push('/(customer)/support/audit'),
-    },
-    {
-      icon: 'person-add',
-      title: profile?.emergency_contact_phone
-        ? 'Edit emergency contact'
-        : 'Set an emergency contact',
-      body: profile?.emergency_contact_phone
-        ? `Texted instantly if you hit SOS during a move.`
-        : 'Pick someone we SMS the moment you trigger SOS — family, partner, close friend.',
-      tone: 'silver',
-      onPress: () => setEmergencyOpen(true),
-    },
-  ];
+  useEffect(() => {
+    open();
+  }, [open]);
+
+  // Closing the chat leaves Customer Service entirely — there's nothing
+  // behind it any more, and leaving the customer on a blank screen after
+  // dismissing the sheet would read as a crash.
+  const onClose = () => router.back();
+
+  if (threadId) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+        <ChatSheet
+          visible
+          threadId={threadId}
+          peerName="Movvy Support"
+          callNumber={SUPPORT_PHONE}
+          quickReplies={[
+            'I need help with my move',
+            "My crew hasn't arrived",
+            'I need to change my booking date',
+            'Something was damaged',
+            'I have a billing question',
+          ]}
+          onClose={onClose}
+        />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView className="flex-1 bg-silver-50 dark:bg-night-900" edges={['top']}>
@@ -93,140 +84,63 @@ export default function SupportHub() {
         <ScreenHeader title="Customer Service" />
       </View>
 
-      {/* MaxWidth keeps the hub a comfortable 560 dp on iPad / web — same
-          width customers see on iPhone, just centred in the larger window. */}
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+      <View className="flex-1 items-center justify-center px-6">
         <MaxWidth>
-        {/* Primary action — open a thread with Movvy support */}
-        <Pressable
-          onPress={openSupportChat}
-          disabled={ensure.isPending}
-          className="rounded-3xl bg-ink-900 p-5 flex-row items-center active:opacity-90"
-        >
-          <View className="h-12 w-12 rounded-2xl bg-brand-600 items-center justify-center">
-            <Ionicons name="chatbubble-ellipses" size={22} color="#fff" />
-          </View>
-          <View className="ml-4 flex-1">
-            <Text className="text-base font-bold text-white">
-              {ensure.isPending ? 'Opening chat…' : 'Message Movvy support'}
-            </Text>
-            <Text className="text-xs text-white/70 mt-0.5 leading-4">
-              Real humans · usually replies in under 10 minutes
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="#fff" />
-        </Pressable>
-
-        {/* Action tiles */}
-        <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500 mt-6 mb-2 px-1">
-          When something goes wrong
-        </Text>
-        {tiles.map((t) => (
-          <Pressable
-            key={t.title}
-            onPress={t.onPress}
-            className={`mb-3 rounded-3xl p-4 flex-row items-center active:opacity-80 ${
-              t.tone === 'sos'
-                ? 'bg-red-50 border-2 border-red-100'
-                : t.tone === 'brand'
-                ? 'bg-brand-50 border border-brand-100'
-                : 'bg-white border border-silver-200'
-            }`}
-          >
-            <View
-              className={`h-12 w-12 rounded-2xl items-center justify-center ${
-                t.tone === 'sos'
-                  ? 'bg-danger'
-                  : t.tone === 'brand'
-                  ? 'bg-brand-600'
-                  : 'bg-silver-100'
-              }`}
-            >
-              <Ionicons
-                name={t.icon}
-                size={22}
-                color={t.tone === 'silver' ? '#0A0A0A' : '#fff'}
-              />
+          {!failed ? (
+            <View className="items-center">
+              <ActivityIndicator color="#16A34A" />
+              <Text className="mt-3 text-sm text-silver-600">Opening chat…</Text>
             </View>
-            <View className="ml-3 flex-1">
-              <Text
-                className={`text-sm font-bold ${
-                  t.tone === 'sos' ? 'text-danger' : 'text-ink-900'
-                }`}
+          ) : (
+            <View>
+              <View className="items-center">
+                <View className="h-14 w-14 rounded-2xl bg-silver-100 items-center justify-center">
+                  <Ionicons name="cloud-offline-outline" size={26} color="#71717A" />
+                </View>
+                <Text className="mt-3 text-base font-bold text-ink-900">
+                  Couldn't open the chat
+                </Text>
+                <Text className="mt-1 text-center text-xs text-silver-600 leading-4">
+                  Check your connection and try again — or reach us the old-fashioned way.
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={open}
+                disabled={ensure.isPending}
+                className="mt-5 rounded-2xl bg-ink-900 py-4 items-center active:opacity-90"
               >
-                {t.title}
-              </Text>
-              <Text className="mt-0.5 text-[11px] text-silver-600 leading-4">{t.body}</Text>
+                <Text className="text-sm font-bold text-white">
+                  {ensure.isPending ? 'Trying…' : 'Try again'}
+                </Text>
+              </Pressable>
+
+              <Card padded={false} className="mt-4">
+                <Pressable
+                  onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)}
+                  className="px-5 py-4 flex-row items-center active:opacity-70 border-b border-silver-100"
+                >
+                  <Ionicons name="mail-outline" size={20} color="#0A0A0A" />
+                  <Text className="ml-3 flex-1 text-sm font-semibold text-ink-900">
+                    {SUPPORT_EMAIL}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color="#A1A1AA" />
+                </Pressable>
+                <Pressable
+                  onPress={() => Linking.openURL(`tel:${SUPPORT_PHONE}`)}
+                  className="px-5 py-4 flex-row items-center active:opacity-70"
+                >
+                  <Ionicons name="call-outline" size={20} color="#0A0A0A" />
+                  <Text className="ml-3 flex-1 text-sm font-semibold text-ink-900">
+                    +1 (613) 416-3426
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color="#A1A1AA" />
+                </Pressable>
+              </Card>
             </View>
-            <Ionicons
-              name="chevron-forward"
-              size={16}
-              color={t.tone === 'sos' ? '#B91C1C' : '#A1A1AA'}
-            />
-          </Pressable>
-        ))}
-
-        {/* Fallback contacts — keep the lights on even if the in-app paths
-            are unreachable. */}
-        <Text className="text-xs font-semibold uppercase tracking-wider text-silver-500 mt-6 mb-2 px-1">
-          Other ways to reach us
-        </Text>
-        <Card padded={false}>
-          <Pressable
-            onPress={() => Linking.openURL('mailto:support@movvy.ca')}
-            className="px-5 py-4 flex-row items-center active:opacity-70 border-b border-silver-100"
-          >
-            <Ionicons name="mail-outline" size={20} color="#0A0A0A" />
-            <Text className="ml-3 flex-1 text-sm font-semibold text-ink-900">support@movvy.ca</Text>
-            <Ionicons name="chevron-forward" size={16} color="#A1A1AA" />
-          </Pressable>
-          <Pressable
-            onPress={() => Linking.openURL('tel:+16134163426')}
-            className="px-5 py-4 flex-row items-center active:opacity-70"
-          >
-            <Ionicons name="call-outline" size={20} color="#0A0A0A" />
-            <Text className="ml-3 flex-1 text-sm font-semibold text-ink-900">+1 (613) 416-3426</Text>
-            <Ionicons name="chevron-forward" size={16} color="#A1A1AA" />
-          </Pressable>
-        </Card>
-
-        <View className="mt-6 rounded-2xl bg-silver-50 p-4 flex-row items-start">
-          <Ionicons name="information-circle-outline" size={16} color="#71717A" />
-          <Text className="ml-2 flex-1 text-[11px] text-silver-600 leading-4">
-            Everything you do here is logged. SOS notifies admin + dispatch
-            + your emergency contact instantly. Claims and disputes create a
-            formal record with photo evidence, reviewed by a human, never
-            an automated bot.
-          </Text>
-        </View>
+          )}
         </MaxWidth>
-      </ScrollView>
-
-      {/* Open in a slide-up ChatSheet — kept in line with the rest of the
-          customer chat surface so we don't introduce a new modal pattern.
-          For support we pass the thread id directly (the support thread is
-          NOT booking-scoped). */}
-      <ChatSheet
-        visible={!!chatThreadId}
-        threadId={chatThreadId}
-        peerName="Movvy support"
-        callNumber="+16134163426"
-        quickReplies={[
-          "I need help with my move",
-          "My crew hasn't arrived",
-          "I need to change my booking date",
-          "Something was damaged",
-          "I have a billing question",
-        ]}
-        onClose={() => setChatThreadId(null)}
-      />
-
-      {/* Emergency contact editor — moved here from Profile so every safety
-          path lives behind the single Customer Service entry. */}
-      <EmergencyContactSheet
-        visible={emergencyOpen}
-        onClose={() => setEmergencyOpen(false)}
-      />
+      </View>
     </SafeAreaView>
   );
 }
