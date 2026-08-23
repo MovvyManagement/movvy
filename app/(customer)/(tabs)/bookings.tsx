@@ -146,7 +146,15 @@ function BookingHistory() {
         dropoffCity: b.dropoff_city ?? '',
         date: b.scheduled_for_date,
         timeWindow: b.scheduled_for_window ?? '',
-        totalDollars: b.price_total_cents / 100,
+        // Once a move is billed, the ACTUAL total is the number — the same one
+        // on the receipt and the same one the card was charged. This read
+        // price_total_cents unconditionally, so a completed move showed its
+        // estimate here ($2,586) and its real bill on the receipt ($110), two
+        // different answers to "what did this move cost" in one app.
+        totalDollars: ((b as any).actual_total_cents ?? b.price_total_cents) / 100,
+        // Which of the two it is, so the row can label it rather than leaving
+        // the customer to guess whether a number is a quote or a charge.
+        isFinalTotal: (b as any).actual_total_cents != null,
         // Surface tip + completion timestamp so the row can decide whether
         // the 24h tip-window UI is still applicable.
         tipCents: (b as any).tip_cents ?? 0,
@@ -167,6 +175,7 @@ function BookingHistory() {
       date: b.date,
       timeWindow: b.timeWindow,
       totalDollars: b.total,
+      isFinalTotal: false,
       tipCents: 0,
       completedAt: null as string | null,
     }));
@@ -266,7 +275,17 @@ function BookingHistory() {
                         {fmtDateShort(b.date)} · {b.timeWindow}
                       </Text>
                     </View>
-                    <Text className="text-sm font-bold text-ink-900">{fmtCurrency(b.totalDollars)}</Text>
+                    {/* Label which number this is. A bare figure on a card is
+                        read as "what this cost", and before the move happens
+                        that isn't true yet — the bill is the actual time. */}
+                    <View className="items-end">
+                      <Text className="text-sm font-bold text-ink-900">
+                        {fmtCurrency(b.totalDollars)}
+                      </Text>
+                      <Text className="text-[10px] text-silver-400 -mt-0.5">
+                        {b.isFinalTotal ? 'final' : 'estimate'}
+                      </Text>
+                    </View>
                   </View>
 
                   {/* Modify booking — only shown while there's still >24h

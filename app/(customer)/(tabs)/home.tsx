@@ -417,7 +417,12 @@ export default function CustomerHome() {
                         {b.pickup_line1} → {b.dropoff_line1 ?? 'in-home'}
                       </Text>
                       <Text className="text-xs text-silver-500">
-                        {fmtDateShort(b.scheduled_for_date)} · ${(b.price_total_cents / 100).toFixed(0)} CAD
+                        {/* These rows are all completed moves, so show what
+                            the move actually billed, not the estimate the
+                            deposit was taken against. Same rule as the Moves
+                            list and the receipt — one number per move. */}
+                        {fmtDateShort(b.scheduled_for_date)} · $
+                        {(((b as any).actual_total_cents ?? b.price_total_cents) / 100).toFixed(0)} CAD
                       </Text>
                     </View>
                     <Badge label="Completed" tone="neutral" />
