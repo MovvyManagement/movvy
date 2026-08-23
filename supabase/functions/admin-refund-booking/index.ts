@@ -35,6 +35,7 @@
 import { z } from 'https://esm.sh/zod@3.23.8';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 import { corsHeaders } from '../_shared/cors.ts';
+import { checkRateLimit } from '../_shared/security.ts';
 
 const Body = z.object({
   booking_id: z.string().uuid(),
@@ -77,6 +78,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const { data: tier, error: tierErr } = await supabase.rpc('movvy_admin_access');
   if (tierErr) return json({ error: 'Could not verify access.' }, 500);
   if (tier !== 'management') return json({ error: 'Refunds are management-only.' }, 403);
+
+  // Rate limit AFTER the access check, so a failed probe by a non-admin can't
+  // burn a real admin's budget, and keyed to the caller so one compromised
+  // session can't drain the Stripe balance in a loop. 20/hour is far above
+  // anything a human refunding by hand will hit — the console shows one button
+  // per owed move — while still bounding the damage.
+  const { data: me } = await supabase.auth.getUser();
+  if (me?.user?.id) {
+    try {
+      await checkRateLimit({
+        bucketKey: `user:${me.user.id}:admin_refund`,
+        endpoint: 'admin-refund-booking',
+        limit: 20, windowSeconds: 3600,
+      });
+    } catch {
+      return json({ error: 'Too many refunds in the last hour. Try again shortly.' }, 429);
+    }
+  }
 
   const secretKey = Deno.env.get('STRIPE_SECRET_KEY');
   if (!secretKey) return json({ error: 'Payments are not configured.' }, 503);
