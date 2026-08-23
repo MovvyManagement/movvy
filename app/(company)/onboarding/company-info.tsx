@@ -1,3 +1,4 @@
+import { COMMISSION_PCT } from '@/lib/brand';
 import React, { useState } from 'react';
 import { View, Text, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -76,7 +77,7 @@ export default function CompanyInfo() {
         >
           <Text className="text-2xl font-bold text-ink-900 mt-2">List your moving company</Text>
           <Text className="mt-1 text-sm text-silver-500">
-            Get matched with customers in your area. Movvy keeps 17%.
+            Get matched with customers in your area. Movvy keeps {COMMISSION_PCT}%.
           </Text>
 
           <View className="mt-6 gap-4">

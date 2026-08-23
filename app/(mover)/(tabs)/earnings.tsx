@@ -1,3 +1,4 @@
+import { COMMISSION_PCT } from '@/lib/brand';
 import React, { useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -187,7 +188,7 @@ export default function MoverEarnings() {
             <Text className="text-white/70 text-sm mt-3 leading-5">
               Your first payout shows here after Move #1. Get online from the
               Jobs tab — the moment you complete a move, your earnings start
-              appearing here. Movvy keeps 17%; you get the rest, paid every
+              appearing here. Movvy keeps {COMMISSION_PCT}%; you get the rest, paid every
               Monday.
             </Text>
           </View>
@@ -206,7 +207,7 @@ export default function MoverEarnings() {
               </Text>
             )}
             <Text className="text-white/70 text-xs mt-1">
-              After Movvy's 17% service fee · Paid every Monday
+              After Movvy&apos;s {COMMISSION_PCT}% service fee · Paid every Monday
             </Text>
 
             <View className="mt-6 flex-row items-end gap-2" style={{ height: 100 }}>

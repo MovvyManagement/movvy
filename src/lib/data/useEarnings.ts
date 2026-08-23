@@ -12,6 +12,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { supabase, supabaseConfigured, useAuth } from '@/lib/supabase';
+import { useMyMembership } from './useDispatch';
 
 const MS_DAY = 24 * 60 * 60 * 1000;
 
@@ -52,8 +53,21 @@ export interface DriverEarningsSummary {
 
 export function useDriverEarningsSummary() {
   const { user } = useAuth();
+  // A payout row is scoped to whoever gets PAID, and queue_driver_payout picks
+  // that by precedence: team, else company, else the individual driver. So on
+  // any move performed under a crew, the row carries company_id and leaves
+  // driver_profile_id null — and this screen, which matched on
+  // driver_profile_id alone, showed the person who did the move $0.00.
+  //
+  // An org admin is the one being paid for their crew's work, so their
+  // earnings are the org's rows. Hourly crew members are deliberately NOT
+  // included: they're paid a wage by their admin, not per move, and showing
+  // them the org's per-move payout would promise money that isn't theirs.
+  const { data: membership } = useMyMembership();
+  const orgId = membership?.org_role === 'admin' ? membership.company_id : null;
+
   return useQuery({
-    queryKey: ['driver-earnings-summary', user?.id],
+    queryKey: ['driver-earnings-summary', user?.id, orgId],
     enabled: !!user?.id && supabaseConfigured,
     queryFn: async (): Promise<DriverEarningsSummary> => {
       const now = new Date();
@@ -67,7 +81,11 @@ export function useDriverEarningsSummary() {
         .select(
           'id, net_cents, created_at, booking:bookings(short_code)',
         )
-        .eq('driver_profile_id', user!.id)
+        .or(
+          orgId
+            ? `driver_profile_id.eq.${user!.id},company_id.eq.${orgId}`
+            : `driver_profile_id.eq.${user!.id}`,
+        )
         .gte('created_at', cutoff.toISOString())
         .order('created_at', { ascending: false });
       if (error) throw error;

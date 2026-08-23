@@ -30,9 +30,15 @@ export const PARTNER_COMMISSION_RATE = 0.20;
 /** Partner's keep rate — the complement of the commission. */
 export const PARTNER_SHARE_RATE = 1 - PARTNER_COMMISSION_RATE; // 0.80
 
-/** Movvy commission rate as displayed to partners. Keep the copy in sync with
- *  PARTNER_COMMISSION_RATE above if the rate ever changes. */
-export const COMMISSION_RATE_LABEL = "Movvy keeps 20% · you keep 80%";
+/** Movvy commission rate as displayed to partners.
+ *
+ *  DERIVED, not typed out. The literal version of this drifted: three screens
+ *  said "17%" long after the rate became 20%, so a crew read one number on
+ *  their Earnings tab and was paid by another. Percentages in copy belong to
+ *  the constant that decides the money, or they eventually disagree with it. */
+export const COMMISSION_PCT = Math.round(PARTNER_COMMISSION_RATE * 100);
+export const PARTNER_SHARE_PCT = Math.round(PARTNER_SHARE_RATE * 100);
+export const COMMISSION_RATE_LABEL = `Movvy keeps ${COMMISSION_PCT}% · you keep ${PARTNER_SHARE_PCT}%`;
 
 // =============================================================================
 // LEGAL / TERMS
