@@ -44,7 +44,13 @@ export default async function PayoutsPage() {
       // both move on, and whoever approves this a week later has to be able to
       // see what they are paying for without re-deriving it.
       'crew_size, tips_cents, jobs_count, period_start, period_end, ' +
-      'companies(display_name, legal_name, email, phone, etransfer_email, bank_account_last4), ' +
+      // The company embed no longer carries bank columns: they are revoked
+      // from `authenticated` (0119) so a crew member can't read their admin's
+      // payment destination, and this page runs on the ADMIN's own session —
+      // same DB role — so naming them here 42501s the entire query. The LIVE
+      // destination now comes from admin_crew_payout_directory() below, which
+      // is security-definer and gated on is_full_admin().
+      'companies(display_name, legal_name, email, phone), ' +
       'profiles:requested_by(full_name, email)',
     )
     .order('created_at', { ascending: false })
@@ -55,6 +61,14 @@ export default async function PayoutsPage() {
   // number in their app can't disagree. Recording a payment below subtracts
   // from this automatically — `claimed` counts paid requests.
   const { data: balances } = await supabase.rpc('admin_crew_balances');
+  // Live banking per crew, for the "details changed since this request" check.
+  const { data: directory } = await supabase.rpc('admin_crew_payout_directory');
+  const liveBank = new Map<string, { etransfer_email: string | null; bank_account_last4: string | null }>(
+    ((directory ?? []) as any[]).map((d) => [
+      d.company_id as string,
+      { etransfer_email: d.etransfer_email ?? null, bank_account_last4: d.bank_account_last4 ?? null },
+    ]),
+  );
   const crewBalances = (balances ?? []) as any[];
   const totalOwed = crewBalances.reduce((s: number, b: any) => s + Number(b.owed_cents ?? 0), 0);
 
@@ -141,10 +155,11 @@ export default async function PayoutsPage() {
           const co = Array.isArray(r.companies) ? r.companies[0] : r.companies;
           const who = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles;
           // The destination could have been edited after the request was filed.
+          const live = liveBank.get(r.company_id);
           const changed =
             r.method === 'etransfer'
-              ? !!co?.etransfer_email && co.etransfer_email !== r.etransfer_email
-              : !!co?.bank_account_last4 && co.bank_account_last4 !== r.bank_account_last4;
+              ? !!live?.etransfer_email && live.etransfer_email !== r.etransfer_email
+              : !!live?.bank_account_last4 && live.bank_account_last4 !== r.bank_account_last4;
 
           return (
             <div key={r.id} className="px-5 py-4">
@@ -225,7 +240,7 @@ export default async function PayoutsPage() {
                       <p className="mt-2 rounded-lg bg-red-50 px-2 py-1.5 text-xs text-red-700">
                         <span className="font-semibold">Details changed since this request.</span>{' '}
                         The crew's profile now shows{' '}
-                        {r.method === 'etransfer' ? co?.etransfer_email : `••••${co?.bank_account_last4}`}.
+                        {r.method === 'etransfer' ? live?.etransfer_email : `••••${live?.bank_account_last4}`}.
                         Confirm with them before sending.
                       </p>
                     ) : null}
