@@ -9,7 +9,7 @@ import { NewJobOfferHost } from '@/components/NewJobOfferHost';
 import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import { fmtCurrency, fmtTime } from '@/lib/format';
-import { jobUrgency } from '@/lib/partnerJobs';
+import { jobUrgency, moveTotalCents } from '@/lib/partnerJobs';
 import { useMyMembership, useCompanyDriverRoster, useCompanyJobs } from '@/lib/data';
 import { NotificationBell } from '@/components/NotificationBell';
 import { UrgencyPill } from '@/components/UrgencyPill';
@@ -50,7 +50,9 @@ export default function CompanyDashboard() {
           j.status === 'completed' &&
           new Date(j.created_at).getTime() >= startOfDay.getTime(),
       )
-      .reduce((s, j) => s + (j.price_total_cents ?? 0), 0);
+      // Completed jobs only, so the settled bill is what they earned — the
+      // estimate is what the deposit was taken against, not revenue.
+      .reduce((s, j) => s + moveTotalCents(j), 0);
   })();
 
   return (
@@ -307,7 +309,7 @@ export default function CompanyDashboard() {
                     <UrgencyPill urgency={jobUrgency(j.scheduled_for_window_starts_at)} />
                   </View>
                   <Text className="text-lg font-bold text-ink-900">
-                    {fmtCurrency(j.price_total_cents / 100)}
+                    {fmtCurrency(moveTotalCents(j) / 100)}
                   </Text>
                 </View>
                 <Text className="text-sm font-bold text-ink-900 mt-3" numberOfLines={1}>

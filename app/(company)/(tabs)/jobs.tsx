@@ -65,7 +65,7 @@ import { FleetGateBanner } from '@/components/FleetGateBanner';
 import { LiveMap } from '@/components/LiveMap';
 import { openInMaps } from '@/lib/maps';
 import { fmtCurrency, fmtDateShort, fmtRelativeAgo } from '@/lib/format';
-import { jobUrgency } from '@/lib/partnerJobs';
+import { jobUrgency, moveTotalCents } from '@/lib/partnerJobs';
 import { supabase, supabaseConfigured, useAuth } from '@/lib/supabase';
 import { MoveDetailSheet } from '@/components/MoveDetailSheet';
 import { ChatSheet } from '@/components/ChatSheet';
@@ -541,7 +541,7 @@ function NewRequestCard({
             {row.move_type.replace(/_/g, ' ')}
           </Text>
           <Text className="text-sm font-bold text-ink-900">
-            {fmtCurrency(row.price_total_cents / 100)}
+            {fmtCurrency(moveTotalCents(row) / 100)}
           </Text>
         </View>
         <RouteBlock row={row} />
@@ -622,7 +622,7 @@ function NeedsDriverCard({
             <UrgencyPill urgency={urgency} />
           </View>
           <Text className="text-sm font-bold text-ink-900">
-            {fmtCurrency(row.price_total_cents / 100)}
+            {fmtCurrency(moveTotalCents(row) / 100)}
           </Text>
         </View>
         <RouteBlock row={row} />
@@ -694,7 +694,7 @@ function SummaryCard({ row, assigneeName, onPress }: { row: any; assigneeName?: 
         <View className="flex-row items-center justify-between">
           <Badge label={row.status.replace(/_/g, ' ')} tone={statusTone(row.status)} />
           <Text className="text-lg font-bold text-ink-900">
-            {fmtCurrency(row.price_total_cents / 100)}
+            {fmtCurrency(moveTotalCents(row) / 100)}
           </Text>
         </View>
 
@@ -818,7 +818,7 @@ function AssignDriverModal({
             <View className="self-center h-1.5 w-12 rounded-full bg-silver-200 mb-4" />
             <Text className="text-xl font-bold text-ink-900">Assign a driver</Text>
             <Text className="mt-1 text-sm text-silver-500">
-              {target ? `#${target.short_code} · ${fmtCurrency(target.price_total_cents / 100)}` : ''}
+              {target ? `#${target.short_code} · ${fmtCurrency(moveTotalCents(target) / 100)}` : ''}
             </Text>
             <Text className="mt-2 text-[11px] text-silver-500">
               Tap a driver to assign · tap the chat icon to ping them first

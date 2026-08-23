@@ -461,6 +461,10 @@ export function useSetMyPresence() {
 // Completed without having to action them individually.
 
 export interface CompanyJobRow {
+  /** Settled bill + crew share, present only once the move has completed.
+   *  moveTotalCents()/partnerPayoutCents() prefer these over the estimate. */
+  actual_total_cents?: number | null;
+  actual_driver_payout_cents?: number | null;
   id: string;
   short_code: string;
   status: string;
@@ -487,7 +491,7 @@ export function useCompanyJobs(companyId: string | null | undefined) {
       const { data, error } = await supabase
         .from('bookings')
         .select(
-          'id, short_code, status, move_type, pickup_line1, pickup_city, dropoff_line1, dropoff_city, scheduled_for_date, scheduled_for_window, scheduled_for_window_starts_at, price_total_cents, assigned_driver_profile_id, customer_id, created_at',
+          'id, short_code, status, move_type, pickup_line1, pickup_city, dropoff_line1, dropoff_city, scheduled_for_date, scheduled_for_window, scheduled_for_window_starts_at, price_total_cents, actual_total_cents, actual_driver_payout_cents, assigned_driver_profile_id, customer_id, created_at',
         )
         .eq('assigned_company_id', companyId!)
         .order('scheduled_for_window_starts_at', { ascending: false })

@@ -37,7 +37,7 @@ import { ChatSheet } from '@/components/ChatSheet';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { useAcceptBooking, useMyMembership, acceptOnBehalfOf, useFleetReadiness } from '@/lib/data';
 import { acceptBlock } from '@/lib/truckFit';
-import { estimatePartnerPayoutCents } from '@/lib/partnerJobs';
+import { isSettled, partnerPayoutCents } from '@/lib/partnerJobs';
 import { haptic } from '@/lib/haptics';
 
 interface BookingDetail {
@@ -60,6 +60,8 @@ interface BookingDetail {
   distance_km: number | null;
   duration_min: number | null;
   price_total_cents: number;
+  actual_total_cents?: number | null;
+  actual_driver_payout_cents?: number | null;
   price_commission_cents: number;
   details: Record<string, any> | null;
 }
@@ -87,7 +89,7 @@ export default function JobDetail() {
       const { data, error } = await supabase
         .from('bookings')
         .select(
-          'id, short_code, move_type, status, customer_id, pickup_line1, pickup_city, pickup_lat, pickup_lng, dropoff_line1, dropoff_city, dropoff_lat, dropoff_lng, scheduled_for_date, scheduled_for_window, scheduled_for_window_starts_at, distance_km, duration_min, price_total_cents, price_commission_cents, details',
+          'id, short_code, move_type, status, customer_id, pickup_line1, pickup_city, pickup_lat, pickup_lng, dropoff_line1, dropoff_city, dropoff_lat, dropoff_lng, scheduled_for_date, scheduled_for_window, scheduled_for_window_starts_at, distance_km, duration_min, price_total_cents, price_commission_cents, actual_total_cents, actual_driver_payout_cents, details',
         )
         .eq('id', id!)
         .maybeSingle();
@@ -142,7 +144,9 @@ export default function JobDetail() {
 
   // Partner share — routed through the shared estimator so the figure matches
   // the Jobs feed and dashboard exactly and can never drift between screens.
-  const payoutCents = estimatePartnerPayoutCents(booking);
+  // Settled figure once the move is billed, estimate while it's still ahead.
+  const payoutCents = partnerPayoutCents(booking);
+  const settled = isSettled(booking);
   const items =
     booking.move_type === 'home_move'
       ? `${booking.details?.bedrooms ?? 0}-bed ${booking.details?.dwelling ?? 'home'}`
@@ -223,12 +227,16 @@ export default function JobDetail() {
         ) : (
           <View className="rounded-3xl bg-ink-900 p-5">
             <Text className="text-white/70 text-xs font-semibold uppercase tracking-wider">
-              Estimated payout
+              {settled ? 'Payout' : 'Estimated payout'}
             </Text>
             <Text className="text-white text-4xl font-bold mt-1">
               {fmtCurrency(payoutCents / 100)}
             </Text>
-            <Text className="text-white/70 text-xs mt-1">After Movvy service fee</Text>
+            <Text className="text-white/70 text-xs mt-1">
+              {settled
+                ? 'Billed on the actual time · after Movvy service fee'
+                : 'After Movvy service fee'}
+            </Text>
           </View>
         )}
 

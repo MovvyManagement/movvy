@@ -19,6 +19,40 @@ import type { DbBooking } from '@/lib/supabase/types';
 import { PARTNER_SHARE_RATE } from '@/lib/brand';
 import { haversineKm } from '@/lib/distance';
 
+/**
+ * What this move COST, in cents — the settled bill once it exists, the estimate
+ * before that.
+ *
+ * Every partner surface showing a dollar figure for a move should come through
+ * here. They all read price_total_cents directly, which is the quote the
+ * deposit was taken against, so a finished move went on advertising its
+ * estimate on the job card, the dispatcher dashboard and the company feed long
+ * after it had been billed for something else entirely.
+ */
+export function moveTotalCents(b: Partial<PayoutInput> & {
+  actual_total_cents?: number | null;
+}): number {
+  return b.actual_total_cents ?? b.price_total_cents ?? 0;
+}
+
+/** True once the move has been billed on real time. */
+export function isSettled(b: { actual_total_cents?: number | null }): boolean {
+  return b.actual_total_cents != null;
+}
+
+/**
+ * What the crew is ACTUALLY owed for a move, in cents.
+ *
+ * Falls back to the pre-acceptance estimate while the move is still ahead —
+ * that's the right number to show on a job card. Once completed, the settled
+ * figure is the only honest one, and it is what driver_payouts carries.
+ */
+export function partnerPayoutCents(b: PayoutInput & {
+  actual_driver_payout_cents?: number | null;
+}): number {
+  return b.actual_driver_payout_cents ?? estimatePartnerPayoutCents(b);
+}
+
 /** Fields any job-feed row carries that we need to estimate a payout. */
 type PayoutInput = Pick<DbBooking, 'price_total_cents' | 'price_commission_cents'>;
 

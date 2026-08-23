@@ -101,6 +101,12 @@ export interface DbBooking {
   price_tax_cents: number;
   price_total_cents: number;
   price_commission_cents: number;
+  /** The bill from the ACTUAL time the move took, written on completion.
+   *  Null until then — a move that hasn't finished has no real total, only
+   *  the estimate the deposit was taken against. */
+  actual_total_cents?: number | null;
+  /** The crew's share of that real bill. Null until completion. */
+  actual_driver_payout_cents?: number | null;
   pricing_model: 'fixed' | 'hourly';
 
   assigned_team_id: string | null;
