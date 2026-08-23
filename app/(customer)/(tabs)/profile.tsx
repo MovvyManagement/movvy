@@ -323,7 +323,16 @@ export default function Profile() {
             <Ionicons name="chevron-forward" size={18} color="#A1A1AA" />
           </Pressable>
           <Pressable
-            onPress={() => router.push('/(legal)/terms')}
+            // Was router.push('/(legal)/terms') — the same destination as the
+            // Terms row directly above, so the Privacy Policy was unreachable
+            // from anywhere in the app. There is no in-app privacy route
+            // (app/(legal)/ holds only terms.tsx), and Apple requires a
+            // reachable privacy policy, so this goes to the published one.
+            onPress={() =>
+              Linking.openURL('https://movvy.ca/privacy').catch(() => {
+                toast.error("Couldn't open the privacy policy.");
+              })
+            }
             className="flex-row items-center px-5 py-4 border-t border-silver-100 active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Read the Privacy Policy"

@@ -95,11 +95,43 @@ parallel set that the app can't use.
 
 ---
 
-## ⚠️ Before going live
+## ⚠️ App Store review needs two of these accounts ALIVE
 
-1. Delete every `demo.*@movvy.ca` and `customer-demo@movvy.app` user
+**Do not delete the demo accounts before review.** Movvy is fully gated — the
+welcome screen offers only "Get started" and "I already have an account", with
+no browsable content — so App Review cannot see the app at all without a login.
+An app a reviewer can't get into is rejected under Guideline 2.1, and deleting
+these accounts as a pre-launch step is exactly how that happens.
+
+Put these in the App Store Connect **Demo Account** fields:
+
+| Field | Value |
+|---|---|
+| Username | `demo.customer@movvy.ca` |
+| Password | `MovvyDemo2026!` |
+
+And in the **Notes** field, so the reviewer isn't stopped by the Alberta gate:
+
+> Movvy serves the province of Alberta, Canada only. Addresses outside Alberta
+> are rejected by design and will return no autocomplete results. To complete a
+> booking, use: pickup `730 2 Avenue SW, Calgary AB` → drop-off
+> `430 Sage Hill Road NW, Calgary AB`.
+>
+> To review the crew side, sign in with `demo.driver@movvy.ca` (same password)
+> and choose "Already a partner? Partner sign-in" on the welcome screen.
+
+Also confirm before submitting: the demo customer has **no in-flight booking**.
+Account deletion is deliberately blocked while a move is live
+(`account-delete/index.ts:91`), and a reviewer testing Guideline 5.1.1(v)
+deletion against a busy account will see a refusal and read it as non-compliance.
+
+## ⚠️ After approval
+
+1. Rotate the password on every `demo.*@movvy.ca` account
 2. Rotate or delete the `Adam Crew` org and its invite code `CO-R5AMHB`
-3. Remove this file from the repo and `.gitignore` it
-4. Confirm `SUPABASE_SERVICE_ROLE_KEY` is never bundled into the client
+3. Delete `customer-demo@movvy.app` (a stale account the app can't use)
+4. Remove this file from the repo and `.gitignore` it
+5. Confirm `SUPABASE_SERVICE_ROLE_KEY` is never bundled into the client
 
 Keep `management@movvy.ca` — that's the real owner account.
+Keep the demo accounts as long as you may submit an update for review.
