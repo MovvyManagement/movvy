@@ -1,8 +1,21 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase, useAuth } from '@/lib/supabase';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
 
 export type DisputeKind = 'damage' | 'late' | 'no_show' | 'poor_service' | 'overcharge' | 'other';
 
+/**
+ * Raise a dispute on a booking.
+ *
+ * Still live: the customer live tracker and the crew's active-job screen both
+ * open one from their "report a problem" path. The dedicated dispute FORM was
+ * removed along with the support hub — support raises the formal record from
+ * the chat thread now — but this endpoint is how those two screens still file
+ * one, and the admin console's Disputes queue reads what it writes.
+ *
+ * `useMyDisputes` lived here too and was deleted: it backed the customer's
+ * "my disputes" list, which went with the support hub, and nothing has read it
+ * since.
+ */
 export function useOpenDispute() {
   const qc = useQueryClient();
   return useMutation({
@@ -19,23 +32,6 @@ export function useOpenDispute() {
     },
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['disputes', vars.booking_id] });
-      qc.invalidateQueries({ queryKey: ['my-disputes'] });
-    },
-  });
-}
-
-export function useMyDisputes() {
-  const { user } = useAuth();
-  return useQuery({
-    queryKey: ['my-disputes', user?.id],
-    enabled: !!user,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('disputes')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data ?? [];
     },
   });
 }

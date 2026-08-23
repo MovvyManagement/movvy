@@ -16,7 +16,6 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { handle } from '../_shared/serve.ts';
 import { sendBrandedEmail } from '../_shared/email.ts';
 import { accountDeleted } from '../_shared/emails/index.ts';
-import { fmtDatePlusDays } from '../_shared/format.ts';
 
 const Body = z.object({
   reason: z.string().max(500).optional(),
@@ -179,10 +178,7 @@ handle(async (req) => {
     if (emailBeforeDelete) {
       sendBrandedEmail({
         to: emailBeforeDelete,
-        template: accountDeleted({
-          fullName: fullNameBeforeDelete,
-          hardDeleteOn: fmtDatePlusDays(30),
-        }),
+        template: accountDeleted({ fullName: fullNameBeforeDelete }),
       }).catch((e) => console.warn('[account-delete] email send failed', e));
     }
 

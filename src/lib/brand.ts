@@ -6,6 +6,19 @@
 // here and every screen reflects the change.
 // =============================================================================
 
+/** The version actually shipped, read from the binary rather than typed out.
+ *
+ *  Three profile screens hardcoded "Movvy v0.1.0" as a literal, so the number a
+ *  user reported a bug against was whatever someone last remembered to edit —
+ *  it stayed 0.1.0 through every build. expo-constants reports what the running
+ *  app really is, so it cannot drift from app.json again. */
+import Constants from 'expo-constants';
+
+export const APP_VERSION = Constants.expoConfig?.version ?? '—';
+
+/** "Movvy v1.0.0 · Alberta-wide" — the footer line on all three profiles. */
+export const APP_VERSION_LINE = `Movvy v${APP_VERSION} · Alberta-wide`;
+
 /** Lifetime move count displayed in the social-proof line on welcome. */
 export const TOTAL_MOVES_TAGLINE = '500+';
 

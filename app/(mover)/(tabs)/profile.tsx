@@ -19,6 +19,7 @@
 // trimmed list — they're paid through their team/company, not directly.
 // =============================================================================
 
+import { APP_VERSION_LINE } from '@/lib/brand';
 import React, { useState } from 'react';
 import { View, Text, ScrollView, Pressable, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -481,7 +482,7 @@ export default function MoverProfile() {
           <Text className="text-sm font-semibold text-silver-500">Delete my account</Text>
         </Pressable>
 
-        <Text className="text-center text-xs text-silver-400 mt-6">Movvy v0.1.0 · Alberta-wide</Text>
+        <Text className="text-center text-xs text-silver-400 mt-6">{APP_VERSION_LINE}</Text>
       </ScrollView>
 
       {/* Editor sheets — all open as slide-up modals; closing returns the
