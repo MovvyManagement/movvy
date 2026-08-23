@@ -110,7 +110,13 @@ export default function CompanySafety() {
               <Text className="text-xs text-silver-500 mt-0.5">
                 {profile?.emergency_contact_phone
                   ? fmtPhone(profile.emergency_contact_phone)
-                  : 'Movvy texts them only if you trigger SOS'}
+                  // Was "Movvy texts them only if you trigger SOS". Nothing
+                  // sends that text: no edge function reads
+                  // emergency_contact_phone, and there is no SOS trigger —
+                  // the SOS card above dials 911 and Movvy directly. Promising
+                  // an automated safety message that cannot arrive is the one
+                  // kind of copy defect that gets someone hurt.
+                  : 'Who Movvy support calls if we cannot reach you'}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color="#A1A1AA" />

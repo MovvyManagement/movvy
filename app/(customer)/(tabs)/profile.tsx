@@ -152,7 +152,8 @@ export default function Profile() {
       label: profile?.emergency_contact_phone
         ? 'Emergency contact'
         : 'Set an emergency contact',
-      value: profile?.emergency_contact_name ?? 'Texted if you hit SOS',
+      // No automated SMS exists — see the note in (mover)/safety.tsx.
+      value: profile?.emergency_contact_name ?? 'Who Movvy support calls if we cannot reach you',
       onPress: () => setEmergencyOpen(true),
     },
     {
