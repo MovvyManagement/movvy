@@ -49,9 +49,27 @@ export function useCompany(companyId: string | null | undefined) {
     queryKey: COMPANY_KEY(companyId),
     enabled: !!companyId && supabaseConfigured,
     queryFn: async (): Promise<CompanyRow | null> => {
+      // Columns named explicitly, not '*'. The five payment-destination
+      // columns are revoked from `authenticated` (0119) because RLS is
+      // row-level and the members-can-read policy therefore exposed a crew's
+      // bank details to every hourly member. PostgREST expands '*' to the
+      // whole table and fails with 42501 when any column is revoked, so a
+      // star select here would break this query for admins too.
+      //
+      // Bank details come from my_company_bank_details() instead — see
+      // useMyCompanyBankDetails below.
       const { data, error } = await supabase
         .from('companies')
-        .select('*')
+        .select(
+          'id, legal_name, display_name, registration_number, phone, email, ' +
+          'primary_city_id, service_radius_km, truck_count, invite_code, ' +
+          'onboarding_status, verified_at, suspended_at, suspended_reason, ' +
+          'background_check_status, background_check_completed_at, ' +
+          'rating_avg, rating_count, hq_line1, hq_line2, hq_city_name, ' +
+          'hq_region, hq_postal, hq_country_code, hq_lat, hq_lng, ' +
+          'stripe_account_id, payout_currency, bank_updated_at, ' +
+          'created_at, updated_at, deleted_at',
+        )
         .eq('id', companyId!)
         .maybeSingle();
       if (error) throw error;
@@ -229,6 +247,36 @@ export function useCompanyPayouts(companyId: string | null | undefined) {
         ...r,
         booking: Array.isArray(r.booking) ? r.booking[0] ?? null : r.booking,
       })) as CompanyPayoutRow[];
+    },
+  });
+}
+
+/**
+ * The caller's own crew payment destination — org admins only.
+ *
+ * Separate from useCompany because the bank columns are no longer readable
+ * from the table: a crew member could read their admin's holder name,
+ * institution, transit and account tail straight off `companies`, which RLS
+ * could not prevent because it grants rows, not columns. my_company_bank_details()
+ * (0119) checks org_role = 'admin' and returns nothing to anyone else.
+ */
+export function useMyCompanyBankDetails(companyId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['company-bank-details', companyId],
+    enabled: !!companyId && supabaseConfigured,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('my_company_bank_details');
+      if (error) throw error;
+      const rows = (data ?? []) as Array<{
+        company_id: string;
+        bank_holder_name: string | null;
+        bank_institution_number: string | null;
+        bank_transit_number: string | null;
+        bank_account_last4: string | null;
+        etransfer_email: string | null;
+        bank_updated_at: string | null;
+      }>;
+      return rows.find((r) => r.company_id === companyId) ?? null;
     },
   });
 }

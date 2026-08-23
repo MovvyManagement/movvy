@@ -33,8 +33,7 @@ import {
   useCompany,
   useCompanyVehicles,
   useCompanyDocuments,
-  useCompanyPayouts,
-} from '@/lib/data';
+  useCompanyPayouts, useMyCompanyBankDetails } from '@/lib/data';
 import { useToast } from '@/components/Toast';
 import { logout } from '@/lib/supabase';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -57,6 +56,7 @@ export default function CompanyProfile() {
   const { data: membership } = useMyMembership();
   const companyId = membership?.kind === 'company' ? membership.company_id : null;
   const { data: company } = useCompany(companyId);
+  const { data: bank } = useMyCompanyBankDetails(companyId);
   const { data: roster } = useCompanyDriverRoster(companyId);
   const { data: trucks } = useCompanyVehicles(companyId);
   const { data: docs } = useCompanyDocuments(companyId);
@@ -157,8 +157,10 @@ export default function CompanyProfile() {
         {
           icon: 'card-outline',
           label: 'Bank Account',
-          value: company?.bank_account_last4
-            ? `•••• ${company.bank_account_last4}`
+          // Reads the admin-only RPC, not the companies row — the bank
+          // columns are revoked from `authenticated` (0119).
+          value: bank?.bank_account_last4
+            ? `•••• ${bank.bank_account_last4}`
             : 'Add account',
           onPress: () => setBankOpen(true),
         },

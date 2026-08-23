@@ -214,7 +214,11 @@ export function useTeam(teamId: string | null | undefined) {
       const { data, error } = await supabase
         .from('companies')
         .select(
-          'id, display_name, invite_code, primary_city_id, service_radius_km, onboarding_status, verified_at, rating_avg, rating_count, stripe_account_id, payout_currency, bank_holder_name, bank_institution_number, bank_transit_number, bank_account_last4, bank_updated_at, etransfer_email',
+          // Bank columns dropped from this select: they are revoked from
+          // `authenticated` (0119), and naming even one of them makes PostgREST
+          // fail the whole query with 42501 — for admins too. Anything that
+          // needs them reads my_company_bank_details() instead.
+          'id, display_name, invite_code, primary_city_id, service_radius_km, onboarding_status, verified_at, rating_avg, rating_count, stripe_account_id, payout_currency, bank_updated_at',
         )
         .eq('id', teamId!)
         .maybeSingle();

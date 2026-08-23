@@ -23,7 +23,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Input } from './Input';
-import { useCompany, useUpdateCompany } from '@/lib/data';
+import { useCompany, useUpdateCompany, useMyCompanyBankDetails } from '@/lib/data';
 import { useToast } from './Toast';
 import { haptic } from '@/lib/haptics';
 
@@ -37,6 +37,11 @@ const IS_IOS = Platform.OS === 'ios';
 
 export function EditBankAccountSheet({ visible, companyId, onClose }: Props) {
   const { data: company } = useCompany(companyId);
+  // Bank details no longer come off the companies row — the payment-destination
+  // columns are revoked from `authenticated` (0119) because RLS grants whole
+  // rows, so a members-can-read policy handed every hourly crew member their
+  // admin's account details. This RPC returns nothing to anyone but an org admin.
+  const { data: bank } = useMyCompanyBankDetails(companyId);
   const update = useUpdateCompany(companyId);
   const toast = useToast();
 
@@ -50,13 +55,13 @@ export function EditBankAccountSheet({ visible, companyId, onClose }: Props) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!visible || !company) return;
-    setHolder(company.bank_holder_name ?? company.legal_name ?? '');
-    setInstitution(company.bank_institution_number ?? '');
-    setTransit(company.bank_transit_number ?? '');
+    if (!visible) return;
+    setHolder(bank?.bank_holder_name ?? company?.legal_name ?? '');
+    setInstitution(bank?.bank_institution_number ?? '');
+    setTransit(bank?.bank_transit_number ?? '');
     setAccountRaw('');
-    setEtransfer((company as any).etransfer_email ?? '');
-  }, [visible, company]);
+    setEtransfer(bank?.etransfer_email ?? '');
+  }, [visible, company, bank]);
 
   const emailOk = etransfer.trim() === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(etransfer.trim());
   // A fresh bank entry needs all four fields. If none is being entered we keep
@@ -71,7 +76,7 @@ export function EditBankAccountSheet({ visible, companyId, onClose }: Props) {
     /^[0-9]{3}$/.test(institution.trim()) &&
     /^[0-9]{5}$/.test(transit.trim()) &&
     /^[0-9]{6,12}$/.test(accountRaw.trim());
-  const hasExisting = !!company?.bank_account_last4;
+  const hasExisting = !!bank?.bank_account_last4;
 
   const valid =
     !!company &&
@@ -129,12 +134,12 @@ export function EditBankAccountSheet({ visible, companyId, onClose }: Props) {
           <View className="flex-row items-center">
             <Ionicons name="shield-checkmark" size={18} color="#047857" />
             <Text className="ml-2 text-sm font-bold text-brand-700">
-              Account on file · •••• {company?.bank_account_last4}
+              Account on file · •••• {bank?.bank_account_last4}
             </Text>
           </View>
           <Text className="mt-1 text-xs text-silver-600">
-            {company?.bank_holder_name} · Institution {company?.bank_institution_number} ·
-            Transit {company?.bank_transit_number}
+            {bank?.bank_holder_name} · Institution {bank?.bank_institution_number} ·
+            Transit {bank?.bank_transit_number}
           </Text>
         </View>
       ) : null}
