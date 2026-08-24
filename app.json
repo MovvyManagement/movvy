@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "movvy",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "icon": "./assets/icon.png",
     "splash": {
@@ -125,7 +125,8 @@
             ]
           }
         ]
-      }
+      },
+      "userInterfaceStyle": "light"
     },
     "android": {
       "package": "com.movvy.app",

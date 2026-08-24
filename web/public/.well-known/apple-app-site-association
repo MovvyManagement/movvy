@@ -2,7 +2,7 @@
   "applinks": {
     "details": [
       {
-        "appIDs": ["APPLE_TEAM_ID.com.movvy.app"],
+        "appIDs": ["G5NBS96282.com.movvy.app"],
         "components": [
           { "/": "/join/*", "comment": "Partner invite deep link" }
         ]
@@ -10,6 +10,6 @@
     ]
   },
   "webcredentials": {
-    "apps": ["APPLE_TEAM_ID.com.movvy.app"]
+    "apps": ["G5NBS96282.com.movvy.app"]
   }
 }
