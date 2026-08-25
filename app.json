@@ -14,7 +14,7 @@
       "backgroundColor": "#FFFFFF",
       "dark": {
         "image": "./assets/splash-icon.png",
-        "backgroundColor": "#0B0B0E"
+        "backgroundColor": "#FFFFFF"
       }
     },
     "ios": {
@@ -132,7 +132,7 @@
       "package": "com.movvy.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#059669"
+        "backgroundColor": "#282B2A"
       },
       "intentFilters": [
         {

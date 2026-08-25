@@ -22,7 +22,7 @@ export default function Welcome() {
       />
       <SafeAreaView className="flex-1" edges={['top', 'bottom']}>
         <View className="flex-1 px-6 pt-6">
-          <MovvyMark size={40} showText />
+          <MovvyMark size={40} />
 
           {/* Hero + value-props. Value props sit between subtitle and CTA so
               they're the last thing read before the user taps Get started —

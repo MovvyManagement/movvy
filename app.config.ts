@@ -28,6 +28,14 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 export default ({ config }: ConfigContext): ExpoConfig => {
   const mapsKey = process.env.GOOGLE_MAPS_MOBILE_KEY ?? '';
 
+  // Local "unsigned" escape hatch. Apple's free Personal teams can't sign an app
+  // that declares Push Notifications (aps-environment) or Associated Domains.
+  // Set EXPO_UNSIGNED_LOCAL=1 for a throwaway on-device dev build (e.g. to
+  // preview the icon/splash) and we drop those two capabilities so a personal
+  // team can sign. NEVER set it for TestFlight / App Store / EAS — production
+  // keeps push + universal links because the env var is unset there.
+  const freeSigning = process.env.EXPO_UNSIGNED_LOCAL === '1';
+
   return {
     ...config,
     // ExpoConfig requires name + slug; app.json always provides both, but the
@@ -36,6 +44,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     slug: config.slug ?? 'movvy',
     ios: {
       ...config.ios,
+      // Drop Associated Domains for the local unsigned build. `undefined`
+      // removes the com.apple.developer.associated-domains entitlement.
+      ...(freeSigning ? { associatedDomains: undefined } : {}),
       config: {
         ...config.ios?.config,
         ...(mapsKey ? { googleMapsApiKey: mapsKey } : {}),
@@ -48,5 +59,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         ...(mapsKey ? { googleMaps: { apiKey: mapsKey } } : {}),
       },
     },
+    // expo-notifications injects the aps-environment (Push) entitlement, which a
+    // personal team can't sign — strip the plugin for the local unsigned build.
+    plugins: freeSigning
+      ? (config.plugins ?? []).filter((p) => (Array.isArray(p) ? p[0] : p) !== 'expo-notifications')
+      : config.plugins,
   };
 };

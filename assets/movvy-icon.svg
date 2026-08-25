@@ -1,52 +1,23 @@
-<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" width="512" height="512">
-
-  <!-- Background pill -->
-  <rect width="100" height="100" rx="22" fill="#059669"/>
-
-  <!-- Motion speed lines (left/rear) -->
-  <rect x="0" y="33" width="7" height="2.5" rx="1.25" fill="white" opacity="0.38"/>
-  <rect x="0" y="40" width="5"   height="2"   rx="1"    fill="white" opacity="0.22"/>
-  <rect x="0" y="47" width="7"   height="2.5" rx="1.25" fill="white" opacity="0.38"/>
-  <rect x="0" y="54" width="4.5" height="2"   rx="1"    fill="white" opacity="0.18"/>
-
-  <!-- CARGO BODY -->
-  <rect x="7" y="26" width="54" height="37" rx="4" fill="white"/>
-  <text x="34" y="47" font-family="system-ui,-apple-system,sans-serif" font-weight="900" font-size="11" fill="#059669" text-anchor="middle" letter-spacing="-0.5">Movvy</text>
-  <!-- Rear door split line -->
-  <rect x="36" y="26" width="1.5" height="37" fill="#059669" opacity="0.2"/>
-  <!-- Door handle bar -->
-  <rect x="28" y="43" width="10" height="2.5" rx="1.25" fill="#059669" opacity="0.22"/>
-
-  <!-- CAB (front of truck, facing right) -->
-  <path d="M 61,34 L 80,34 Q 88,34 90,42 L 91,63 L 61,63 Z" fill="white"/>
-  <!-- Cab / cargo subtle join -->
-  <rect x="59.5" y="34" width="2" height="29" rx="1" fill="#059669" opacity="0.18"/>
-
-  <!-- WINDSHIELD -->
-  <path d="M 63,36 L 79,36 Q 86,36 88,44 L 88,54 L 63,54 Z" fill="#047857" opacity="0.3"/>
-  <!-- Glare reflection -->
-  <rect x="65" y="38" width="7" height="5" rx="2" fill="white" opacity="0.2"/>
-
-  <!-- HEADLIGHT -->
-  <rect x="90" y="44" width="2.5" height="6" rx="1.25" fill="#FDE68A" opacity="0.9"/>
-
-  <!-- CHASSIS BAR -->
-  <rect x="7" y="63" width="86" height="4" rx="2" fill="white" opacity="0.78"/>
-
-  <!-- WHEELS -->
-  <circle cx="25" cy="73" r="8"   fill="#0A0A0A"/>
-  <circle cx="25" cy="73" r="4.5" fill="#1F2937"/>
-  <circle cx="25" cy="73" r="2"   fill="#4B5563"/>
-
-  <circle cx="76" cy="73" r="8"   fill="#0A0A0A"/>
-  <circle cx="76" cy="73" r="4.5" fill="#1F2937"/>
-  <circle cx="76" cy="73" r="2"   fill="#4B5563"/>
-
-  <!-- Subtle ground shadow -->
-  <ellipse cx="50" cy="84" rx="40" ry="3" fill="rgba(0,0,0,0.22)"/>
-
-  <!-- LOCATION PIN (above cab = destination) -->
-  <path d="M 82,5 C 76,5 70,11 70,18 C 70,26 82,34 82,34 C 82,34 94,26 94,18 C 94,11 88,5 82,5 Z" fill="white"/>
-  <circle cx="82" cy="18" r="5" fill="#059669"/>
-
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">
+  <rect width="150" height="150" rx="34" fill="#282B2A"/>
+  <g transform="translate(15 36.5)">
+    <!-- motion speed lines -->
+    <rect x="7" y="28" width="13" height="6" rx="3" fill="#0FA353"/>
+    <rect x="3" y="37" width="16" height="6" rx="3" fill="#0FA353"/>
+    <rect x="0" y="46" width="21" height="6" rx="3" fill="#0FA353"/>
+    <!-- cargo body -->
+    <rect x="24" y="6" width="66" height="46" rx="8" fill="#0FA353"/>
+    <path d="M24,45 H90 V44 A8,8 0 0 1 82,52 H32 A8,8 0 0 1 24,44 V45 Z" fill="#0A7A3E"/>
+    <text x="57" y="34" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
+          font-weight="900" font-size="16" letter-spacing="-0.6" fill="#FFFFFF">movvy</text>
+    <!-- cab + window + headlight -->
+    <path d="M94,21 H112 A8,8 0 0 1 120,29 V48 A4,4 0 0 1 116,52 H94 A4,4 0 0 1 90,48 V25 A4,4 0 0 1 94,21 Z" fill="#0FA353"/>
+    <path d="M90,45 H120 V48 A4,4 0 0 1 116,52 H94 A4,4 0 0 1 90,48 V45 Z" fill="#0A7A3E"/>
+    <path d="M98,26 H106 A6,6 0 0 1 112,32 V38 A2,2 0 0 1 110,40 H98 A2,2 0 0 1 96,38 V28 A2,2 0 0 1 98,26 Z" fill="#282B2A"/>
+    <path d="M116,41 H118 A2,2 0 0 1 120,43 V45 A2,2 0 0 1 118,47 H116 V41 Z" fill="#0A7A3E"/>
+    <!-- wheels -->
+    <path d="M50,51 H51 A11,11 0 0 1 62,62 V62 H39 V62 A11,11 0 0 1 50,51 Z" fill="#0A7A3E"/>
+    <path d="M103,51 H104 A11,11 0 0 1 115,62 V62 H92 V62 A11,11 0 0 1 103,51 Z" fill="#0A7A3E"/>
+    <circle cx="51" cy="62" r="9" fill="#FFFFFF"/>
+    <circle cx="104" cy="62" r="9" fill="#FFFFFF"/></g>
 </svg>
