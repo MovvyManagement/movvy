@@ -76,7 +76,6 @@ export function Footer() {
             <HiddenAdminTrigger>
               <Wordmark size={20} />
             </HiddenAdminTrigger>
-            <span className="text-sm font-semibold text-ink-900">Movvy Technologies Inc.</span>
           </div>
           <p className="text-xs text-silver-500">
             © {new Date().getFullYear()} Movvy Technologies Inc. · Calgary, AB · Built in Canada

@@ -1,10 +1,28 @@
 /** @type {import('tailwindcss').Config} */
 // Neutral tokens (ink/silver) mirror the mobile app. The green is the refreshed
-// 2026-08 brand — primary #0FA353, deep #0A7A3E — and intentionally diverges
-// from the mobile app's palette now. One scale backs BOTH `brand-*` (public
-// marketing site) and `emerald-*` (the admin ops console), so the entire site
-// shares a single green. `success` is the same primary green.
-const green = {
+// 2026-08 brand and intentionally diverges from the mobile app now.
+//
+// Two green scales on purpose:
+//  • brand-*  (public marketing site) — the mid-band 500/600/700 all collapse to
+//    the EXACT logo green #0FA353, so every green on the page matches the
+//    wordmark. 800/900 keep the deep greens (unused on marketing today).
+//  • emerald-* (admin ops console) — a graduated ramp so badge text
+//    (emerald-700/800 on light emerald-50/100 fills) keeps enough contrast.
+const brand = {
+  50: '#E9F7EF',
+  100: '#CFEFDD',
+  200: '#A3E0BF',
+  300: '#6BCB99',
+  400: '#33B473',
+  500: '#0FA353',
+  600: '#0FA353',
+  700: '#0FA353',
+  800: '#0A7A3E',
+  900: '#086433',
+  DEFAULT: '#0FA353',
+};
+
+const emerald = {
   50: '#E9F7EF',
   100: '#CFEFDD',
   200: '#A3E0BF',
@@ -39,11 +57,8 @@ module.exports = {
           500: '#71717A',
           600: '#52525B',
         },
-        brand: green,
-        // Admin console (app/admin-management/*) is built on Tailwind's built-in
-        // `emerald-*`; overriding it here recolors the whole ops console to the
-        // brand green without touching any of those class strings.
-        emerald: green,
+        brand,
+        emerald,
         success: '#0FA353',
         warning: '#F59E0B',
         danger: '#EF4444',

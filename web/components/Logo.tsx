@@ -31,7 +31,7 @@ export function Wordmark({ size = 28, onDark = false }: WordmarkProps) {
   const widths = [0.37, 0.6, 0.83].map((f) => Math.round(size * f));
   return (
     <span
-      style={{ display: 'inline-flex', alignItems: 'flex-end', gap: Math.round(size * 0.34) }}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: Math.round(size * 0.34) }}
       role="img"
       aria-label="Movvy"
     >
@@ -40,8 +40,8 @@ export function Wordmark({ size = 28, onDark = false }: WordmarkProps) {
         style={{
           display: 'flex',
           flexDirection: 'column',
+          alignItems: 'flex-end',
           gap,
-          paddingBottom: Math.round(size * 0.16),
         }}
       >
         {widths.map((w, i) => (
