@@ -7,7 +7,7 @@
 // =============================================================================
 
 import Link from 'next/link';
-import { Logo } from './Logo';
+import { Wordmark } from './Logo';
 
 const navLinks = [
   { href: '/partners', label: 'For Movers' },
@@ -19,9 +19,8 @@ export function Nav() {
   return (
     <header className="sticky top-0 z-40 border-b border-silver-200 bg-white/85 backdrop-blur">
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
-        <Link href="/" className="flex items-center gap-2" aria-label="Movvy home">
-          <Logo size={28} />
-          <span className="text-lg font-bold tracking-tight text-ink-900">Movvy</span>
+        <Link href="/" className="flex items-center" aria-label="Movvy home">
+          <Wordmark size={26} />
         </Link>
         <div className="hidden items-center gap-8 md:flex">
           {navLinks.map((l) => (

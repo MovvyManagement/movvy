@@ -5,10 +5,22 @@
 // chrome (Nav + Footer) so every page renders identically below the fold.
 // =============================================================================
 
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
+import { Archivo_Black } from 'next/font/google';
 import './globals.css';
 import { Nav } from '@/components/Nav';
 import { Footer } from '@/components/Footer';
+import { Splash } from '@/components/Splash';
+
+// Display face for the brand wordmark only (Nav / Footer / splash). The rest of
+// the site stays Inter — this is exposed as a CSS variable so it's opt-in per
+// element, not a site-wide type swap.
+const archivoBlack = Archivo_Black({
+  weight: '400',
+  subsets: ['latin'],
+  variable: '--font-archivo-black',
+  display: 'swap',
+});
 
 const TITLE = 'Movvy — Your Move, Booked in 60 Seconds';
 const DESCRIPTION =
@@ -56,14 +68,20 @@ export const metadata: Metadata = {
   },
 };
 
+// Brand charcoal drives the browser UI (address bar on mobile, PWA chrome).
+export const viewport: Viewport = {
+  themeColor: '#282B2A',
+};
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en-CA">
+    <html lang="en-CA" className={archivoBlack.variable}>
       <body className="flex min-h-screen flex-col">
+        <Splash />
         <Nav />
         <main className="flex-1">{children}</main>
         <Footer />

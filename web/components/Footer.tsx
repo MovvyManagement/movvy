@@ -6,7 +6,7 @@
 // =============================================================================
 
 import Link from 'next/link';
-import { Logo } from './Logo';
+import { Wordmark } from './Logo';
 import { HiddenAdminTrigger } from './HiddenAdminTrigger';
 
 const columns = [
@@ -74,7 +74,7 @@ export function Footer() {
                 Invisible to anyone who doesn't already know it's there.
                 Cmd/Ctrl+Shift+M anywhere on the page does the same. */}
             <HiddenAdminTrigger>
-              <Logo size={20} />
+              <Wordmark size={20} />
             </HiddenAdminTrigger>
             <span className="text-sm font-semibold text-ink-900">Movvy Technologies Inc.</span>
           </div>

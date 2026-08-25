@@ -26,3 +26,76 @@
   font-display: swap;
   src: url('https://rsms.me/inter/font-files/InterVariable.woff2') format('woff2');
 }
+
+/* ===========================================================================
+   First-paint splash (movvy.ca)
+   White overlay with the animated "mo(vv)y" wordmark. It self-hides purely via
+   CSS — no JS and no DOM removal, so React never unmounts it and there's zero
+   hydration risk. Covers the page for ~1.2s on a hard load, then fades out and
+   goes non-interactive. Client-side navigations don't replay it (layout
+   persists across route changes). Respects prefers-reduced-motion.
+   =========================================================================== */
+#mv-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  animation: mvSplashOut 1.6s ease forwards;
+}
+#mv-splash .mv-lockup { display: flex; align-items: flex-end; gap: 18px; margin-top: -28px; }
+#mv-splash .mv-strips { display: flex; flex-direction: column; align-items: flex-end; gap: 9px; padding-bottom: 8px; }
+#mv-splash .mv-strips span { display: block; height: 11px; border-radius: 6px; background: #0fa353; }
+#mv-splash .mv-strips span:nth-child(1) { width: 30px; animation: mvStrip .5s cubic-bezier(.2,.7,.3,1) .05s both; }
+#mv-splash .mv-strips span:nth-child(2) { width: 50px; animation: mvStrip .5s cubic-bezier(.2,.7,.3,1) .15s both; }
+#mv-splash .mv-strips span:nth-child(3) { width: 70px; animation: mvStrip .5s cubic-bezier(.2,.7,.3,1) .25s both; }
+#mv-splash .mv-word {
+  font-family: var(--font-archivo-black), system-ui, sans-serif;
+  font-weight: 900;
+  font-synthesis: none;
+  font-size: 84px;
+  line-height: .9;
+  letter-spacing: -.03em;
+  color: #161615;
+  animation: mvWord .55s cubic-bezier(.2,.7,.3,1) .3s both;
+}
+#mv-splash .mv-word i { color: #0fa353; font-style: normal; }
+#mv-splash .mv-tag {
+  margin-top: 24px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .28em;
+  text-transform: uppercase;
+  color: rgba(40, 43, 42, .55);
+  animation: mvTag .5s ease-out .75s both;
+}
+#mv-splash .mv-bar {
+  position: absolute;
+  bottom: 96px;
+  width: 120px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(40, 43, 42, .12);
+  overflow: hidden;
+}
+#mv-splash .mv-bar i { display: block; height: 100%; border-radius: 2px; background: #0fa353; animation: mvBar 1s ease-in-out .3s both; }
+#mv-splash .mv-foot {
+  position: absolute;
+  bottom: 52px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .22em;
+  color: rgba(40, 43, 42, .4);
+  animation: mvTag .5s ease-out 1s both;
+}
+@keyframes mvSplashOut { 0%, 75% { opacity: 1; visibility: visible; } 100% { opacity: 0; visibility: hidden; } }
+@keyframes mvStrip { 0% { transform: translateX(-38px); opacity: 0; } 55% { opacity: 1; } 100% { transform: translateX(0); opacity: 1; } }
+@keyframes mvWord { 0% { transform: translateY(16px) scale(.94); opacity: 0; } 100% { transform: translateY(0) scale(1); opacity: 1; } }
+@keyframes mvTag { 0% { transform: translateY(10px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+@keyframes mvBar { 0% { width: 0; } 100% { width: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  #mv-splash { animation: none; opacity: 0; visibility: hidden; }
+}

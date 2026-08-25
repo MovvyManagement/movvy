@@ -14,6 +14,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { supabaseServer } from '@/lib/supabase/server';
 import { getAdminAccess } from '@/lib/adminAccess';
+import { AppIcon } from '@/components/Logo';
 import { logout } from './login/actions';
 import { LoginGate } from './_components/LoginGate';
 import { AdminLiveCenter } from './_components/AdminLiveCenter';
@@ -139,9 +140,7 @@ export default async function AdminLayout({
         {/* Logo */}
         <div className="px-5 py-4 border-b border-zinc-100">
           <Link href="/admin-management/dashboard" className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
-              M
-            </div>
+            <AppIcon size={32} />
             <div>
               <div className="text-sm font-bold text-zinc-900 leading-none">Movvy</div>
               <div className="text-xs text-zinc-500 mt-0.5">Operations Console</div>

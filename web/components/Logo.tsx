@@ -1,83 +1,102 @@
 // =============================================================================
-// Movvy brand mark.
+// Movvy brand marks (web).
 //
-// Two surfaces:
-//   • <Logo />     — the small mark for Nav + Footer (rounded square, ~28px)
-//   • <AppIcon />  — the same mark scaled up for the hero phone mockup,
-//                    presented as the App Store icon.
+// Two surfaces, matching the refreshed brand system (charcoal + one green,
+// Archivo Black wordmark):
+//   • <Wordmark /> — the header/footer lockup: three green speed-strips + the
+//                    lowercase "mo(vv)y" wordmark, the "vv" in brand green.
+//                    This is what goes on movvy.ca chrome — NOT the truck.
+//   • <AppIcon />  — the charcoal app-tile with the green truck, i.e. what the
+//                    App Store shows. Used in the hero phone mockup.
 //
-// SVG embedded so the logo renders zero-flash, with no extra HTTP request.
-// If you'd rather use the high-res PNG of the truck+pin icon, drop it at
-// /public/logo.png and swap the SVG body for <img src="/logo.png" />.
+// `Logo` stays exported as an alias of Wordmark so existing imports keep working.
+// SVG/inline so both render zero-flash with no extra HTTP request.
 // =============================================================================
 
-interface Props {
+const GREEN = '#0FA353';
+const GREEN_DEEP = '#0A7A3E';
+const CHARCOAL = '#282B2A';
+const INK = '#161615';
+
+interface WordmarkProps {
+  /** Cap height of the wordmark in px. Strips scale with it. */
   size?: number;
+  /** Render the wordmark white (for placement on charcoal / dark surfaces). */
+  onDark?: boolean;
 }
 
-export function Logo({ size = 28 }: Props) {
-  return <MovvyMark size={size} aria-label="Movvy" />;
+export function Wordmark({ size = 28, onDark = false }: WordmarkProps) {
+  const stripH = Math.max(2, Math.round(size * 0.16));
+  const gap = Math.max(2, Math.round(size * 0.16));
+  const widths = [0.37, 0.6, 0.83].map((f) => Math.round(size * f));
+  return (
+    <span
+      style={{ display: 'inline-flex', alignItems: 'flex-end', gap: Math.round(size * 0.34) }}
+      role="img"
+      aria-label="Movvy"
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap,
+          paddingBottom: Math.round(size * 0.16),
+        }}
+      >
+        {widths.map((w, i) => (
+          <span
+            key={i}
+            style={{ width: w, height: stripH, borderRadius: stripH, background: GREEN }}
+          />
+        ))}
+      </span>
+      <span
+        aria-hidden="true"
+        style={{
+          fontFamily: 'var(--font-archivo-black), system-ui, sans-serif',
+          fontWeight: 900,
+          fontSynthesis: 'none',
+          fontSize: size,
+          lineHeight: 0.9,
+          letterSpacing: '-0.03em',
+          color: onDark ? '#FFFFFF' : INK,
+        }}
+      >
+        mo<span style={{ color: GREEN }}>vv</span>y
+      </span>
+    </span>
+  );
 }
 
-export function AppIcon({ size = 64 }: Props) {
-  return <MovvyMark size={size} aria-label="Movvy app icon" />;
-}
+/** Back-compat alias — Nav/Footer historically imported `Logo`. */
+export const Logo = Wordmark;
 
-function MovvyMark({ size, ...rest }: { size: number } & React.SVGProps<SVGSVGElement>) {
+/** The charcoal app-tile with the green truck — the App Store icon. */
+export function AppIcon({ size = 64 }: { size?: number }) {
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 100 100"
+      viewBox="0 0 120 120"
       xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-      {...rest}
+      role="img"
+      aria-label="Movvy app icon"
     >
-      {/* Rounded green tile — App Store icon shape */}
-      <rect width="100" height="100" rx="22" fill="#0E9F6E" />
-
-      {/* Motion lines on the far left — sense of "in transit" */}
-      <line x1="5" y1="52" x2="14" y2="52" stroke="white" strokeOpacity="0.45" strokeWidth="2.6" strokeLinecap="round" />
-      <line x1="7" y1="58" x2="16" y2="58" stroke="white" strokeOpacity="0.45" strokeWidth="2.6" strokeLinecap="round" />
-      <line x1="9" y1="64" x2="18" y2="64" stroke="white" strokeOpacity="0.45" strokeWidth="2.6" strokeLinecap="round" />
-
-      {/* Cargo box */}
-      <rect x="20" y="40" width="38" height="35" rx="3.5" fill="white" />
-      {/* Box panel divider line (matches the original artwork) */}
-      <line x1="39" y1="40" x2="39" y2="75" stroke="#D1FAE5" strokeWidth="1.5" />
-
-      {/* Wordmark */}
-      <text
-        x="39.5"
-        y="62"
-        textAnchor="middle"
-        fill="#047857"
-        fontWeight="800"
-        fontSize="9.5"
-        fontFamily="Inter, system-ui, sans-serif"
-        letterSpacing="-0.3"
-      >
-        Movvy
-      </text>
-
-      {/* Cab (driver compartment + windshield) */}
-      <path d="M58 50 L75 50 L80 60 L80 75 L58 75 Z" fill="white" />
-      <path d="M62 53 L73 53 L76 60 L62 60 Z" fill="#A7F3D0" />
-      <circle cx="78" cy="64" r="1.6" fill="#FBBF24" />
-
-      {/* Wheels — outer tire + inner hub */}
-      <circle cx="32" cy="78" r="6.2" fill="#1F2937" />
-      <circle cx="32" cy="78" r="2.6" fill="#9CA3AF" />
-      <circle cx="70" cy="78" r="6.2" fill="#1F2937" />
-      <circle cx="70" cy="78" r="2.6" fill="#9CA3AF" />
-
-      {/* Bumper / ground accent */}
-      <rect x="18" y="73" width="64" height="2.5" rx="1" fill="#A7F3D0" />
-
-      {/* Location pin — top right */}
-      <circle cx="76" cy="22" r="10" fill="white" />
-      <path d="M76 32 L72 38 L80 38 Z" fill="white" />
-      <circle cx="76" cy="22" r="4.2" fill="#0E9F6E" />
+      <rect width="120" height="120" rx="27" fill={CHARCOAL} />
+      {/* speed strips */}
+      <rect x="14" y="49" width="9" height="5" rx="2.5" fill={GREEN} />
+      <rect x="9" y="56" width="13" height="5" rx="2.5" fill={GREEN} />
+      <rect x="5" y="63" width="17" height="5" rx="2.5" fill={GREEN} />
+      {/* cargo + cab */}
+      <rect x="30" y="40" width="44" height="30" rx="5" fill={GREEN} />
+      <rect x="30" y="63" width="44" height="7" rx="3" fill={GREEN_DEEP} />
+      <rect x="74" y="48" width="22" height="22" rx="4" fill={GREEN} />
+      <rect x="74" y="64" width="22" height="6" rx="3" fill={GREEN_DEEP} />
+      <rect x="78" y="51" width="11" height="9" rx="2" fill={CHARCOAL} />
+      {/* wheels */}
+      <circle cx="46" cy="72" r="7" fill="#FFFFFF" />
+      <circle cx="82" cy="72" r="7" fill="#FFFFFF" />
     </svg>
   );
 }
