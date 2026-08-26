@@ -25,6 +25,7 @@ import { StripeProvider } from '@stripe/stripe-react-native';
 // unset, StripeProvider renders harmlessly and the pay button no-ops.
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '';
 import { queryClient, useAutoRegisterPushToken } from '@/lib/data';
+import { useNotificationDeepLink } from '@/lib/useNotificationDeepLink';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ToastProvider } from '@/components/Toast';
 import { track } from '@/lib/analytics';
@@ -46,6 +47,12 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function PushTokenWatcher() {
   useAutoRegisterPushToken();
+  return null;
+}
+
+/** Routes a tapped push (warm or cold start) to the relevant booking screen. */
+function NotificationRouter() {
+  useNotificationDeepLink();
   return null;
 }
 
@@ -99,6 +106,7 @@ export default function RootLayout() {
                 >
                 <>
                 <PushTokenWatcher />
+                <NotificationRouter />
                 <NotificationBannerHost />
                 <AnalyticsBootstrap />
                 <StatusBar style={palette.statusBar} />
