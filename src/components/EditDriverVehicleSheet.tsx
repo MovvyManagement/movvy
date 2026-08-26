@@ -255,7 +255,7 @@ export function EditDriverVehicleSheet({ visible, onClose }: Props) {
         onRequestClose={onClose}
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['bottom']}>
-          <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
             {body}
           </KeyboardAvoidingView>
         </SafeAreaView>
