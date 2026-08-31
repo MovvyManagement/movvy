@@ -482,9 +482,10 @@ export function splitTip(tipCents: number) {
 // recorded on the bookings row + the rate-card + fuel/materials that were
 // frozen at booking time, and returns the final invoice numbers.
 //
-// Rule: customer pays for what actually happened. No cap, no minimum on
-// short jobs (the booking already enforces the 4-hour minimum at estimate
-// time, but if the actual is shorter the customer keeps the savings).
+// Rule: customer pays for actual time worked, floored at a 4-hour labor minimum
+// (MIN_BILLABLE_HOURS) — a short job still bills, and pays the crew, for at
+// least 4 hours, matching the minimum the estimate quoted. Long-haul transit is
+// billed per km and is NOT subject to this floor.
 
 export interface ActualBillInput {
   startedAt: Date | string;
@@ -515,7 +516,11 @@ export interface ActualBillInput {
 }
 
 export interface ActualBillOutput {
-  actualHours: number;            // 2-decimal places, e.g. 6.42
+  actualHours: number;            // BILLED labor hours — max(4h min, worked), 2dp
+  /** True on-site hours actually clocked (start→end, minus transit). */
+  workedHours: number;
+  /** True when the 4-hour minimum lifted the bill above the worked hours. */
+  minimumApplied: boolean;
   /** Hours removed from the clock because transit was billed per km. */
   transitHoursExcluded: number;
   actualServiceCents: number;     // actual_hours × hourlyRate
@@ -550,7 +555,13 @@ export function computeActualBill(input: ActualBillInput): ActualBillOutput {
     hours = Math.max(0, hours - transitHoursExcluded);
   }
 
-  const actualHours = Math.round(hours * 100) / 100;
+  const workedHours = Math.round(hours * 100) / 100;
+  // 4-hour minimum: a short job still bills — and pays the crew — for at least
+  // MIN_BILLABLE_HOURS of labor, matching the minimum the estimate quoted. On a
+  // long haul the highway (billed per km) is already taken off the clock above,
+  // so this floor applies only to on-site labor hours, never to transit.
+  const actualHours = Math.max(MIN_BILLABLE_HOURS, workedHours);
+  const minimumApplied = actualHours > workedHours;
   transitHoursExcluded = Math.round(transitHoursExcluded * 100) / 100;
 
   const actualServiceCents  = Math.round(actualHours * input.hourlyRateCustomerCents);
@@ -565,6 +576,8 @@ export function computeActualBill(input: ActualBillInput): ActualBillOutput {
 
   return {
     actualHours,
+    workedHours,
+    minimumApplied,
     transitHoursExcluded,
     actualServiceCents,
     actualSubtotalCents,

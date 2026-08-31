@@ -13,7 +13,7 @@
 // a moving status, as a belt-and-suspenders for an app that was killed).
 // =============================================================================
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { startLiveLocation, stopLiveLocation } from '@/lib/bgTracking';
 import type { BookingStatus } from '@/types';
 
@@ -29,21 +29,47 @@ export function useLiveTrackingBroadcast({
   bookingId,
   status,
   isSource,
+  onBlocked,
 }: {
   bookingId: string | undefined;
   status: BookingStatus | undefined;
   isSource: boolean;
+  /**
+   * Fired when this device SHOULD be broadcasting but couldn't start — almost
+   * always because Location permission isn't granted. Lets the screen warn the
+   * crew instead of the customer's map silently going dark. Fires once per
+   * blocked session (re-armed once tracking succeeds or the move ends).
+   */
+  onBlocked?: () => void;
 }): void {
   const active =
     isSource && !!bookingId && !!status && MOVING_STATUSES.includes(status);
 
+  // Keep the latest callback without making it an effect dependency.
+  const onBlockedRef = useRef(onBlocked);
+  onBlockedRef.current = onBlocked;
+  const warnedRef = useRef(false);
+
   useEffect(() => {
+    let cancelled = false;
     if (active && bookingId) {
-      startLiveLocation(bookingId);
+      startLiveLocation(bookingId).then((ok) => {
+        if (cancelled) return;
+        if (ok) {
+          warnedRef.current = false;
+        } else if (!warnedRef.current) {
+          warnedRef.current = true;
+          onBlockedRef.current?.();
+        }
+      });
     } else {
       stopLiveLocation();
+      warnedRef.current = false;
     }
     // No unmount cleanup on purpose — broadcasting must survive backgrounding.
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, bookingId]);
 }

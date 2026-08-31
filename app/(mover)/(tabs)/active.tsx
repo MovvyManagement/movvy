@@ -216,6 +216,10 @@ export default function MoverActive() {
     bookingId: liveJob?.id,
     status: liveJob?.status as any,
     isSource: isTrackingSource,
+    onBlocked: () =>
+      toast.error(
+        "Location is off — the customer can't track you. Enable Location for Movvy in Settings (set it to \"Always\").",
+      ),
   });
 
   // ── Phone proxy (Uber-style masked call) ───────────────────────────────────

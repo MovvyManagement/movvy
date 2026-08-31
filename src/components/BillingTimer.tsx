@@ -16,6 +16,10 @@ import React, { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+// 4-hour labor minimum — mirrors MIN_BILLABLE_HOURS in the server's
+// computeActualBill so the live meter matches the final invoice.
+const MIN_BILLABLE_HOURS = 4;
+
 interface BillingTimerProps {
   startedAt?: string | null;
   completedAt?: string | null;
@@ -109,8 +113,14 @@ export function BillingTimer({
     ? Math.max(0, (transitEnd ?? end) - transitStart)
     : 0;
   const billableMs = Math.max(0, elapsedMs - transitMs);
+  // 4-hour labor minimum: a short job still bills for at least 4 hours of
+  // on-site work — matches the server's computeActualBill and the estimate.
+  // Long-haul transit is billed per km and is never floored.
+  const workedHours = billableMs / 3_600_000;
+  const billedHours = Math.max(MIN_BILLABLE_HOURS, workedHours);
+  const minimumApplied = workedHours < MIN_BILLABLE_HOURS;
   const liveServiceCents =
-    Math.round((billableMs / 3_600_000) * rateCents) + (isLongHaul ? (transitCents ?? 0) : 0);
+    Math.round(billedHours * rateCents) + (isLongHaul ? (transitCents ?? 0) : 0);
   const onTheHighway = isLongHaul && !!transitStart && !transitEnd && !completedAt;
   // Approximate live driver take — 80% of running service cost. The real
   // 80% is computed on the FINAL total (after GST/materials/fuel) so this
@@ -142,7 +152,10 @@ export function BillingTimer({
                 <Text className="text-2xl font-bold text-ink-900 mt-1">
                   ${(displayCents / 100).toFixed(2)}
                 </Text>
-                <Text className="text-xs text-silver-600 mt-0.5">{displayLabel}</Text>
+                <Text className="text-xs text-silver-600 mt-0.5">
+                  {displayLabel}
+                  {minimumApplied ? ' · 4-hour minimum' : ''}
+                </Text>
               </>
             )}
           </View>
@@ -182,6 +195,11 @@ export function BillingTimer({
             >
               ${(displayCents / 100).toFixed(2)}
             </Text>
+            {minimumApplied ? (
+              <Text className="text-[10px] font-semibold uppercase tracking-wider text-brand-300 mt-0.5">
+                4-hr minimum
+              </Text>
+            ) : null}
           </View>
         )}
       </View>
