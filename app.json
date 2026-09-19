@@ -126,7 +126,8 @@
           }
         ]
       },
-      "userInterfaceStyle": "light"
+      "userInterfaceStyle": "light",
+      "config": {}
     },
     "android": {
       "package": "com.movvy.app",
@@ -155,6 +156,14 @@
             "DEFAULT"
           ]
         }
+      ],
+      "config": {},
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ]
     },
     "web": {
@@ -215,6 +224,12 @@
         "projectId": "318e0dc7-90be-4e00-8b61-89ae74f92625"
       }
     },
-    "owner": "adamhmedat"
+    "owner": "adamhmedat",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/318e0dc7-90be-4e00-8b61-89ae74f92625"
+    }
   }
 }
