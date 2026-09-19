@@ -52,3 +52,6 @@ next-env.d.ts
 
 # Vercel CLI / deploy artifacts
 .vercel/
+
+# google-services.json is safe to commit (ships in every APK; needed by EAS Build)
+!google-services.json

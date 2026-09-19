@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "686851365465",
+    "project_id": "movvy-d016c",
+    "storage_bucket": "movvy-d016c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:686851365465:android:77300cfa258dd4a5aa2f48",
+        "android_client_info": {
+          "package_name": "com.movvy.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCprDojboi2tjDsok2q5oO60FF-bqM_Stw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
