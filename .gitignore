@@ -55,3 +55,8 @@ next-env.d.ts
 
 # google-services.json is safe to commit (ships in every APK; needed by EAS Build)
 !google-services.json
+
+# Local native build artifacts (downloaded EAS builds, local outputs)
+*.apk
+*.aab
+*.ipa
