@@ -39,7 +39,7 @@ const SLIDES: Slide[] = [
     body: 'Two addresses, a date — that\'s it. Movvy picks the right crew and truck size based on your move type.',
     highlights: [
       'No phone calls, no quotes-by-email',
-      'Flat $175/hr rate · Alberta-wide',
+      'Flat rate · Alberta-wide',
       '20% deposit at booking · balance after the move',
     ],
   },
@@ -63,7 +63,7 @@ const SLIDES: Slide[] = [
     highlights: [
       'Photo-ID + criminal record check',
       'Damage protection up to $2,500',
-      'Tip your crew 90% goes straight to them',
+      'Tip your crew — it goes straight to them',
     ],
   },
 ];

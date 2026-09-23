@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { MovvyMark } from '@/components/MovvyMark';
 import { useActiveBooking } from '@/lib/data';
 import { useThemedColors } from '@/lib/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // =============================================================================
 // Customer bottom-nav layout — EXACTLY three tabs.
@@ -23,6 +24,13 @@ import { useThemedColors } from '@/lib/theme';
 
 export default function CustomerTabs() {
   const palette = useThemedColors();
+  // Respect the device's bottom inset (Android edge-to-edge nav bar / iOS home
+  // indicator) so tab labels sit ABOVE the system nav buttons instead of behind
+  // them. Floor at 12 so the bar isn't flush to the edge on devices that report
+  // no inset. Was a hardcoded paddingBottom: 24, which overlapped the Android
+  // 3-button / gesture bar.
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, 12);
 
   // Green dot on the Moves tab when a live move is in progress so the user
   // can spot it instantly — that's where chat + tracking now live.
@@ -38,9 +46,9 @@ export default function CustomerTabs() {
         tabBarStyle: {
           backgroundColor: palette.surface,
           borderTopColor: palette.border,
-          height: 84,
+          height: 60 + bottomPad,
           paddingTop: 6,
-          paddingBottom: 24,
+          paddingBottom: bottomPad,
         },
         // Equal-width tab items + centred icon/label so the three visible
         // tabs are evenly distributed across the bar.

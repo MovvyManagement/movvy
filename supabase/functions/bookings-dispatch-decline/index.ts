@@ -36,9 +36,14 @@ const Body = z.object({
 // window the customer's move day is already locked in, so it costs the org a
 // flat fee — the release still goes through (a no-show hurts the customer far
 // more than a re-listing), it just isn't free.
-// Releasing is free while there's still time to re-staff the move. Inside this
-// window it strands a customer who has already planned their day.
-const FREE_RELEASE_DAYS = 2;
+//
+// MUST stay in sync with the client's `lateRelease` threshold in
+// MoveDetailSheet.tsx (hoursOut < 72). It was 2 here, so a move released
+// 48–72h out showed the crew a "$100 penalty" confirm dialog but was then
+// charged nothing server-side — the penalty silently never landed on Earnings
+// or in the payout balance. The intended policy is 3 days everywhere (see the
+// 0080 migration header and the release dialog copy).
+const FREE_RELEASE_DAYS = 3;
 // Flat $100, regardless of the job's value. The percentage version is gone: the
 // charge exists to discourage dropping a customer at short notice, and a fee
 // that scales with revenue punishes the same behaviour unevenly while being

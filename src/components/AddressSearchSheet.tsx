@@ -142,9 +142,11 @@ export function AddressSearchSheet({
           window the root SafeAreaProvider doesn't reach, so measuring insets
           inside it is unreliable (content intermittently slid under the Dynamic
           Island, hiding the input + back button). */}
-      <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: '#FFFFFF' }}>
-        {/* Header: back + search input pinned to the top */}
-        <View className="px-4 pt-2 pb-3 border-b border-silver-100">
+      <View style={{ flex: 1, paddingTop: insets.top + 12, backgroundColor: '#FFFFFF' }}>
+        {/* Header: back + search input. A little breathing room below the
+            status bar / notch so the field doesn't sit flush against the top
+            edge (felt cramped on Android). */}
+        <View className="px-4 pt-3 pb-3 border-b border-silver-100">
           <View className="flex-row items-center">
             <Pressable onPress={close} hitSlop={10} className="pr-2 py-2">
               <Ionicons name="chevron-back" size={26} color="#0A0A0A" />

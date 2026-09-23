@@ -2,6 +2,7 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemedColors } from '@/lib/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // =============================================================================
 // Company bottom-nav — exactly 4 tabs.
@@ -17,6 +18,10 @@ import { useThemedColors } from '@/lib/theme';
 
 export default function CompanyTabs() {
   const palette = useThemedColors();
+  // Sit tab labels above the Android nav bar / iOS home indicator instead of
+  // behind them (edge-to-edge). Floor at 12 for devices reporting no inset.
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, 12);
 
   return (
     <Tabs
@@ -27,9 +32,9 @@ export default function CompanyTabs() {
         tabBarStyle: {
           backgroundColor: palette.surface,
           borderTopColor: palette.border,
-          height: 84,
+          height: 60 + bottomPad,
           paddingTop: 6,
-          paddingBottom: 24,
+          paddingBottom: bottomPad,
         },
         tabBarItemStyle: { flex: 1, justifyContent: 'center', alignItems: 'center' },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
