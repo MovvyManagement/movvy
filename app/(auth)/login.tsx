@@ -8,6 +8,7 @@ import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { PhoneInput, isPhoneComplete, toE164 } from '@/components/PhoneInput';
 import { login, supabaseConfigured } from '@/lib/supabase';
+import { setLastPortal } from '@/lib/lastPortal';
 import { useToast } from '@/components/Toast';
 
 // =============================================================================
@@ -60,6 +61,8 @@ export default function Login() {
         setError(res.error ?? 'Could not sign in.');
         return;
       }
+      // Remember the portal so a cold start sends them straight back here.
+      await setLastPortal('/(customer)/(tabs)/home');
       router.replace('/(customer)/(tabs)/home');
     } catch (e: any) {
       setError(e?.message ?? 'Could not sign in. Check your connection and try again.');

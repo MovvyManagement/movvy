@@ -46,11 +46,29 @@ export function usePayForMove() {
 
       const clientSecret = (data as any).client_secret as string;
       const amountCents = (data as any).amount_cents as number;
+      // Stripe customer + ephemeral key (issued server-side). Passing both to
+      // the Payment Sheet is what makes it list the customer's SAVED cards and
+      // pre-select their default — so a returning customer just taps "Pay"
+      // (one tap) instead of re-typing a card. The PaymentIntent is created with
+      // setup_future_usage:'off_session', so the card entered on the FIRST
+      // payment is saved and shows up here on every payment after.
+      const ephemeralKeySecret = (data as any).ephemeral_key_secret as string | null;
+      const customerId = (data as any).customer_id as string | null;
       if (!clientSecret) throw new Error('Payment could not be started.');
 
       const init = await initPaymentSheet({
         merchantDisplayName: 'Movvy',
         paymentIntentClientSecret: clientSecret,
+        // Show the customer's saved cards + remember new ones for next time.
+        // Guarded on both values: if the ephemeral key call failed server-side
+        // the sheet still works, it just starts empty (no saved cards listed).
+        ...(customerId && ephemeralKeySecret
+          ? { customerId, customerEphemeralKeySecret: ephemeralKeySecret }
+          : {}),
+        // Offer "Save this card" so a first-time payer opts into one-tap next
+        // time; Stripe honours setup_future_usage regardless, this just makes
+        // the choice visible.
+        allowsDelayedPaymentMethods: false,
         // Return URL lets redirect-based methods come back to the app. Matches
         // the `movvy` scheme registered in app.json.
         returnURL: 'movvy://stripe-redirect',

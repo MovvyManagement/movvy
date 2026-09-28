@@ -47,6 +47,9 @@ export interface PayoutSummary {
   /** Tips inside available_cents — called out so a crew sees them. */
   tips_cents: number;
   penalties_cents: number;
+  /** Referral/promo credit inside available_cents — the admin's personal
+   *  account_credits balance, withdrawable alongside earnings (0120). */
+  credit_cents: number;
   lifetime_paid_cents: number;
   open_request: OpenPayoutRequest | null;
 }
@@ -65,6 +68,7 @@ const EMPTY: PayoutSummary = {
   next_available_at: null,
   tips_cents: 0,
   penalties_cents: 0,
+  credit_cents: 0,
   lifetime_paid_cents: 0,
   open_request: null,
 };

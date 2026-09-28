@@ -34,6 +34,7 @@ import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { PhoneInput, isPhoneComplete, toE164 } from '@/components/PhoneInput';
 import { registerOtherSide, retryAfterSeconds, supabase, supabaseConfigured } from '@/lib/supabase';
+import { setLastPortal } from '@/lib/lastPortal';
 import { useToast } from '@/components/Toast';
 import { TERMS_VERSION } from '@/lib/brand';
 import { haptic } from '@/lib/haptics';
@@ -201,6 +202,7 @@ export default function Signup() {
         return;
       }
       haptic.success();
+      await setLastPortal('/(customer)/(tabs)/home');
       router.replace('/(customer)/(tabs)/home' as any);
     } catch (e: any) {
       setError(e?.message ?? 'Could not add that account.');
@@ -261,6 +263,7 @@ export default function Signup() {
 
       haptic.success();
       toast.success('Welcome to Movvy!');
+      await setLastPortal('/(customer)/(tabs)/home');
       router.replace('/(customer)/(tabs)/home');
     } catch (e: any) {
       setError(e?.message ?? "Couldn't verify the code. Try again.");

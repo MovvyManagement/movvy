@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, Image, Pressable } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Link, router } from 'expo-router';
@@ -6,6 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '@/components/Button';
 import { MovvyMark } from '@/components/MovvyMark';
+import { useAuth } from '@/lib/supabase';
+import { getLastPortal } from '@/lib/lastPortal';
 import {
   COVERAGE_LABEL,
   COVERAGE_SHORT,
@@ -14,6 +16,25 @@ import {
 } from '@/lib/brand';
 
 export default function Welcome() {
+  // Cold-start routing: Expo Router always opens on this marketing screen, but a
+  // returning user still has a valid restored session. Send them straight to the
+  // portal they signed into last (recorded in lastPortal) instead of making them
+  // log in again. Signed-out users fall through to the marketing UI below.
+  const { loading, session } = useAuth();
+  const redirected = useRef(false);
+
+  useEffect(() => {
+    if (loading || !session || redirected.current) return;
+    redirected.current = true;
+    getLastPortal().then((route) => {
+      router.replace((route ?? '/(customer)/(tabs)/home') as never);
+    });
+  }, [loading, session]);
+
+  // Once we know a session exists we're about to redirect — don't flash the
+  // "Get started" marketing screen at an already-signed-in user.
+  if (!loading && session) return null;
+
   return (
     <View className="flex-1 bg-white">
       <LinearGradient

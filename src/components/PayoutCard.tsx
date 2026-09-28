@@ -171,6 +171,12 @@ export function PayoutCard() {
           </Text>
         ) : null}
 
+        {s.credit_cents > 0 ? (
+          <Text className="mt-1 text-xs text-brand-700">
+            includes {fmtCurrency(s.credit_cents / 100)} in referral credit
+          </Text>
+        ) : null}
+
         {s.penalties_cents > 0 ? (
           <Text className="mt-1 text-xs text-danger">
             −{fmtCurrency(s.penalties_cents / 100)} in late-release charges deducted

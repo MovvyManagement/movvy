@@ -34,6 +34,7 @@ import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { PhoneInput, isPhoneComplete, toE164 } from '@/components/PhoneInput';
 import { loginPartner, supabaseConfigured } from '@/lib/supabase';
+import { setLastPortal } from '@/lib/lastPortal';
 
 type ContactMethod = 'email' | 'phone';
 
@@ -91,9 +92,12 @@ export default function PartnerSignIn() {
       // never shows dollar figures. This is what makes "the admin is the only
       // one who sees prices" true at the navigation level.
       const isAdmin = res.data?.kind === 'company' && res.data?.org_role === 'admin';
-      router.replace(
-        isAdmin ? '/(company)/(tabs)/dashboard' : '/(mover)/(tabs)/dashboard',
-      );
+      const home = isAdmin ? '/(company)/(tabs)/dashboard' : '/(mover)/(tabs)/dashboard';
+      // Remember this terminal portal so a cold start returns them here instead
+      // of the marketing screen. We intentionally do NOT store the onboarding or
+      // pending-approval routes above — those are transient waiting rooms.
+      await setLastPortal(home as any);
+      router.replace(home);
     } catch (e: any) {
       setError(e?.message ?? 'Could not sign in. Check your connection and try again.');
     } finally {

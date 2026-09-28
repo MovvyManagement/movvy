@@ -85,7 +85,9 @@ export function ReferralPanel({ side }: { side: 'customer' | 'driver' }) {
         </Text>
         <Text className="mt-1 text-xs text-silver-500 leading-5">
           {(credit?.balance_cents ?? 0) > 0
-            ? 'Movvy applies this against your account — contact support to use it on your next move.'
+            ? side === 'customer'
+              ? 'Applied automatically to your next move — it comes straight off your final bill. Anything left over rolls to the move after.'
+              : 'Added to your payout balance — withdraw it together with your earnings when you cash out.'
             : `Earn ${reward} for every person you invite, ${qualifier}.`}
         </Text>
       </Card>

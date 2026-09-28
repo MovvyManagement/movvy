@@ -3,6 +3,7 @@
 
 import { supabase } from './client';
 import { SignupInput, LoginInput, ForgotPasswordInput } from '@/lib/validation';
+import { clearLastPortal } from '@/lib/lastPortal';
 
 export interface AuthResult<T = void> {
   ok: boolean;
@@ -337,6 +338,9 @@ async function hasPendingInviteFor(
 export async function logout(): Promise<AuthResult> {
   const { error } = await supabase.auth.signOut();
   if (error) return { ok: false, error: friendly(error.message) };
+  // Drop the remembered portal so the next person to sign in on this device
+  // isn't cold-started into the previous user's portal.
+  await clearLastPortal();
   return { ok: true };
 }
 

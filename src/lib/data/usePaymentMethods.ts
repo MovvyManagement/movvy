@@ -1,34 +1,40 @@
 // =============================================================================
-// usePaymentMethods — saved-card management for the customer
+// usePaymentMethods — saved-card management, backed by Stripe
 //
-// Backs the /(customer)/payment-methods screen and the Profile → Payment
-// methods row. We never store the full PAN or CVV — only the safe display
-// metadata (brand, last4, exp, cardholder, billing postal). Phase 3 will
-// swap the storage for Stripe tokenized payment methods; until then this is
-// a real, persisted "cards I told Movvy about" registry.
+// Cards live on the customer's Stripe customer object, not in our database.
+// They're collected and tokenized by Stripe's native Payment Sheet (a
+// SetupIntent), so a raw card number never touches the app or our servers — the
+// screen only ever sees brand / last4 / expiry that Stripe hands back. The same
+// saved cards power one-tap checkout in usePayForMove.
+//
+// All Stripe calls go through the stripe-payment-methods edge function, which
+// resolves the caller's Stripe customer server-side (a customer can only ever
+// see or change their own cards).
 // =============================================================================
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useStripe } from '@stripe/stripe-react-native';
 import { supabase, useAuth } from '@/lib/supabase';
 
-export type CardBrand = 'visa' | 'mastercard' | 'amex' | 'discover' | 'other';
-
 export interface PaymentMethodRow {
+  /** Stripe PaymentMethod id (pm_...). */
   id: string;
-  profile_id: string;
-  brand: CardBrand;
+  /** Stripe card brand: 'visa' | 'mastercard' | 'amex' | 'discover' | … */
+  brand: string;
   last4: string;
   exp_month: number;
   exp_year: number;
-  cardholder_name: string;
-  billing_postal: string | null;
-  stripe_payment_method_id: string | null;
   is_default: boolean;
-  created_at: string;
-  updated_at: string;
 }
 
 const QK = ['payment-methods'] as const;
+
+async function invokePM<T = any>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke('stripe-payment-methods', { body });
+  if (error) throw new Error(error.message ?? 'Could not reach payments.');
+  if ((data as any)?.error) throw new Error((data as any).error);
+  return data as T;
+}
 
 export function usePaymentMethods() {
   const { user } = useAuth();
@@ -36,62 +42,45 @@ export function usePaymentMethods() {
     queryKey: [...QK, user?.id],
     enabled: !!user?.id,
     queryFn: async (): Promise<PaymentMethodRow[]> => {
-      const { data, error } = await supabase
-        .from('payment_methods')
-        .select('*')
-        .eq('profile_id', user!.id)
-        .order('is_default', { ascending: false })
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as PaymentMethodRow[];
+      const data = await invokePM<{ cards: PaymentMethodRow[] }>({ action: 'list' });
+      return data.cards ?? [];
     },
   });
 }
 
-export interface SavePaymentMethodArgs {
-  brand: CardBrand;
-  last4: string;
-  exp_month: number;
-  exp_year: number;
-  cardholder_name: string;
-  billing_postal?: string | null;
-  is_default?: boolean;
-}
-
-export function useSavePaymentMethod() {
+/**
+ * Present Stripe's native Payment Sheet in "save a card" mode (SetupIntent).
+ * Resolves to 'added' when a card was saved, 'canceled' if the customer
+ * dismissed the sheet. Throws only on a real failure.
+ */
+export function useAddCard() {
   const qc = useQueryClient();
-  const { user } = useAuth();
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
   return useMutation({
-    mutationFn: async (args: SavePaymentMethodArgs) => {
-      if (!user) throw new Error('Sign in first');
+    mutationFn: async (): Promise<'added' | 'canceled'> => {
+      const setup = await invokePM<{
+        setup_intent_client_secret: string;
+        ephemeral_key_secret: string | null;
+        customer_id: string;
+      }>({ action: 'setup' });
+      if (!setup.setup_intent_client_secret) throw new Error('Could not start card setup.');
 
-      // If this card is being marked default, demote any existing default
-      // first — the partial unique index (one default per profile) would
-      // otherwise reject the insert.
-      if (args.is_default) {
-        await supabase
-          .from('payment_methods')
-          .update({ is_default: false })
-          .eq('profile_id', user.id)
-          .eq('is_default', true);
+      const init = await initPaymentSheet({
+        merchantDisplayName: 'Movvy',
+        setupIntentClientSecret: setup.setup_intent_client_secret,
+        ...(setup.customer_id && setup.ephemeral_key_secret
+          ? { customerId: setup.customer_id, customerEphemeralKeySecret: setup.ephemeral_key_secret }
+          : {}),
+        returnURL: 'movvy://stripe-redirect',
+      });
+      if (init.error) throw new Error(init.error.message);
+
+      const res = await presentPaymentSheet();
+      if (res.error) {
+        if (res.error.code === 'Canceled') return 'canceled';
+        throw new Error(res.error.message);
       }
-
-      const { data, error } = await supabase
-        .from('payment_methods')
-        .insert({
-          profile_id: user.id,
-          brand: args.brand,
-          last4: args.last4,
-          exp_month: args.exp_month,
-          exp_year: args.exp_year,
-          cardholder_name: args.cardholder_name.trim(),
-          billing_postal: args.billing_postal?.trim() || null,
-          is_default: args.is_default ?? false,
-        })
-        .select('*')
-        .single();
-      if (error) throw error;
-      return data as PaymentMethodRow;
+      return 'added';
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: QK }),
   });
@@ -99,23 +88,9 @@ export function useSavePaymentMethod() {
 
 export function useSetDefaultPaymentMethod() {
   const qc = useQueryClient();
-  const { user } = useAuth();
   return useMutation({
     mutationFn: async (id: string) => {
-      if (!user) throw new Error('Sign in first');
-      // Demote the current default first to avoid the partial-unique-index
-      // collision, then promote the chosen card.
-      await supabase
-        .from('payment_methods')
-        .update({ is_default: false })
-        .eq('profile_id', user.id)
-        .eq('is_default', true);
-      const { error } = await supabase
-        .from('payment_methods')
-        .update({ is_default: true })
-        .eq('id', id)
-        .eq('profile_id', user.id);
-      if (error) throw error;
+      await invokePM({ action: 'set_default', payment_method_id: id });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: QK }),
   });
@@ -125,55 +100,8 @@ export function useDeletePaymentMethod() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('payment_methods').delete().eq('id', id);
-      if (error) throw error;
+      await invokePM({ action: 'detach', payment_method_id: id });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: QK }),
   });
-}
-
-// ─── Card-number helpers ────────────────────────────────────────────────────
-
-/** Detect brand from the leading digits of a PAN. */
-export function detectCardBrand(pan: string): CardBrand {
-  const digits = pan.replace(/\D/g, '');
-  if (/^4\d{0,}$/.test(digits)) return 'visa';
-  if (/^(5[1-5]|2[2-7])\d{0,}$/.test(digits)) return 'mastercard';
-  if (/^3[47]\d{0,}$/.test(digits)) return 'amex';
-  if (/^(6011|65|64[4-9])\d{0,}$/.test(digits)) return 'discover';
-  return 'other';
-}
-
-/** Format a PAN with single-space groups (4-4-4-4, or 4-6-5 for Amex). */
-export function formatCardNumber(pan: string, brand?: CardBrand): string {
-  const digits = pan.replace(/\D/g, '').slice(0, 19);
-  const b = brand ?? detectCardBrand(digits);
-  if (b === 'amex') {
-    return digits.replace(/^(\d{0,4})(\d{0,6})(\d{0,5}).*$/, (_, a, c, d) =>
-      [a, c, d].filter(Boolean).join(' '),
-    );
-  }
-  return digits.replace(/(\d{4})(?=\d)/g, '$1 ').trim();
-}
-
-/** Luhn check — front-line validity (real fraud detection is server-side). */
-export function isValidLuhn(pan: string): boolean {
-  const digits = pan.replace(/\D/g, '');
-  if (digits.length < 13 || digits.length > 19) return false;
-  let sum = 0;
-  let alt = false;
-  for (let i = digits.length - 1; i >= 0; i--) {
-    let n = parseInt(digits[i], 10);
-    if (alt) {
-      n *= 2;
-      if (n > 9) n -= 9;
-    }
-    sum += n;
-    alt = !alt;
-  }
-  return sum % 10 === 0;
-}
-
-export function expectedPanLength(brand: CardBrand): number {
-  return brand === 'amex' ? 15 : 16;
 }
