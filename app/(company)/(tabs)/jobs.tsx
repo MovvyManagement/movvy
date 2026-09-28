@@ -307,6 +307,27 @@ export default function CompanyJobs() {
               Alert.alert('Could not accept', e?.message ?? 'Try again.');
             }
           }}
+          onDismiss={() => {
+            Alert.alert(
+              'Dismiss this job?',
+              'It leaves your Requests for good. Other crews in range can still take it. You can’t undo this.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Dismiss',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await decline.mutateAsync({ booking_id: b.id, company_id: companyId! });
+                      haptic.warning();
+                    } catch (e: any) {
+                      Alert.alert('Could not dismiss', e?.message ?? 'Try again.');
+                    }
+                  },
+                },
+              ],
+            );
+          }}
         />
       ));
     }
@@ -528,10 +549,12 @@ function NewRequestCard({
   row,
   busy,
   onAccept,
+  onDismiss,
 }: {
   row: DispatchQueueRow;
   busy: boolean;
   onAccept: () => void;
+  onDismiss: () => void;
 }) {
   return (
     <View className="mb-3">
@@ -577,6 +600,17 @@ function NewRequestCard({
             ) : (
               <Text className="text-sm font-bold text-white">Accept for company</Text>
             )}
+          </Pressable>
+          {/* Dismiss removes this job from THIS company's pool for good — other
+              in-range companies still see it. Recorded server-side so it never
+              comes back on a refresh (bookings-dispatch-decline → 0121). */}
+          <Pressable
+            onPress={onDismiss}
+            disabled={busy}
+            hitSlop={6}
+            className="mt-2 h-10 items-center justify-center active:opacity-70"
+          >
+            <Text className="text-sm font-semibold text-silver-500">Not for us — dismiss</Text>
           </Pressable>
         </View>
       </Card>

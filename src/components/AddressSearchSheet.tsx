@@ -93,7 +93,14 @@ export function AddressSearchSheet({
         const results = await searchCalgary(query, ctrl.signal);
         setSuggestions(results);
         if (results.length === 0) {
-          setError(query.length >= 6 ? 'No matching addresses — try a different one' : null);
+          // Search is filtered to Alberta, so a real address that returns
+          // nothing is almost always outside our coverage. Say that plainly
+          // rather than "no matches", which reads as a broken search.
+          setError(
+            query.length >= 6
+              ? 'No Alberta address matched. Movvy currently serves Alberta only — try an address within the province.'
+              : null,
+          );
         }
       } catch (e: any) {
         if (e.name !== 'AbortError') {

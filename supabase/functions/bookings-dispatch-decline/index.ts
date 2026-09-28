@@ -93,7 +93,22 @@ handle(async (req) => {
     if (bErr || !booking) throw httpError(404, 'Booking not found');
 
     if (booking.status === 'searching') {
-      // (a) Just log the decline so the matcher can use it as a signal.
+      // (a) Record the decline so this company stops seeing the job. Every
+      // open-pool feed (dispatch_queue / org_open_jobs / open_jobs_for_me) and
+      // the open-pool RLS policy exclude declined (booking, company) pairs — see
+      // migration 0121. Fire-and-forget + ignore-duplicate: a repeat dismiss is
+      // a no-op, and a ledger hiccup must never fail the dismiss itself.
+      try {
+        await admin
+          .from('dispatch_declines')
+          .upsert(
+            { booking_id, company_id, profile_id: user.id },
+            { onConflict: 'booking_id,company_id', ignoreDuplicates: true },
+          );
+      } catch (declErr) {
+        console.error('[bookings-dispatch-decline] decline write failed', declErr);
+      }
+
       await audit({
         actorId: user.id,
         actorRole: user.role,

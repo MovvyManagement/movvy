@@ -35,7 +35,11 @@ import { buildCalendar } from '@/lib/scheduling';
 import { fmtDateShort } from '@/lib/format';
 import { cityProvinceFromGeocode, type GeocodeResult } from '@/lib/geocoding';
 
-const WINDOWS = ['9:00 AM – 11:00 AM', '11:00 AM – 1:00 PM', '1:00 PM – 3:00 PM', '3:00 PM – 5:00 PM'];
+// Every Movvy move is a fixed 9–11 AM arrival window. Customers choose the
+// DATE, not the time — so the modify screen shows this window, it doesn't offer
+// a choice of times that don't exist. Kept as one canonical string the booking
+// flow (home.tsx) and this screen both use.
+const ARRIVAL_WINDOW = '9:00 AM – 11:00 AM';
 
 export default function ModifyBooking() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -56,7 +60,8 @@ export default function ModifyBooking() {
   useEffect(() => {
     if (!booking) return;
     setDate(booking.scheduled_for_date);
-    setWindowLabel(booking.scheduled_for_window ?? WINDOWS[0]);
+    // Force the one real window — there is no other time to choose.
+    setWindowLabel(ARRIVAL_WINDOW);
     setPickupText(booking.pickup_line1 ?? '');
     setDropoffText(booking.dropoff_line1 ?? '');
     setNotes((booking as any).customer_notes ?? '');
@@ -202,29 +207,18 @@ export default function ModifyBooking() {
           </Text>
           <DateScroller value={date} onChange={setDate} />
 
-          {/* Window */}
+          {/* Arrival window — fixed, not a choice. Every Movvy move is a 9–11 AM
+              arrival; the customer picks the date only. */}
           <Text className="mt-5 text-xs font-semibold uppercase tracking-wider text-silver-500 mb-2">
-            Time window
+            Arrival window
           </Text>
-          <View className="flex-row flex-wrap gap-2">
-            {WINDOWS.map((w) => {
-              const sel = windowLabel === w;
-              return (
-                <Pressable
-                  key={w}
-                  onPress={() => setWindowLabel(w)}
-                  disabled={blocked}
-                  className={`px-4 py-2.5 rounded-full border ${
-                    sel ? 'bg-brand-600 border-brand-600' : 'bg-white border-silver-200'
-                  }`}
-                >
-                  <Text className={`text-sm font-semibold ${sel ? 'text-white' : 'text-ink-900'}`}>
-                    {w}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <Card className="p-3">
+            <Text className="text-sm font-semibold text-ink-900">{ARRIVAL_WINDOW}</Text>
+            <Text className="mt-0.5 text-xs text-silver-500 leading-4">
+              Every Movvy move is a fixed morning window — your crew arrives
+              between 9 and 11 AM. You choose the date.
+            </Text>
+          </Card>
 
           {/* Pickup */}
           <Text className="mt-5 text-xs font-semibold uppercase tracking-wider text-silver-500 mb-2">
