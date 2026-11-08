@@ -83,14 +83,26 @@ export interface AddressMatch {
   lng?: number;
 }
 
+const SEARCH_RETRY_DELAYS_MS = [400, 1200];
+
+/** A search changes nothing, so a dropped request is safe to quietly try again. */
 export async function searchAddresses(query: string, signal?: AbortSignal) {
-  const res = await callFunction<{ results: AddressMatch[] }>(
-    'geocoding-search',
-    { query, province: 'AB' },
-    undefined,
-    signal,
-  );
-  return res.results ?? [];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await callFunction<{ results: AddressMatch[] }>(
+        'geocoding-search',
+        { query, province: 'AB' },
+        undefined,
+        signal,
+      );
+      return res.results ?? [];
+    } catch (e) {
+      const offline = e instanceof ApiError && e.status === 0;
+      if (!offline || attempt >= SEARCH_RETRY_DELAYS_MS.length) throw e;
+      await new Promise((resolve) => setTimeout(resolve, SEARCH_RETRY_DELAYS_MS[attempt]));
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    }
+  }
 }
 
 const POSTAL_RE = /^[A-Z]\d[A-Z]\s?\d[A-Z]\d$/i;

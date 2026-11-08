@@ -8,8 +8,10 @@
 import Link from 'next/link';
 import { Wordmark } from './Logo';
 
+// /book and /track are opened with a plain <a> on purpose. A Next <Link> swaps
+// pages without loading a new document, so the browser would keep the previous
+// page's stricter security policy and block Stripe's card form and the map.
 const navLinks = [
-  { href: '/track', label: 'Track a Move' },
   { href: '/partners', label: 'For Movers' },
   { href: '/#cities', label: 'Cities' },
   { href: '/#faq', label: 'FAQ' },
@@ -23,6 +25,9 @@ export function Nav() {
           <Wordmark size={26} />
         </Link>
         <div className="hidden items-center gap-8 md:flex">
+          <a href="/track" className="text-sm font-medium text-ink-700 transition hover:text-brand-700">
+            Track a Move
+          </a>
           {navLinks.map((l) => (
             <Link
               key={l.href}
@@ -33,12 +38,12 @@ export function Nav() {
             </Link>
           ))}
         </div>
-        <Link
+        <a
           href="/book"
           className="rounded-full bg-ink-900 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-700"
         >
           Book a Move
-        </Link>
+        </a>
       </nav>
     </header>
   );

@@ -8,7 +8,6 @@
 // =============================================================================
 
 import Image from 'next/image';
-import Link from 'next/link';
 import { StoreBadges } from './StoreBadges';
 import { TrustChips } from './TrustChips';
 
@@ -49,15 +48,16 @@ export function Hero() {
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-4">
-            <Link
+            {/* Plain links: see the note in Nav.tsx about the security policy. */}
+            <a
               href="/book"
               className="inline-flex min-h-[52px] items-center rounded-full bg-ink-900 px-7 text-base font-bold text-white transition hover:bg-brand-700"
             >
               Book your move online
-            </Link>
-            <Link href="/track" className="text-sm font-bold text-ink-900 underline-offset-4 hover:underline">
+            </a>
+            <a href="/track" className="text-sm font-bold text-ink-900 underline-offset-4 hover:underline">
               Track a move
-            </Link>
+            </a>
           </div>
 
           <div className="mt-8">
