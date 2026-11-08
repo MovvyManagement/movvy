@@ -24,9 +24,9 @@
 
 import { z } from 'https://esm.sh/zod@3.23.8';
 import {
-  adminClient, checkRateLimit, clientIp, httpError, HttpError, jsonResponse, requireAuth,
+  adminClient, checkRateLimit, clientIp, httpError, HttpError, jsonResponse, optionalAuth,
 } from '../_shared/security.ts';
-import { corsHeaders } from '../_shared/cors.ts';
+import { corsHeaders, isAllowedOrigin } from '../_shared/cors.ts';
 import { handle } from '../_shared/serve.ts';
 
 const Body = z.object({
@@ -47,19 +47,21 @@ handle(async (req) => {
   if (req.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, { status: 405 }, cors);
 
   try {
-    const user = await requireAuth(req);
+    // Same visitor rule as geocoding-search: Movvy's own sites only, tighter.
+    const user = await optionalAuth(req);
     const ip = clientIp(req);
+    if (!user && !isAllowedOrigin(req)) throw httpError(401, 'Missing Authorization header');
 
     // ---- Rate limits -------------------------------------------------------
     await checkRateLimit({
-      bucketKey: `user:${user.id}:place_details_min`,
+      bucketKey: user ? `user:${user.id}:place_details_min` : `visitor:${ip}:place_details_min`,
       endpoint: 'place-details',
-      limit: 30, windowSeconds: 60,
+      limit: user ? 30 : 20, windowSeconds: 60,
     });
     await checkRateLimit({
-      bucketKey: `user:${user.id}:place_details_day`,
+      bucketKey: user ? `user:${user.id}:place_details_day` : `visitor:${ip}:place_details_day`,
       endpoint: 'place-details',
-      limit: 200, windowSeconds: 86_400,
+      limit: user ? 200 : 60, windowSeconds: 86_400,
     });
     await checkRateLimit({
       bucketKey: `ip:${ip}:place_details_min`,
@@ -80,7 +82,7 @@ handle(async (req) => {
       await admin.rpc('api_log_call', {
         p_service: 'google_places',
         p_endpoint: 'details',
-        p_profile_id: user.id,
+        p_profile_id: user?.id ?? null,
         p_ip: ip,
         p_cost_usd: 0,
         p_cache_hit: true,
@@ -215,7 +217,7 @@ handle(async (req) => {
     await admin.rpc('api_log_call', {
       p_service: 'google_places',
       p_endpoint: 'details',
-      p_profile_id: user.id,
+      p_profile_id: user?.id ?? null,
       p_ip: ip,
       p_cost_usd: COST_GOOGLE_DETAILS,
       p_cache_hit: false,

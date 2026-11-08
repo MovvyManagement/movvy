@@ -24,9 +24,13 @@ import {
 } from '../_shared/security.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { handle } from '../_shared/serve.ts';
+import { verifyTrackToken } from '../_shared/trackToken.ts';
 
 const Body = z.object({
-  booking_id: z.string().uuid(),
+  // Required unless track_token is sent (the token names the booking).
+  booking_id: z.string().uuid().optional(),
+  // From the website's move-code page. Only ever pays a FINAL bill.
+  track_token: z.string().min(20).max(400).optional(),
   // 'deposit' = 20% of the estimate, payable right after booking.
   // 'final'   = actual bill minus the deposit already paid (+ tip).
   kind: z.enum(['deposit', 'final']).default('final'),
@@ -55,17 +59,31 @@ handle(async (req) => {
   if (req.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, { status: 405 }, cors);
 
   try {
-    const user = await requireAuth(req);
+    const parsed = Body.safeParse(await req.json().catch(() => ({})));
+    if (!parsed.success) throw httpError(400, parsed.error.issues[0]?.message ?? 'Invalid input');
+
+    // Two ways in: a signed-in customer, or the website's move-code token.
+    // The token is deliberately limited to settling the final bill: paying
+    // what is owed can't hurt anyone, but it must never start anything else.
+    const trackedBookingId = parsed.data.track_token
+      ? await verifyTrackToken(parsed.data.track_token)
+      : null;
+    if (parsed.data.track_token && !trackedBookingId) {
+      throw httpError(401, 'This tracking session has expired. Enter your move code again.');
+    }
+    if (trackedBookingId && parsed.data.kind !== 'final') {
+      throw httpError(403, 'A move code can only pay the final bill.');
+    }
+    const user = trackedBookingId ? null : await requireAuth(req);
 
     await checkRateLimit({
-      bucketKey: `user:${user.id}:stripe_pi`,
+      bucketKey: user ? `user:${user.id}:stripe_pi` : `track:${trackedBookingId}:stripe_pi`,
       endpoint: 'stripe-create-payment-intent',
       limit: 20, windowSeconds: 60,
     });
 
-    const parsed = Body.safeParse(await req.json().catch(() => ({})));
-    if (!parsed.success) throw httpError(400, parsed.error.issues[0]?.message ?? 'Invalid input');
-    const { booking_id } = parsed.data;
+    const booking_id = trackedBookingId ?? parsed.data.booking_id;
+    if (!booking_id) throw httpError(400, 'booking_id is required');
 
     const secretKey = Deno.env.get('STRIPE_SECRET_KEY');
     if (!secretKey) {
@@ -76,8 +94,11 @@ handle(async (req) => {
 
     const kind = parsed.data.kind;
 
-    // RLS-bound client — the customer can only read their own booking.
-    const supabase = userClient(req.headers.get('Authorization'));
+    // RLS-bound client — the customer can only read their own booking. The
+    // token path has no user to bind to, and already proved which booking.
+    const supabase = trackedBookingId
+      ? adminClient()
+      : userClient(req.headers.get('Authorization'));
     const { data: booking, error } = await supabase
       .from('bookings')
       .select('id, short_code, status, payment_status, actual_total_cents, price_total_cents, stripe_payment_intent_id, customer_id, deposit_cents, deposit_status, deposit_refunded_cents')
@@ -85,7 +106,8 @@ handle(async (req) => {
       .maybeSingle();
 
     if (error || !booking) throw httpError(404, 'Booking not found');
-    if (booking.customer_id !== user.id) throw httpError(403, 'Not your booking');
+    if (user && booking.customer_id !== user.id) throw httpError(403, 'Not your booking');
+    const customerProfileId = booking.customer_id as string;
 
     // SERVER-SIDE amounts — never trust any client-supplied figure.
     let moveCents: number;   // the portion of THIS charge that is move revenue
@@ -101,7 +123,9 @@ handle(async (req) => {
       if (!booking.price_total_cents || booking.price_total_cents <= 0) {
         throw httpError(409, 'No estimate on this move yet.');
       }
-      moveCents = Math.round(booking.price_total_cents * DEPOSIT_RATE);
+      // The figure quoted at checkout and credited on the final bill. Falling
+      // back to the rate only covers rows from before deposit_cents existed.
+      moveCents = booking.deposit_cents ?? Math.round(booking.price_total_cents * DEPOSIT_RATE);
     } else {
       if (booking.payment_status === 'captured') throw httpError(409, 'This move is already paid.');
       if (!FINAL_PAYABLE_STATUSES.includes(booking.status)) {
@@ -131,11 +155,16 @@ handle(async (req) => {
       // and every call must land on the SAME number rather than spending the
       // balance twice. It returns the already-applied amount in that case.
       if (moveCents > 0) {
-        const { data: applied, error: creditErr } = await supabase
-          .rpc('redeem_credit_for_booking', {
-            p_booking_id: booking_id,
-            p_max_cents: moveCents,
-          });
+        const { data: applied, error: creditErr } = trackedBookingId
+          ? await adminClient().rpc('redeem_credit_for_customer', {
+              p_customer_id: customerProfileId,
+              p_booking_id: booking_id,
+              p_max_cents: moveCents,
+            })
+          : await supabase.rpc('redeem_credit_for_booking', {
+              p_booking_id: booking_id,
+              p_max_cents: moveCents,
+            });
         if (creditErr) {
           // Never block a payment over credit. Charging full price is
           // recoverable — the balance is still there and we can apply it by
@@ -194,7 +223,7 @@ handle(async (req) => {
     let customerId: string | null = null;
     {
       const { data: prof } = await admin.from('profiles')
-        .select('stripe_customer_id, full_name, email').eq('id', user.id).maybeSingle();
+        .select('stripe_customer_id, full_name, email').eq('id', customerProfileId).maybeSingle();
       customerId = (prof as any)?.stripe_customer_id ?? null;
       if (!customerId) {
         const cRes = await fetch('https://api.stripe.com/v1/customers', {
@@ -203,12 +232,12 @@ handle(async (req) => {
           body: form({
             name: (prof as any)?.full_name ?? '',
             email: (prof as any)?.email ?? '',
-            'metadata[profile_id]': user.id,
+            'metadata[profile_id]': customerProfileId,
           }),
         });
         if (cRes.ok) {
           customerId = (await cRes.json()).id;
-          await admin.from('profiles').update({ stripe_customer_id: customerId }).eq('id', user.id);
+          await admin.from('profiles').update({ stripe_customer_id: customerId }).eq('id', customerProfileId);
         } else {
           console.error('[stripe-create-payment-intent] customer create failed', await cRes.text());
         }
@@ -233,7 +262,7 @@ handle(async (req) => {
         : `Movvy move #${booking.short_code}`,
       'metadata[booking_id]': booking.id,
       'metadata[short_code]': booking.short_code ?? '',
-      'metadata[customer_id]': user.id,
+      'metadata[customer_id]': customerProfileId,
       'metadata[kind]': kind,
       'metadata[move_cents]': String(moveCents),
       'metadata[tip_cents]': String(tipCents),

@@ -22,6 +22,7 @@ export function moveComplete(args: {
   actualTotalDollars: string; // "$1,612"
   receiptUrl: string;        // deep link to in-app receipt
   rateUrl: string;           // deep link to rating screen
+  trackUrl?: string;         // movvy.ca/track, for customers without the app
 }): BrandedTemplate {
   const name = args.fullName?.split(' ')[0] ?? 'there';
   const subject = `Move complete · ${args.actualTotalDollars} · #${args.shortCode}`;
@@ -40,15 +41,25 @@ export function moveComplete(args: {
       { label: 'Hours worked', value: args.actualHours },
       { label: 'Total billed', value: args.actualTotalDollars },
     ]),
-    paragraph(
-      `Your full itemized receipt (with hourly breakdown, materials, fuel, and tax) lives in the app under <strong>Receipts</strong>.`,
-    ),
-    buttonCta('View Receipt', args.receiptUrl),
-    paragraph(
-      `One tiny ask: <a href="${escapeHtml(
-        args.rateUrl,
-      )}" style="color:#047857;font-weight:600;">rate your crew</a> so other Albertans know who to book. Takes 5 seconds.`,
-    ),
+    ...(args.trackUrl
+      ? [
+          paragraph(
+            `If you have a balance left to pay, you can settle it, add a tip and rate your crew at <strong>movvy.ca/track</strong> with your move code, <strong>${escapeHtml(args.shortCode)}</strong>, and the last 4 digits of your phone number.`,
+          ),
+          buttonCta('Pay and Rate Your Move', args.trackUrl),
+          paragraph(`Using the Movvy app? Your itemized receipt is under <strong>Receipts</strong>.`),
+        ]
+      : [
+          paragraph(
+            `Your full itemized receipt (with hourly breakdown, materials, fuel, and tax) lives in the app under <strong>Receipts</strong>.`,
+          ),
+          buttonCta('View Receipt', args.receiptUrl),
+          paragraph(
+            `One tiny ask: <a href="${escapeHtml(
+              args.rateUrl,
+            )}" style="color:#047857;font-weight:600;">rate your crew</a> so other Albertans know who to book. Takes 5 seconds.`,
+          ),
+        ]),
     paragraph(`Thanks for moving with us. — The Movvy team`),
   ].join('');
 

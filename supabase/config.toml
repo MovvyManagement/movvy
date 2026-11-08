@@ -130,6 +130,13 @@ verify_jwt = true
 verify_jwt = true
 [functions.stripe-payment-methods]
 verify_jwt = true
+# Public website endpoints: visitors have no Supabase JWT. Each one restricts
+# itself to Movvy's origins and is rate limited; web-track also requires a
+# move code + phone digits, or a signed tracking token.
+[functions.web-quote]
+verify_jwt = false
+[functions.web-track]
+verify_jwt = false
 # Stripe calls this with no Supabase JWT — the Stripe-Signature check IS the auth.
 [functions.stripe-webhook]
 verify_jwt = false

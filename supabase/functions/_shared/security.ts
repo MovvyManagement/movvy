@@ -58,6 +58,29 @@ export async function requireAuth(req: Request): Promise<AuthedUser> {
 }
 
 /** DB-backed sliding-window rate limit. Returns true if request is allowed. */
+/** True when the bearer is the project's public key, meaning no signed-in user. */
+function isPublicKey(token: string): boolean {
+  if (token.startsWith('sb_publishable_')) return true;
+  if (token === Deno.env.get('SUPABASE_ANON_KEY')) return true;
+  try {
+    const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(part)).role === 'anon';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * For endpoints the public website calls before anyone has an account.
+ * Returns null for a visitor holding only the public key. A real user token
+ * still goes through full verification, so an expired session stays a 401.
+ */
+export async function optionalAuth(req: Request): Promise<AuthedUser | null> {
+  const token = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '').trim();
+  if (!token || isPublicKey(token)) return null;
+  return await requireAuth(req);
+}
+
 export async function checkRateLimit(opts: {
   bucketKey: string;          // e.g. 'user:<uuid>:bookings_create' or 'ip:<ip>:auth_signup'
   endpoint: string;

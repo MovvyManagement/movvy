@@ -9,6 +9,11 @@ const ALLOWED_ORIGINS = [
   'http://localhost:19006',
 ];
 
+/** True when the request comes from one of Movvy's own sites. */
+export function isAllowedOrigin(req: Request): boolean {
+  return ALLOWED_ORIGINS.includes(req.headers.get('origin') ?? '');
+}
+
 export function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get('origin') ?? '';
   const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : 'null';

@@ -32,6 +32,43 @@ const CSP = [
   "upgrade-insecure-requests",
 ].join('; ');
 
+// The booking and live tracking pages also load Stripe's card fields and
+// Google's map. Only those two pages get the wider policy, so the admin console
+// and the rest of the site keep the strict one above.
+const CHECKOUT_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://maps.googleapis.com",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.googleapis.com https://api.stripe.com https://r.stripe.com https://m.stripe.com",
+  "media-src 'self' blob:",
+  "worker-src 'self' blob:",
+  "frame-src https://js.stripe.com https://hooks.stripe.com",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "upgrade-insecure-requests",
+].join('; ');
+
+const CHECKOUT_HEADERS = [
+  { key: 'Content-Security-Policy', value: CHECKOUT_CSP },
+  {
+    key: 'Permissions-Policy',
+    value: [
+      'accelerometer=()',
+      'camera=()',
+      'geolocation=()',
+      'gyroscope=()',
+      'magnetometer=()',
+      'microphone=()',
+      'payment=(self "https://js.stripe.com")',
+      'usb=()',
+    ].join(', '),
+  },
+];
+
 const SECURITY_HEADERS = [
   // Prevents the browser from MIME-sniffing an intended text/plain into
   // something executable (script injection defense-in-depth).
@@ -88,6 +125,9 @@ const nextConfig = {
         source: '/:path*',
         headers: SECURITY_HEADERS,
       },
+      // ─── Booking + tracking — must come after the rule above to override it
+      { source: '/book', headers: CHECKOUT_HEADERS },
+      { source: '/track', headers: CHECKOUT_HEADERS },
       // ─── Universal-link manifests — need specific Content-Type ─────────
       // These override the security headers above just for the file's own
       // Content-Type; the security headers still apply.

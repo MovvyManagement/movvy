@@ -393,6 +393,7 @@ handle(async (req) => {
               actualTotalDollars: fmtMoney(actualBill.actualTotalCents),
               receiptUrl: `https://movvy.ca/app/receipts/${booking_id}`,
               rateUrl: `https://movvy.ca/app/rate/${booking_id}`,
+              trackUrl: `https://movvy.ca/track?code=${encodeURIComponent(data.short_code)}`,
             }),
           }).catch((e) =>
             console.warn('[bookings-update-status] email send failed', e),

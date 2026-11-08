@@ -8,6 +8,7 @@
 // =============================================================================
 
 import Image from 'next/image';
+import Link from 'next/link';
 import { StoreBadges } from './StoreBadges';
 import { TrustChips } from './TrustChips';
 
@@ -47,9 +48,21 @@ export function Hero() {
             drop-off — booked in under 60 seconds.
           </p>
 
+          <div className="mt-8 flex flex-wrap items-center gap-4">
+            <Link
+              href="/book"
+              className="inline-flex min-h-[52px] items-center rounded-full bg-ink-900 px-7 text-base font-bold text-white transition hover:bg-brand-700"
+            >
+              Book your move online
+            </Link>
+            <Link href="/track" className="text-sm font-bold text-ink-900 underline-offset-4 hover:underline">
+              Track a move
+            </Link>
+          </div>
+
           <div className="mt-8">
             <p className="mb-3 text-xs font-bold uppercase tracking-wider text-silver-500">
-              Get the App
+              Or get the app
             </p>
             <StoreBadges size="lg" />
           </div>

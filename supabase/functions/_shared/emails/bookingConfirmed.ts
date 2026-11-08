@@ -24,6 +24,7 @@ export function bookingConfirmed(args: {
   crewSize: number;
   estimatedTotalDollars: string; // e.g. "$1,420"
   bookingUrl: string;            // deep link into the app
+  trackUrl?: string;             // movvy.ca/track, for customers without the app
 }): BrandedTemplate {
   const name = args.fullName?.split(' ')[0] ?? 'there';
   const subject = `Your move is booked · ${args.scheduledStart} · #${args.shortCode}`;
@@ -45,9 +46,12 @@ export function bookingConfirmed(args: {
     paragraph(
       `Your final total may differ from the estimate above — Movvy bills on actual hours worked, from "we've left HQ" to the last box off the truck.`,
     ),
-    buttonCta('View Booking in App', args.bookingUrl),
+    buttonCta(args.trackUrl ? 'Track Your Move' : 'View Booking in App', args.trackUrl ?? args.bookingUrl),
     paragraph(
-      `Need to change something? Open the booking in the app to reschedule or cancel — no fees up to 24 hours before your move.`,
+      `To follow your move on the web, go to <strong>movvy.ca/track</strong> and enter your move code, <strong>${escapeHtml(args.shortCode)}</strong>, with the last 4 digits of your phone number.`,
+    ),
+    paragraph(
+      `Need to change something? You can reschedule up to 24 hours before your move. Cancel more than 48 hours ahead and your deposit is fully refunded.`,
     ),
   ].join('');
 

@@ -218,6 +218,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
                       crewSize: Number(bk.pricing_breakdown?.recommendedCrew ?? 2),
                       estimatedTotalDollars: fmtMoney(bk.price_total_cents),
                       bookingUrl: `https://movvy.ca/app/bookings/${bk.id}`,
+                      trackUrl: `https://movvy.ca/track?code=${encodeURIComponent(bk.short_code)}`,
                     }),
                   }).catch((e) => console.warn('[stripe-webhook] confirm email failed', e));
                 }
