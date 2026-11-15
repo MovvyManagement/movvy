@@ -29,6 +29,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, Link } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { CREW_CALLING_ENABLED } from '@/lib/features';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
@@ -571,9 +572,9 @@ export default function Signup() {
         <View className="mt-6 rounded-2xl bg-silver-50 p-4 flex-row">
           <Ionicons name="shield-checkmark-outline" size={18} color="#047857" />
           <Text className="ml-2 flex-1 text-[11px] text-silver-600 leading-5">
-            Your phone is verified at signup so your crew can reach you the
-            moment they're on the way. Movvy never shares your real number —
-            calls are routed through a private proxy line.
+            {CREW_CALLING_ENABLED
+              ? "Your phone is verified at signup so your crew can reach you the moment they're on the way. Movvy never shares your real number — calls go through a Movvy number."
+              : 'Your phone is verified at signup to keep your account secure. Movvy never shares your real number — you and your crew message each other in the app.'}
           </Text>
         </View>
       </>

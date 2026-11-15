@@ -11,7 +11,8 @@
 //   2. Setting feature_flags.google_places_enabled = true in the DB
 //   3. Confirming your daily budget cap in api_budgets
 
-import { supabase, supabaseConfigured } from './supabase';
+import { FunctionRegion, FunctionsHttpError } from '@supabase/supabase-js';
+import { supabase, supabaseConfigured, supabaseFunctionsUrl } from './supabase';
 import { ALBERTA_BOUNDS, cityForCoord, closestMajorCity, MAJOR_CITIES } from './distance';
 
 /** Kept for backwards-compat — Calgary is one of many Alberta cities now. */
@@ -94,6 +95,101 @@ export function cityProvinceFromGeocode(
   return { city: info.name, province };
 }
 
+// -----------------------------------------------------------------------------
+// Speed
+//
+// Suggestions are asked for at every pause in typing, so three things keep
+// them quick:
+//   1. The address functions are pinned to the region the database is in. Each
+//      search makes several database calls, and running next to it beats
+//      running in whichever region happens to be nearest the phone.
+//   2. Answers are remembered for a few minutes, so backspacing or retyping an
+//      address shows its suggestions instantly, with no request at all.
+//   3. Two callers asking for the same text at the same moment share one
+//      request.
+// -----------------------------------------------------------------------------
+const SEARCH_REGION = FunctionRegion.CaCentral1;
+const SEARCH_MEMORY_MS = 10 * 60 * 1000;
+const SEARCH_MEMORY_MAX = 80;
+const PLACE_MEMORY_MAX = 50;
+const WARM_UP_EVERY_MS = 60 * 1000;
+
+const rememberedSearches = new Map<string, { at: number; results: GeocodeResult[] }>();
+const searchesInFlight = new Map<string, Promise<GeocodeResult[]>>();
+const rememberedPlaces = new Map<string, GeocodeResult>();
+let warmedAt = 0;
+
+const searchKey = (query: string) => query.trim().toLowerCase().replace(/\s+/g, ' ');
+
+/** Suggestions already fetched for exactly this text, if they are still fresh. */
+export function rememberedSearch(query: string): GeocodeResult[] | null {
+  const key = searchKey(query);
+  const hit = rememberedSearches.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > SEARCH_MEMORY_MS) {
+    rememberedSearches.delete(key);
+    return null;
+  }
+  return hit.results;
+}
+
+function rememberSearch(query: string, results: GeocodeResult[]): void {
+  const key = searchKey(query);
+  rememberedSearches.delete(key);
+  if (rememberedSearches.size >= SEARCH_MEMORY_MAX) {
+    rememberedSearches.delete(rememberedSearches.keys().next().value as string);
+  }
+  rememberedSearches.set(key, { at: Date.now(), results });
+}
+
+/**
+ * Call an address function in the database's region. If that region can't be
+ * reached at all, try once more wherever Supabase chooses. An answer from the
+ * function itself (rate limit, bad input) is returned as is, never retried.
+ */
+async function invokeNearDatabase(name: string, body: Record<string, unknown>) {
+  const pinned = await supabase.functions.invoke(name, { body, region: SEARCH_REGION });
+  if (!pinned.error || pinned.error instanceof FunctionsHttpError) return pinned;
+  return supabase.functions.invoke(name, { body });
+}
+
+/**
+ * Wake the address functions, and open the connection to them, before the
+ * first keystroke needs either. Call when an address field is opened. The
+ * request does no work on the server and counts against no limit.
+ */
+export function warmAddressSearch(): void {
+  if (!supabaseFunctionsUrl) return;
+  const now = Date.now();
+  if (now - warmedAt < WARM_UP_EVERY_MS) return;
+  warmedAt = now;
+  for (const name of ['geocoding-search', 'place-details']) {
+    fetch(`${supabaseFunctionsUrl}/${name}?forceFunctionRegion=${SEARCH_REGION}`, {
+      method: 'OPTIONS',
+    }).catch(() => {
+      // Only a head start. The real search reports any real problem.
+    });
+  }
+}
+
+const wordsOf = (text: string) => text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+/**
+ * Of the suggestions already on screen, the ones that still fit what has been
+ * typed since. Lets the list keep up with the keyboard while the next answer
+ * is on its way. If none of them fit, the list is left alone rather than
+ * emptied, because the server matches more loosely than this does.
+ */
+export function narrowSuggestions(current: GeocodeResult[], query: string): GeocodeResult[] {
+  const typed = wordsOf(query);
+  if (typed.length === 0 || current.length === 0) return current;
+  const fitting = current.filter((s) => {
+    const shown = wordsOf(`${s.label} ${s.secondary ?? ''}`);
+    return typed.every((t) => shown.some((w) => w.startsWith(t)));
+  });
+  return fitting.length > 0 && fitting.length < current.length ? fitting : current;
+}
+
 /**
  * Search Alberta-wide addresses through the protected edge function.
  *
@@ -101,14 +197,37 @@ export function cityProvinceFromGeocode(
  * (i.e. dev demo mode without backend). When the backend is live, the edge
  * function decides between Google (paid, gated) and Nominatim (free) based on
  * feature flags + remaining daily budget.
+ *
+ * Pass `signal` to be told when an answer is no longer wanted: the call then
+ * rejects with an AbortError instead of returning a stale answer. The request
+ * itself is left to finish, so its answer is still remembered for next time.
  */
 export async function searchAlberta(query: string, signal?: AbortSignal): Promise<GeocodeResult[]> {
   const q = query.trim();
   if (q.length < 3) return [];
 
+  const remembered = rememberedSearch(q);
+  if (remembered) return remembered;
+
+  const key = searchKey(q);
+  let search = searchesInFlight.get(key);
+  if (!search) {
+    search = runSearch(q).finally(() => searchesInFlight.delete(key));
+    searchesInFlight.set(key, search);
+  }
+  const results = await search;
+  if (signal?.aborted) {
+    const stale = new Error('Search no longer needed');
+    stale.name = 'AbortError';
+    throw stale;
+  }
+  return results;
+}
+
+async function runSearch(q: string): Promise<GeocodeResult[]> {
   // No Supabase? Skip straight to Nominatim — dev / demo case.
   if (!supabaseConfigured) {
-    return nominatimDirect(q, signal);
+    return nominatimDirect(q);
   }
 
   // Try the edge function first (gives us Google when enabled + caching +
@@ -116,21 +235,26 @@ export async function searchAlberta(query: string, signal?: AbortSignal): Promis
   // auth missing, etc.), fall back to direct Nominatim so the user STILL
   // gets address suggestions instead of a dead input.
   try {
-    const { data, error } = await supabase.functions.invoke('geocoding-search', {
-      body: { query: q, province: 'AB' },
+    const { data, error } = await invokeNearDatabase('geocoding-search', {
+      query: q,
+      province: 'AB',
     });
     if (error) throw error;
     if (data?.error) throw new Error(data.error);
-    const results = (data?.results ?? []) as GeocodeResult[];
-    if (results.length > 0) return results;
-    // Edge function returned an empty result — try Nominatim as a second
-    // pass before giving up. Common when Google budget is exhausted.
-    return nominatimDirect(q, signal);
+    let results = (data?.results ?? []) as GeocodeResult[];
+    if (results.length === 0) {
+      // Edge function returned an empty result — try Nominatim as a second
+      // pass before giving up. Common when Google budget is exhausted.
+      results = await nominatimDirect(q);
+    }
+    rememberSearch(q, results);
+    return results;
   } catch (e) {
     if (__DEV__) {
       console.warn('[geocoding] edge function failed, falling back to Nominatim:', e);
     }
-    return nominatimDirect(q, signal);
+    // Not remembered: the next attempt should try the fast path again.
+    return nominatimDirect(q);
   }
 }
 
@@ -155,15 +279,20 @@ export async function resolvePlaceId(
   signal?: AbortSignal,
 ): Promise<GeocodeResult | null> {
   if (!placeId || !supabaseConfigured) return null;
+  // A place's coordinates never change, so a pick made earlier is instant.
+  const remembered = rememberedPlaces.get(placeId);
+  if (remembered) return remembered;
   try {
-    const { data, error } = await supabase.functions.invoke('place-details', {
-      body: { place_id: placeId },
-    });
+    const { data, error } = await invokeNearDatabase('place-details', { place_id: placeId });
     if (signal?.aborted) return null;
     if (error) throw error;
     if (data?.error) throw new Error(data.error);
     const r = data?.result as GeocodeResult | undefined;
     if (!r || !Number.isFinite(Number(r.lat)) || !Number.isFinite(Number(r.lng))) return null;
+    if (rememberedPlaces.size >= PLACE_MEMORY_MAX) {
+      rememberedPlaces.delete(rememberedPlaces.keys().next().value as string);
+    }
+    rememberedPlaces.set(placeId, r);
     return r;
   } catch (e) {
     if (__DEV__) console.warn('[geocoding] place-details resolve failed:', e);

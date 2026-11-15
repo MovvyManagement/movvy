@@ -9,6 +9,11 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const PUBLIC_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export const ARRIVAL_WINDOW = '9:00 AM – 11:00 AM';
+
+// Calling between a customer and their crew, through Movvy's Twilio number.
+// Set this to false to hide the Call button and leave chat as the only way to
+// reach the crew. The app's matching switch is in src/lib/features.ts.
+export const CREW_CALLING_ENABLED: boolean = true;
 export const TERMS_VERSION = '2026-06-02';
 export const MIN_PASSWORD_LENGTH = 10;
 const MIN_LEAD_DAYS = 3;
@@ -20,6 +25,12 @@ export class ApiError extends Error {
   }
 }
 
+// The database lives in Canada Central. Address search makes several database
+// calls per request, so running those functions next to it, rather than in
+// whichever region is closest to the visitor, saves a round trip each time.
+const DATABASE_REGION_FUNCTIONS = new Set(['geocoding-search', 'place-details']);
+const DATABASE_REGION = 'ca-central-1';
+
 /** Call a Supabase edge function, as a visitor or as a signed-in customer. */
 export async function callFunction<T>(
   name: string,
@@ -27,9 +38,10 @@ export async function callFunction<T>(
   accessToken?: string,
   signal?: AbortSignal,
 ): Promise<T> {
+  const region = DATABASE_REGION_FUNCTIONS.has(name) ? `?forceFunctionRegion=${DATABASE_REGION}` : '';
   let res: Response;
   try {
-    res = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/${name}${region}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -85,8 +97,22 @@ export interface AddressMatch {
 
 const SEARCH_RETRY_DELAYS_MS = [400, 1200];
 
+// Searches already answered during this visit, so backspacing or retyping an
+// address shows its suggestions instantly without asking the server again.
+const recentSearches = new Map<string, AddressMatch[]>();
+const RECENT_SEARCH_LIMIT = 50;
+const searchKey = (query: string) => query.trim().toLowerCase().replace(/\s+/g, ' ');
+
+/** Suggestions for a search already made during this visit, if any. */
+export function cachedAddresses(query: string): AddressMatch[] | undefined {
+  return recentSearches.get(searchKey(query));
+}
+
 /** A search changes nothing, so a dropped request is safe to quietly try again. */
 export async function searchAddresses(query: string, signal?: AbortSignal) {
+  const key = searchKey(query);
+  const known = recentSearches.get(key);
+  if (known) return known;
   for (let attempt = 0; ; attempt++) {
     try {
       const res = await callFunction<{ results: AddressMatch[] }>(
@@ -95,7 +121,12 @@ export async function searchAddresses(query: string, signal?: AbortSignal) {
         undefined,
         signal,
       );
-      return res.results ?? [];
+      const results = res.results ?? [];
+      if (recentSearches.size >= RECENT_SEARCH_LIMIT) {
+        recentSearches.delete(recentSearches.keys().next().value as string);
+      }
+      recentSearches.set(key, results);
+      return results;
     } catch (e) {
       const offline = e instanceof ApiError && e.status === 0;
       if (!offline || attempt >= SEARCH_RETRY_DELAYS_MS.length) throw e;

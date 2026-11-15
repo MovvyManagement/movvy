@@ -76,9 +76,73 @@ function isPublicKey(token: string): boolean {
  * still goes through full verification, so an expired session stays a 401.
  */
 export async function optionalAuth(req: Request): Promise<AuthedUser | null> {
-  const token = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '').trim();
+  const token = bearerToken(req);
   if (!token || isPublicKey(token)) return null;
   return await requireAuth(req);
+}
+
+function bearerToken(req: Request): string | null {
+  return req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '').trim() || null;
+}
+
+// ---------------------------------------------------------------------------
+// Sessions remembered for a minute — ADDRESS SEARCH ONLY.
+//
+// Address search runs on every keystroke, and verifying the same session each
+// time costs two round trips (auth server, then the profile row) before the
+// search even starts. A session this warm instance has just verified is
+// remembered for up to a minute, never past the token's own expiry.
+//
+// The trade-off: a sign-out or suspension can take up to a minute to reach
+// these endpoints. That is fine for looking up addresses, which website
+// visitors can do with no account at all. Anything that books, pays or
+// changes data must keep calling requireAuth on every request.
+// ---------------------------------------------------------------------------
+const SESSION_MEMO_MS = 60_000;
+const SESSION_MEMO_MAX = 500;
+const sessionMemo = new Map<string, { user: AuthedUser; until: number }>();
+
+function tokenExpiryMs(token: string): number {
+  try {
+    const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const exp = Number(JSON.parse(atob(part)).exp);
+    return Number.isFinite(exp) ? exp * 1000 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * A first look at who is calling, with no network call:
+ *   null        a visitor holding only the public key
+ *   AuthedUser  a session verified here within the last minute
+ *   undefined   a session that still has to be verified (call verifySession)
+ */
+export function peekSession(req: Request): AuthedUser | null | undefined {
+  const token = bearerToken(req);
+  if (!token || isPublicKey(token)) return null;
+  const hit = sessionMemo.get(token);
+  if (!hit) return undefined;
+  if (hit.until <= Date.now()) {
+    sessionMemo.delete(token);
+    return undefined;
+  }
+  return hit.user;
+}
+
+/** Verify a session the full way (same checks as requireAuth), then remember it. */
+export async function verifySession(req: Request): Promise<AuthedUser> {
+  const user = await requireAuth(req);
+  const token = bearerToken(req);
+  const now = Date.now();
+  const until = token ? Math.min(now + SESSION_MEMO_MS, tokenExpiryMs(token)) : 0;
+  if (token && until > now) {
+    if (sessionMemo.size >= SESSION_MEMO_MAX) {
+      sessionMemo.delete(sessionMemo.keys().next().value as string);
+    }
+    sessionMemo.set(token, { user, until });
+  }
+  return user;
 }
 
 export async function checkRateLimit(opts: {

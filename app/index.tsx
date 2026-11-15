@@ -77,24 +77,31 @@ export default function Welcome() {
               />
             </View>
 
-            {/* Social-proof line — keep it factual; adjust the constants in
-                src/lib/brand.ts as the marketplace grows. */}
-            <View className="mt-5 flex-row items-center">
-              <View className="flex-row -space-x-2">
-                {[0, 1, 2].map((i) => (
-                  <View
-                    key={i}
-                    className="h-6 w-6 rounded-full border-2 border-white items-center justify-center"
-                    style={{ backgroundColor: ['#16A34A', '#047857', '#0A0A0A'][i] }}
-                  >
-                    <Ionicons name="person" size={10} color="#fff" />
-                  </View>
-                ))}
+            {/* Social-proof line — real numbers only. It stays hidden until
+                both constants in src/lib/brand.ts hold real figures. */}
+            {TOTAL_MOVES_TAGLINE && AVG_RATING_TAGLINE ? (
+              <View className="mt-5 flex-row items-center">
+                <View className="flex-row -space-x-2">
+                  {[0, 1, 2].map((i) => (
+                    <View
+                      key={i}
+                      className="h-6 w-6 rounded-full border-2 border-white items-center justify-center"
+                      style={{ backgroundColor: ['#16A34A', '#047857', '#0A0A0A'][i] }}
+                    >
+                      <Ionicons name="person" size={10} color="#fff" />
+                    </View>
+                  ))}
+                </View>
+                <Text className="ml-3 text-xs text-silver-600">
+                  <Text className="font-bold text-ink-900">{TOTAL_MOVES_TAGLINE} moves</Text> across Alberta · {AVG_RATING_TAGLINE}★ avg
+                </Text>
               </View>
-              <Text className="ml-3 text-xs text-silver-600">
-                <Text className="font-bold text-ink-900">{TOTAL_MOVES_TAGLINE} moves</Text> across Alberta · {AVG_RATING_TAGLINE}★ avg
-              </Text>
-            </View>
+            ) : (
+              <View className="mt-5 flex-row items-center">
+                <View className="h-2 w-2 rounded-full bg-brand-600" />
+                <Text className="ml-2 text-xs text-silver-600">Now booking moves across Alberta</Text>
+              </View>
+            )}
           </View>
 
           <View className="pb-2">

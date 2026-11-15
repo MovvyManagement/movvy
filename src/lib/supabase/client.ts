@@ -61,3 +61,6 @@ export const supabase = createClient(SUPABASE_URL ?? '', SUPABASE_ANON_KEY ?? ''
 });
 
 export const supabaseConfigured = !!SUPABASE_URL && !!SUPABASE_ANON_KEY;
+
+/** Base URL of the project's edge functions, or null when Supabase isn't set up. */
+export const supabaseFunctionsUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1` : null;

@@ -19,11 +19,15 @@ export const APP_VERSION = Constants.expoConfig?.version ?? '—';
 /** "Movvy v1.0.0 · Alberta-wide" — the footer line on all three profiles. */
 export const APP_VERSION_LINE = `Movvy v${APP_VERSION} · Alberta-wide`;
 
-/** Lifetime move count displayed in the social-proof line on welcome. */
-export const TOTAL_MOVES_TAGLINE = '500+';
+/** Lifetime move count for the social-proof line on the welcome screen, e.g.
+ *  '500+'. null until Movvy has real completed moves to count: an invented
+ *  number here is a false claim to customers and to App Store / Play review.
+ *  The line stays hidden while either of these two is null. */
+export const TOTAL_MOVES_TAGLINE: string | null = null;
 
-/** Average customer rating shown alongside the move count. */
-export const AVG_RATING_TAGLINE = '4.9';
+/** Real average customer rating shown alongside the move count, e.g. '4.8'.
+ *  null until there are enough real ratings to average. */
+export const AVG_RATING_TAGLINE: string | null = null;
 
 /** Insurance coverage cap shown to customers + on booking confirm.
  *  Dollar value covered per move under Movvy's policy (or partner's where

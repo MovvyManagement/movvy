@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { SUPPORT_EMAIL, SUPPORT_PHONE } from '@/lib/features';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
@@ -48,10 +49,13 @@ export default function MoverSafety() {
   const fullyInsured =
     insurance?.status === 'approved' && license?.status === 'approved';
 
-  const callMovvy = () => {
-    // Movvy customer support line.
-    Linking.openURL('tel:+16134163426').catch(() =>
-      Alert.alert("Couldn't open dialer"),
+  const contactMovvy = () => {
+    // The support line when there is one, otherwise email. See SUPPORT_PHONE.
+    const url = SUPPORT_PHONE ? `tel:${SUPPORT_PHONE}` : `mailto:${SUPPORT_EMAIL}`;
+    Linking.openURL(url).catch(() =>
+      Alert.alert(
+        SUPPORT_PHONE ? "Couldn't open dialer" : `Email us at ${SUPPORT_EMAIL}`,
+      ),
     );
   };
 
@@ -89,12 +93,14 @@ export default function MoverSafety() {
               <Text className="text-white text-base font-bold">Call 911</Text>
             </Pressable>
             <Pressable
-              onPress={callMovvy}
+              onPress={contactMovvy}
               className="flex-1 h-12 rounded-2xl border border-ink-900 items-center justify-center active:opacity-70"
               accessibilityRole="button"
-              accessibilityLabel="Call Movvy support"
+              accessibilityLabel={SUPPORT_PHONE ? 'Call Movvy support' : 'Email Movvy support'}
             >
-              <Text className="text-base font-bold text-ink-900">Call Movvy</Text>
+              <Text className="text-base font-bold text-ink-900">
+                {SUPPORT_PHONE ? 'Call Movvy' : 'Email Movvy'}
+              </Text>
             </Pressable>
           </View>
         </Card>

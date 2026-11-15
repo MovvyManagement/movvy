@@ -29,6 +29,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { CREW_CALLING_ENABLED } from '@/lib/features';
 import { Avatar } from './Avatar';
 import { MovvyMark } from './MovvyMark';
 import { useToast } from './Toast';
@@ -53,7 +54,7 @@ interface Props {
   onClose: () => void;
   /** Display name shown in the header (e.g. driver name or customer name). */
   peerName?: string;
-  /** A real phone number (E.164, e.g. "+16134163426") the header call button
+  /** A real phone number (E.164, e.g. "+14035550123") the header call button
    *  should dial directly. Used by the support chat, where the Movvy support
    *  line is a real number the customer can just call. When omitted (crew↔
    *  customer chat) the button explains that calls route through a Movvy proxy
@@ -204,10 +205,16 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
               <View className="flex-row items-center mt-0.5">
                 <MovvyMark size="sm" />
                 <Text className="ml-1.5 text-[11px] text-silver-500">
-                  Via Movvy line · numbers private
+                  {callNumber || CREW_CALLING_ENABLED
+                    ? 'Via Movvy line · numbers private'
+                    : 'Through Movvy · numbers private'}
                 </Text>
               </View>
             </View>
+            {/* The call button shows for the support line (a real number), and
+                for crew chats only when calling is switched on. Otherwise an
+                empty box the same size keeps the title centred. */}
+            {callNumber || CREW_CALLING_ENABLED ? (
             <View className="flex-row items-center">
               <Pressable
                 onPress={() => {
@@ -229,6 +236,9 @@ export function ChatSheet({ visible, bookingId, threadId: threadIdProp, onClose,
                 <Ionicons name="call" size={18} color="#fff" />
               </Pressable>
             </View>
+            ) : (
+              <View className="h-10 w-10" />
+            )}
           </View>
 
           {/* Messages */}

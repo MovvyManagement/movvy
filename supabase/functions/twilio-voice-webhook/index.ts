@@ -56,8 +56,8 @@ async function verifyTwilioSignature(req: Request, body: URLSearchParams): Promi
   // The signature is HMAC-SHA1 over: full URL + each form param sorted
   // alphabetically and concatenated as key+value (no separator).
   const sortedKeys = [...body.keys()].sort();
-  let raw = req.url;
-  for (const key of sortedKeys) raw += key + (body.get(key) ?? '');
+  let params = '';
+  for (const key of sortedKeys) params += key + (body.get(key) ?? '');
 
   const enc = new TextEncoder();
   const cryptoKey = await crypto.subtle.importKey(
@@ -67,9 +67,29 @@ async function verifyTwilioSignature(req: Request, body: URLSearchParams): Promi
     false,
     ['sign'],
   );
-  const sigBuffer = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(raw));
-  const computed = btoa(String.fromCharCode(...new Uint8Array(sigBuffer)));
-  return computed === sig;
+  for (const url of signedUrlCandidates(req)) {
+    const sigBuffer = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(url + params));
+    const computed = btoa(String.fromCharCode(...new Uint8Array(sigBuffer)));
+    if (computed === sig) return true;
+  }
+  return false;
+}
+
+// Twilio signs the public address it called:
+//   https://<project>.supabase.co/functions/v1/twilio-voice-webhook
+// Inside this function the very same request shows up as
+//   http://<project>.supabase.co/twilio-voice-webhook
+// (no https, no /functions/v1). Checking the signature against req.url alone
+// therefore rejected every genuine call as "busy". The public address is
+// rebuilt here from SUPABASE_URL and tried first. Each candidate is still
+// checked against the auth token, so nothing Twilio didn't sign gets through.
+function signedUrlCandidates(req: Request): string[] {
+  const seen = new URL(req.url);
+  const urls = new Set<string>();
+  const base = (Deno.env.get('SUPABASE_URL') ?? '').replace(/\/$/, '');
+  if (base) urls.add(`${base}/functions/v1/twilio-voice-webhook${seen.search}`);
+  urls.add(req.url);
+  return [...urls];
 }
 
 Deno.serve(async (req) => {

@@ -824,7 +824,7 @@ function Confirmed({ code, date, last4 }: { code: string; date: string; last4: s
         <SectionLabel>Your move code</SectionLabel>
         <p className="mt-1 text-4xl font-bold tracking-tight text-ink-900">{code}</p>
         <p className="mt-3 text-sm leading-relaxed text-silver-600">
-          Keep this code. Come back to <strong className="text-ink-900">movvy.ca/track</strong> any time and enter it with the last 4 digits of your phone number to see your move live. We&apos;ve emailed it to you too.
+          Keep this code. Come back to <strong className="text-ink-900">movvy.ca/track</strong>{' '}any time and enter it with the last 4 digits of your phone number to see your move live. We&apos;ve emailed it to you too.
         </p>
       </Card>
       <Button className="mt-6 w-full" loading={busy} onClick={openLive}>

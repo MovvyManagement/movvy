@@ -27,9 +27,10 @@ import { Card } from '@/components/Card';
 import { ChatSheet } from '@/components/ChatSheet';
 import { MaxWidth } from '@/components/MaxWidth';
 import { useEnsureSupportThread } from '@/lib/data';
+import { SUPPORT_EMAIL, SUPPORT_PHONE, supportPhoneLabel } from '@/lib/features';
 
-const SUPPORT_PHONE = '+16134163426';
-const SUPPORT_EMAIL = 'support@movvy.ca';
+// The support line and email live in one place. SUPPORT_PHONE is null until
+// there is a real, answered number, and every phone option below hides itself.
 
 export default function SupportScreen() {
   const ensure = useEnsureSupportThread();
@@ -64,7 +65,7 @@ export default function SupportScreen() {
           visible
           threadId={threadId}
           peerName="Movvy Support"
-          callNumber={SUPPORT_PHONE}
+          callNumber={SUPPORT_PHONE ?? undefined}
           quickReplies={[
             'I need help with my move',
             "My crew hasn't arrived",
@@ -118,7 +119,9 @@ export default function SupportScreen() {
               <Card padded={false} className="mt-4">
                 <Pressable
                   onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)}
-                  className="px-5 py-4 flex-row items-center active:opacity-70 border-b border-silver-100"
+                  className={`px-5 py-4 flex-row items-center active:opacity-70 ${
+                    SUPPORT_PHONE ? 'border-b border-silver-100' : ''
+                  }`}
                 >
                   <Ionicons name="mail-outline" size={20} color="#0A0A0A" />
                   <Text className="ml-3 flex-1 text-sm font-semibold text-ink-900">
@@ -126,16 +129,18 @@ export default function SupportScreen() {
                   </Text>
                   <Ionicons name="chevron-forward" size={16} color="#A1A1AA" />
                 </Pressable>
-                <Pressable
-                  onPress={() => Linking.openURL(`tel:${SUPPORT_PHONE}`)}
-                  className="px-5 py-4 flex-row items-center active:opacity-70"
-                >
-                  <Ionicons name="call-outline" size={20} color="#0A0A0A" />
-                  <Text className="ml-3 flex-1 text-sm font-semibold text-ink-900">
-                    +1 (613) 416-3426
-                  </Text>
-                  <Ionicons name="chevron-forward" size={16} color="#A1A1AA" />
-                </Pressable>
+                {SUPPORT_PHONE ? (
+                  <Pressable
+                    onPress={() => Linking.openURL(`tel:${SUPPORT_PHONE}`)}
+                    className="px-5 py-4 flex-row items-center active:opacity-70"
+                  >
+                    <Ionicons name="call-outline" size={20} color="#0A0A0A" />
+                    <Text className="ml-3 flex-1 text-sm font-semibold text-ink-900">
+                      {supportPhoneLabel()}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={16} color="#A1A1AA" />
+                  </Pressable>
+                ) : null}
               </Card>
             </View>
           )}

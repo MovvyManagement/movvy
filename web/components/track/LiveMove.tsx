@@ -20,6 +20,7 @@ import {
   buildCalendar,
   callFunction,
   clearTrackSession,
+  CREW_CALLING_ENABLED,
   formatDate,
   money,
   type MoveStatus,
@@ -112,7 +113,7 @@ function GateSheet({ bookingId, onClose, onPassed }: { bookingId: string; onClos
         <ForgotPasswordForm onDone={() => setForgot(false)} />
       ) : (
         <div className="space-y-4">
-          <p className="text-sm text-silver-600">To keep your move safe, chat, calls, changes and cancelling need the account you booked with.</p>
+          <p className="text-sm text-silver-600">To keep your move safe, chat, changes and cancelling need the account you booked with.</p>
           <ErrorNote>{error}</ErrorNote>
           <SignInForm onSignedIn={afterSignIn} onForgot={() => setForgot(true)} submitLabel="Continue" />
         </div>
@@ -780,9 +781,9 @@ export function LiveMove({
               <p className="mt-2 text-sm text-silver-600">{closed ? 'No crew was assigned.' : "We'll show your crew here as soon as they're assigned."}</p>
             )}
             {!closed && snap.crew ? (
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <ActionButton onClick={() => guarded('chat')}>Chat</ActionButton>
-                <ActionButton onClick={() => guarded('call')}>Call</ActionButton>
+              <div className={`mt-4 grid gap-2 ${CREW_CALLING_ENABLED ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                <ActionButton onClick={() => guarded('chat')}>Chat with your crew</ActionButton>
+                {CREW_CALLING_ENABLED ? <ActionButton onClick={() => guarded('call')}>Call</ActionButton> : null}
               </div>
             ) : null}
           </Card>

@@ -12,12 +12,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  searchCalgary,
   resolvePlaceId,
   needsResolution,
   cityProvinceFromGeocode,
+  warmAddressSearch,
   type GeocodeResult,
 } from '@/lib/geocoding';
+import { useAddressSuggestions } from '@/lib/useAddressSuggestions';
 import { haptic } from '@/lib/haptics';
 
 interface Props {
@@ -47,74 +48,47 @@ export function AddressSearchSheet({
   accent = '#0A0A0A',
 }: Props) {
   const [q, setQ] = useState(initialQuery);
-  const [suggestions, setSuggestions] = useState<GeocodeResult[]>([]);
-  const [loading, setLoading] = useState(false);
   const [resolving, setResolving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Set when a tapped suggestion couldn't be turned into coordinates.
+  const [pinError, setPinError] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Suggestions for the typed text: instant when already searched, otherwise
+  // fetched after a short pause in typing. See useAddressSuggestions.
+  const { suggestions, loading, outcome } = useAddressSuggestions(q, visible);
   // Real device top inset from the ROOT provider (measured before the modal
   // mounts) — applied as explicit padding so the header never lands under the
   // Dynamic Island. Re-measuring inside the Modal was the source of the
   // intermittent "input hidden under the island" glitch.
   const insets = useSafeAreaInsets();
 
-  // Reset + autofocus each time the sheet opens.
+  // Reset + autofocus each time the sheet opens. The address functions are
+  // woken up at the same moment, so they are ready by the third keystroke.
   useEffect(() => {
     if (!visible) return;
     setQ(initialQuery);
-    setSuggestions([]);
-    setError(null);
+    setPinError(null);
+    warmAddressSearch();
     const t = setTimeout(() => inputRef.current?.focus(), 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  // Debounced search.
+  // A pin failure belongs to the text it happened on.
   useEffect(() => {
-    if (!visible) return;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    abortRef.current?.abort();
+    setPinError(null);
+  }, [q]);
 
-    const query = q.trim();
-    if (query.length < 3) {
-      setSuggestions([]);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    timerRef.current = setTimeout(async () => {
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
-      try {
-        const results = await searchCalgary(query, ctrl.signal);
-        setSuggestions(results);
-        if (results.length === 0) {
-          // Search is filtered to Alberta, so a real address that returns
-          // nothing is almost always outside our coverage. Say that plainly
-          // rather than "no matches", which reads as a broken search.
-          setError(
-            query.length >= 6
-              ? 'No Alberta address matched. Movvy currently serves Alberta only — try an address within the province.'
-              : null,
-          );
-        }
-      } catch (e: any) {
-        if (e.name !== 'AbortError') {
-          setError('Address search is offline — type the full address manually');
-          setSuggestions([]);
-        }
-      } finally {
-        setLoading(false);
-      }
-    }, 300);
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [q, visible]);
+  // Search is filtered to Alberta, so a real address that returns nothing is
+  // almost always outside our coverage. Say that plainly rather than "no
+  // matches", which reads as a broken search. Under 6 characters the customer
+  // is still mid-type, so say nothing.
+  const searchNote =
+    outcome === 'offline'
+      ? 'Address search is offline — type the full address manually'
+      : outcome === 'empty' && q.trim().length >= 6
+      ? 'No Alberta address matched. Movvy currently serves Alberta only — try an address within the province.'
+      : null;
+  const note = pinError ?? (suggestions.length === 0 ? searchNote : null);
 
   const handleSelect = async (r: GeocodeResult) => {
     haptic.success();
@@ -122,11 +96,11 @@ export function AddressSearchSheet({
     // Google predictions carry no coordinates — resolve before committing.
     if (needsResolution(r)) {
       setResolving(true);
-      setError(null);
+      setPinError(null);
       const resolved = await resolvePlaceId(r.place_id!);
       setResolving(false);
       if (!resolved) {
-        setError('Couldn’t pin that address — try another suggestion');
+        setPinError('Couldn’t pin that address — try another suggestion');
         return;
       }
       final = resolved;
@@ -192,10 +166,10 @@ export function AddressSearchSheet({
           keyExtractor={(s) => s.id}
           keyboardShouldPersistTaps="handled"
           ListHeaderComponent={
-            error && suggestions.length === 0 ? (
+            note ? (
               <View className="flex-row items-center px-4 py-3">
                 <Ionicons name="information-circle-outline" size={16} color="#A1A1AA" />
-                <Text className="ml-2 text-sm text-silver-500">{error}</Text>
+                <Text className="ml-2 flex-1 text-sm text-silver-500">{note}</Text>
               </View>
             ) : null
           }

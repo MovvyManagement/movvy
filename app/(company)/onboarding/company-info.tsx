@@ -4,6 +4,7 @@ import { View, Text, ScrollView, KeyboardAvoidingView, Platform } from 'react-na
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { CREW_CALLING_ENABLED } from '@/lib/features';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { StepIndicator } from '@/components/StepIndicator';
 import { Input } from '@/components/Input';
@@ -110,7 +111,11 @@ export default function CompanyInfo() {
               label="Phone (required)"
               value={company.phone}
               onChangeText={(t) => setCompany({ phone: t })}
-              hint="Routed through a Movvy proxy line — your real number stays private"
+              hint={
+                CREW_CALLING_ENABLED
+                  ? 'Calls reach you through a Movvy number — your real number stays private'
+                  : 'Never shown to customers — they message your crew in the app'
+              }
             />
           </View>
 

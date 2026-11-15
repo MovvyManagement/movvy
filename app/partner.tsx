@@ -29,6 +29,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, Link } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { CREW_CALLING_ENABLED } from '@/lib/features';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { StepIndicator } from '@/components/StepIndicator';
@@ -575,8 +576,9 @@ export default function PartnerSignup() {
         <View className="mt-4 rounded-2xl bg-silver-50 p-4 flex-row">
           <Ionicons name="shield-checkmark-outline" size={18} color="#047857" />
           <Text className="ml-2 flex-1 text-[11px] text-silver-600 leading-5">
-            Phone verification is mandatory for partners so customers can reach
-            you on a Movvy proxy line without ever seeing your real number.
+            {CREW_CALLING_ENABLED
+              ? 'Phone verification is mandatory for partners so customers can reach you through a Movvy number without ever seeing your real one.'
+              : 'Phone verification is mandatory for partners. Customers message you in the app and never see your real number.'}
           </Text>
         </View>
       </>

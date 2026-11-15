@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { type Address, type AddressMatch, resolveAddress, searchAddresses } from '@/lib/movvy';
+import { type Address, type AddressMatch, cachedAddresses, resolveAddress, searchAddresses } from '@/lib/movvy';
 import { Spinner } from './ui';
 
 // Live address search, limited to Alberta on the server.
@@ -32,6 +32,15 @@ export function AddressField({
     const query = text.trim();
     if (query.length < 3) {
       setMatches([]);
+      setBusy(false);
+      return;
+    }
+    // Already searched during this visit: show those suggestions right away.
+    const known = cachedAddresses(query);
+    if (known) {
+      setMatches(known);
+      setNote(known.length ? null : 'No Alberta address matched. Movvy currently serves Alberta only.');
+      setOpen(true);
       setBusy(false);
       return;
     }
@@ -68,10 +77,19 @@ export function AddressField({
     setOpen(false);
     setBusy(true);
     setNote(null);
+    // Show the chosen address straight away while its full details load.
+    // (skipSearch is only set when the text really changes, otherwise React
+    // skips the update and the visitor's next keystroke wouldn't search.)
+    if (match.label !== text) {
+      skipSearch.current = true;
+      setText(match.label);
+    }
     try {
       const address = await resolveAddress(match);
-      skipSearch.current = true;
-      setText(address.line1);
+      if (address.line1 !== match.label) {
+        skipSearch.current = true;
+        setText(address.line1);
+      }
       onChange(address);
     } catch (e) {
       setNote((e as Error).message);

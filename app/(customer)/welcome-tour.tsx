@@ -3,6 +3,7 @@ import { View, Text, Pressable, ScrollView, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { CREW_CALLING_ENABLED } from '@/lib/features';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Button } from '@/components/Button';
@@ -59,7 +60,9 @@ const SLIDES: Slide[] = [
   {
     icon: 'shield-checkmark',
     title: 'Safe, private, fair',
-    body: 'Every Movvy crew is background-checked and verified. Calls and texts route through a Movvy line so your real number stays private.',
+    body: CREW_CALLING_ENABLED
+      ? 'Every Movvy crew is background-checked and verified. Calls go through a Movvy number and messages stay in the app, so your real number stays private.'
+      : 'Every Movvy crew is background-checked and verified. You message your crew inside the app, so your real number stays private.',
     highlights: [
       'Photo-ID + criminal record check',
       'Damage protection up to $2,500',

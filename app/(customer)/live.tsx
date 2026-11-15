@@ -48,6 +48,7 @@ import { mockBookings } from '@/data/mockBookings';
 import { mockFallbacksEnabled } from '@/lib/mocks';
 import { haptic } from '@/lib/haptics';
 import { PayMoveButton } from '@/components/PayMoveButton';
+import { CREW_CALLING_ENABLED } from '@/lib/features';
 import type { BookingStatus } from '@/types';
 
 const STEP_KEYS: BookingStatus[] = ['on_the_way','arrived','loading','in_transit','unloading','completed'];
@@ -505,29 +506,35 @@ export default function LiveMove() {
                   <Ionicons name="chatbubble-ellipses" size={22} color="#0A0A0A" />
                   <Text className="ml-2 text-base font-bold text-ink-900">Chat with crew</Text>
                 </Pressable>
-                <Pressable
-                  onPress={onCallCrew}
-                  disabled={phoneProxy.isPending}
-                  accessibilityRole="button"
-                  accessibilityLabel="Call your crew through Movvy"
-                  accessibilityHint="Routes through a Movvy proxy line so your real number stays private"
-                  className={`h-14 w-14 rounded-2xl items-center justify-center ${
-                    phoneProxy.isPending
-                      ? 'bg-silver-300'
-                      : 'bg-brand-600 active:opacity-90'
-                  }`}
-                >
-                  <Ionicons
-                    name={phoneProxy.isPending ? 'hourglass-outline' : 'call'}
-                    size={22}
-                    color="#fff"
-                  />
-                </Pressable>
+                {/* Calling is switched off until Twilio voice is connected
+                    (see CREW_CALLING_ENABLED). Chat is the way to reach the crew. */}
+                {CREW_CALLING_ENABLED ? (
+                  <Pressable
+                    onPress={onCallCrew}
+                    disabled={phoneProxy.isPending}
+                    accessibilityRole="button"
+                    accessibilityLabel="Call your crew through Movvy"
+                    accessibilityHint="Routes through a Movvy proxy line so your real number stays private"
+                    className={`h-14 w-14 rounded-2xl items-center justify-center ${
+                      phoneProxy.isPending
+                        ? 'bg-silver-300'
+                        : 'bg-brand-600 active:opacity-90'
+                    }`}
+                  >
+                    <Ionicons
+                      name={phoneProxy.isPending ? 'hourglass-outline' : 'call'}
+                      size={22}
+                      color="#fff"
+                    />
+                  </Pressable>
+                ) : null}
               </View>
               <View className="mt-3 flex-row items-center">
                 <Ionicons name="shield-checkmark" size={12} color="#71717A" />
                 <Text className="ml-1.5 text-[11px] text-silver-500">
-                  Calls and texts route through a Movvy line — your real number is never shared.
+                  {CREW_CALLING_ENABLED
+                    ? 'Calls and texts route through a Movvy line — your real number is never shared.'
+                    : 'Messages go through Movvy — your real number is never shared.'}
                 </Text>
               </View>
             </>

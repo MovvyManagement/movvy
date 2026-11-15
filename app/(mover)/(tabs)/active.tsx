@@ -3,6 +3,7 @@ import { View, Text, ScrollView, Pressable, Alert, ActivityIndicator, Linking, P
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { CREW_CALLING_ENABLED } from '@/lib/features';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Card } from '@/components/Card';
 import { Avatar } from '@/components/Avatar';
@@ -566,7 +567,9 @@ export default function MoverActive() {
             <Avatar name={customerName} size={48} tone="dark" />
             <View className="ml-3 flex-1">
               <Text className="text-base font-bold text-ink-900">{customerName}</Text>
-              <Text className="text-xs text-silver-500">Contact via Movvy line</Text>
+              <Text className="text-xs text-silver-500">
+                {CREW_CALLING_ENABLED ? 'Contact via Movvy line' : 'Message through Movvy'}
+              </Text>
             </View>
           </View>
           <View className="mt-3 flex-row gap-2">
@@ -578,22 +581,26 @@ export default function MoverActive() {
               <Ionicons name="chatbubble-ellipses" size={18} color="#0A0A0A" />
               <Text className="ml-2 text-sm font-bold text-ink-900">Message</Text>
             </Pressable>
-            <Pressable
-              onPress={onCallCustomer}
-              disabled={phoneProxy.isPending}
-              accessibilityRole="button"
-              accessibilityLabel="Call customer through Movvy"
-              accessibilityHint="Routes through a Movvy proxy line so your real number stays private"
-              className={`flex-1 flex-row items-center justify-center rounded-2xl ${
-                phoneProxy.isPending ? 'bg-silver-300' : 'bg-brand-600 active:opacity-90'
-              }`}
-              style={{ height: 48 }}
-            >
-              <Ionicons name="call" size={18} color="#fff" />
-              <Text className="ml-2 text-sm font-bold text-white">
-                {phoneProxy.isPending ? 'Connecting…' : 'Call'}
-              </Text>
-            </Pressable>
+            {/* Calling is switched off until Twilio voice is connected
+                (see CREW_CALLING_ENABLED). Message is the way to reach the customer. */}
+            {CREW_CALLING_ENABLED ? (
+              <Pressable
+                onPress={onCallCustomer}
+                disabled={phoneProxy.isPending}
+                accessibilityRole="button"
+                accessibilityLabel="Call customer through Movvy"
+                accessibilityHint="Routes through a Movvy proxy line so your real number stays private"
+                className={`flex-1 flex-row items-center justify-center rounded-2xl ${
+                  phoneProxy.isPending ? 'bg-silver-300' : 'bg-brand-600 active:opacity-90'
+                }`}
+                style={{ height: 48 }}
+              >
+                <Ionicons name="call" size={18} color="#fff" />
+                <Text className="ml-2 text-sm font-bold text-white">
+                  {phoneProxy.isPending ? 'Connecting…' : 'Call'}
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         </Card>
 
