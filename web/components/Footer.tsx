@@ -29,6 +29,7 @@ const columns = [
   {
     title: 'Help',
     links: [
+      { href: '/support', label: 'Support' },
       { href: 'mailto:support@movvy.ca', label: 'support@movvy.ca' },
       { href: 'mailto:partner@movvy.ca', label: 'partner@movvy.ca' },
     ],
@@ -39,6 +40,7 @@ const columns = [
       { href: '/legal', label: 'Terms of Service' },
       { href: '/privacy', label: 'Privacy Policy' },
       { href: '/safety', label: 'Safety Center' },
+      { href: '/delete-account', label: 'Delete your account' },
     ],
   },
 ];

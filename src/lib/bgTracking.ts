@@ -22,6 +22,7 @@ import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
+import { confirmLocationDisclosure } from '@/lib/locationDisclosure';
 
 export const LIVE_LOCATION_TASK = 'movvy-live-location';
 const BOOKING_KEY = 'movvy.liveLocation.bookingId';
@@ -81,11 +82,25 @@ TaskManager.defineTask(LIVE_LOCATION_TASK, async ({ data, error }) => {
  *  false if location permission wasn't granted. */
 export async function startLiveLocation(bookingId: string): Promise<boolean> {
   try {
-    const fg = await Location.requestForegroundPermissionsAsync();
+    // Explain first, then ask. Google Play requires an in-app notice before a
+    // background location request, so whenever the OS is about to show a
+    // location prompt the crew member sees LocationDisclosureSheet first. When
+    // permission is already settled no prompt appears, so neither does the
+    // notice.
+    const fgNow = await Location.getForegroundPermissionsAsync();
+    const bgNow = await Location.getBackgroundPermissionsAsync().catch(() => null);
+    const fgWillAsk = fgNow.status !== 'granted' && fgNow.canAskAgain;
+    const bgWillAsk = !!bgNow && bgNow.status !== 'granted' && bgNow.canAskAgain;
+    if (fgWillAsk || bgWillAsk) {
+      const agreed = await confirmLocationDisclosure();
+      if (!agreed) return false;
+    }
+
+    const fg = fgNow.status === 'granted' ? fgNow : await Location.requestForegroundPermissionsAsync();
     if (fg.status !== 'granted') return false;
     // "Always" is what keeps it alive in the background; if the user only grants
     // While-Using, updates still flow while the app is foregrounded.
-    await Location.requestBackgroundPermissionsAsync().catch(() => {});
+    if (bgWillAsk) await Location.requestBackgroundPermissionsAsync().catch(() => {});
 
     await AsyncStorage.setItem(BOOKING_KEY, bookingId);
 

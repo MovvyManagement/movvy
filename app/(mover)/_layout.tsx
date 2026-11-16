@@ -6,6 +6,7 @@ import { useThemedColors } from '@/lib/theme';
 import { useSetMyPresence } from '@/lib/data';
 import { RoleSurfaceGuard } from '@/components/RoleSurfaceGuard';
 import { PartnerOnboardingGate } from '@/components/PartnerOnboardingGate';
+import { LocationDisclosureSheet } from '@/components/LocationDisclosureSheet';
 
 // =============================================================================
 // Driver (mover) route group — Stack on top of Tabs (mirrors the company side).
@@ -85,6 +86,7 @@ export default function MoverStack() {
       />
       <RoleSurfaceGuard surface="mover" />
       <PartnerOnboardingGate />
+      <LocationDisclosureSheet />
     </>
   );
 }
