@@ -1,25 +1,22 @@
 // =============================================================================
-// /admin-management/dashboard — launch-ready operational overview.
+// /admin-management/dashboard — operational overview.
 //
-// International-standard admin dashboard with:
-// · Revenue KPIs (today, MTD, all-time) with Movvy commission breakdown
-// · Booking funnel metrics (conversion, cancellation rate, avg booking value)
-// · Live operational counters (active moves, pending approvals, open disputes)
-// · Customer support inbox summary with SLA indicator
-// · Driver / crew network health (active partners, pending verifications)
-// · Recent bookings table with full context (last 10)
-// · Ratings & satisfaction score
-// · Revenue trend (last 7 days, day-by-day bar chart)
-// · Top cities by booking volume (last 30 days)
-// · Pending payouts & finance summary
+// Every number comes from ONE database call, admin_dashboard_stats()
+// (migration 0124). The page used to make 22 separate requests, and three of
+// them downloaded every booking row to total them here; PostgREST caps a
+// response at 1,000 rows, so past 1,000 bookings the all-time figures would
+// have silently stopped growing. The database now does the adding up, in
+// Alberta days, and the page only lays it out.
 //
-// All numbers are live Supabase queries — no hardcoded fixtures.
-// Force-dynamic so every page load reflects the latest state.
+// If that call fails the page says so instead of showing zeros. Several tiles
+// here once read 0 for months because a query broke and nothing noticed.
+//
+// Money is management-only: the function returns it null for staff, and the
+// page hides those sections as well.
 // =============================================================================
 
 import Link from 'next/link';
 import { supabaseServer } from '@/lib/supabase/server';
-import { getAdminAccess } from '@/lib/adminAccess';
 import { fmtCents, fmtRelative, fmtStatus, fmtDate } from '@/lib/format';
 
 const ACTIVE_STATUSES = [
@@ -36,480 +33,273 @@ export const dynamic = 'force-dynamic';
 
 const ALBERTA_TZ = 'America/Edmonton';
 
-/**
- * The instant Alberta's calendar day containing `d` began.
- *
- * Derived from the zone rather than assumed, so this is correct on a UTC server
- * and correct across the daylight-saving switch (when a "day" is 23 or 25 hours
- * long, which is exactly when a hardcoded -6 or -7 offset silently lies).
- */
-function albertaDayStart(d: Date): Date {
-  const [y, m, day] = new Intl.DateTimeFormat('en-CA', {
-    timeZone: ALBERTA_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(d).split('-').map(Number);
-  // Guess at UTC midnight, then correct by however far that lands from local
-  // midnight. One correction is always enough: the error is the zone offset.
-  const guess = Date.UTC(y, m - 1, day);
-  const off = zoneOffsetMs(new Date(guess));
-  return new Date(guess + off);
-}
+type BookingRef = { id: string; short_code: string };
 
-/** The instant the current Alberta calendar month began. */
-function albertaMonthStart(d: Date): Date {
-  const [y, m] = new Intl.DateTimeFormat('en-CA', {
-    timeZone: ALBERTA_TZ, year: 'numeric', month: '2-digit',
-  }).format(d).split('-').map(Number);
-  const guess = Date.UTC(y, m - 1, 1);
-  return new Date(guess + zoneOffsetMs(new Date(guess)));
-}
+type DashboardStats = {
+  access: 'management' | 'staff';
+  today: string;
+  money: null | {
+    gmv_today: number;
+    commission_today: number;
+    gmv_month: number;
+    commission_month: number;
+    gmv_all: number;
+    commission_all: number;
+    avg_booking_cents: number;
+    trend: { day: string; cents: number }[];
+  };
+  bookings_today: number;
+  booked_all: number;
+  completed_all: number;
+  cancelled_today: number;
+  cancel_rate_30d: number;
+  active_moves: number;
+  moves_today: number;
+  searching: number;
+  pending_crews: number;
+  pending_companies: number;
+  verified_crews: number;
+  verified_companies: number;
+  customers: number;
+  open_disputes: number;
+  support_threads_7d: number;
+  support_waiting: number;
+  rating_avg: number | null;
+  rating_count: number;
+  top_cities: { city: string; moves: number }[];
+  payouts_pending: number;
+  payouts_pending_cents: number | null;
+  deposits_owed: BookingRef[];
+  deposits_owed_cents: number | null;
+  stale_accepted: BookingRef[];
+  payments_live: boolean;
+  recent: {
+    id: string;
+    short_code: string | null;
+    status: string;
+    pickup_city: string | null;
+    dropoff_city: string | null;
+    scheduled_for_date: string | null;
+    created_at: string;
+    value_cents: number | null;
+    commission_cents: number | null;
+  }[];
+};
 
-/** How far Alberta is behind UTC at instant `d`, in ms (positive). */
-function zoneOffsetMs(d: Date): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: ALBERTA_TZ, hour12: false,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).formatToParts(d).reduce<Record<string, number>>((a, p) => {
-    if (p.type !== 'literal') a[p.type] = Number(p.value);
-    return a;
-  }, {});
-  const asUtc = Date.UTC(
-    parts.year, parts.month - 1, parts.day,
-    parts.hour % 24, parts.minute, parts.second,
-  );
-  return d.getTime() - asUtc;
-}
+/** "2026-11-16" → "Mon". The day is already an Alberta date, so read it as one. */
+const weekday = (isoDay: string) =>
+  new Date(`${isoDay}T12:00:00Z`).toLocaleDateString('en-CA', { weekday: 'short', timeZone: 'UTC' });
+
+const plural = (n: number, word: string, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
 
 export default async function DashboardPage() {
   const supabase = await supabaseServer();
+  const { data, error } = await supabase.rpc('admin_dashboard_stats');
 
-  // Revenue figures are management-only. Staff still see live ops, just no money.
-  const isManagement = (await getAdminAccess(supabase)) === 'management';
-
-  // ── Day boundaries, in ALBERTA time ────────────────────────────────────────
-  // These were computed with setUTCHours(0,0,0,0), i.e. midnight UTC — which is
-  // 6:00 PM Mountain the PREVIOUS day. "Bookings today", "Revenue today", the
-  // cancellation rate and every month figure therefore started counting from
-  // last evening, and the 7-day chart labelled its bars in local time while
-  // filtering them in UTC, so the labels and the data disagreed and tonight's
-  // revenue fell outside the chart entirely.
-  //
-  // Movvy operates in one province. The day that matters is the Alberta day,
-  // and it has to be derived rather than assumed, because the server this runs
-  // on is not in Alberta and the offset changes with daylight saving.
-  const now = new Date();
-  const startOfToday = albertaDayStart(now);
-  const startOfMonth = albertaMonthStart(now);
-  const startOf7Days = new Date(startOfToday.getTime() - 6 * 86_400_000);
-
-  // ── Parallel data fetch ────────────────────────────────────────────────────
-  const [
-    bookingsToday,
-    bookingsMonth,
-    bookingsAllTime,
-    pendingTeams,
-    pendingCompanies,
-    activeBookings,
-    openDisputes,
-    openSupportThreads,
-    waitingSupportCount,
-    recentBookings,
-    totalCustomers,
-    totalPartnerTeams,
-    totalCompanies,
-    ratingsData,
-    cancelledToday,
-    completedAllTime,
-    topCities,
-    payoutRequests,
-    unreadNotifications,
-  ] = await Promise.all([
-    supabase
-      .from('bookings')
-      .select('price_total_cents, movvy_margin_cents, status')
-      .gte('created_at', startOfToday.toISOString()),
-
-    supabase
-      .from('bookings')
-      .select('price_total_cents, movvy_margin_cents, status')
-      .gte('created_at', startOfMonth.toISOString()),
-
-    supabase
-      .from('bookings')
-      .select('price_total_cents, movvy_margin_cents, status, created_at'),
-
-    supabase
-      .from('partner_teams')
-      .select('id', { count: 'exact', head: true })
-      .in('onboarding_status', ['in_review', 'docs_uploaded', 'in_progress']),
-
-    supabase
-      .from('companies')
-      .select('id', { count: 'exact', head: true })
-      .in('onboarding_status', ['in_review', 'docs_uploaded', 'in_progress']),
-
-    supabase
-      .from('bookings')
-      .select('id', { count: 'exact', head: true })
-      .in('status', ACTIVE_STATUSES),
-
-    supabase
-      .from('disputes')
-      .select('id', { count: 'exact', head: true })
-      .in('status', ['open', 'in_review']),
-
-    supabase
-      .from('chat_threads')
-      .select('id', { count: 'exact', head: true })
-      .eq('kind', 'support')
-      .gte('last_message_at', new Date(Date.now() - 7 * 86_400_000).toISOString()),
-
-    supabase
-      .from('chat_messages')
-      .select('thread_id', { count: 'exact', head: true })
-      .eq('is_admin', false)
-      .gte('created_at', new Date(Date.now() - 7 * 86_400_000).toISOString()),
-
-    supabase
-      .from('bookings')
-      .select(
-        'id, short_code, status, pickup_city, dropoff_city, price_total_cents, movvy_margin_cents, scheduled_for_date, created_at',
-      )
-      .order('created_at', { ascending: false })
-      .limit(10),
-
-    supabase
-      .from('profiles')
-      .select('id', { count: 'exact', head: true })
-      .eq('role', 'customer'),
-
-    supabase
-      .from('partner_teams')
-      .select('id', { count: 'exact', head: true })
-      .eq('onboarding_status', 'verified'),
-
-    supabase
-      .from('companies')
-      .select('id', { count: 'exact', head: true })
-      .eq('onboarding_status', 'verified'),
-
-    // `ratings.score` has never existed — the columns are overall,
-    // professionalism, timeliness, carefulness, communication (0003). Selecting
-    // a phantom column makes PostgREST 400 the request, so .data was null and
-    // this tile read "— / 5 · 0 total ratings" no matter how many ratings existed.
-    supabase
-      .from('ratings')
-      .select('overall'),
-
-    supabase
-      .from('bookings')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'cancelled')
-      .gte('created_at', startOfToday.toISOString()),
-
-    supabase
-      .from('bookings')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'completed'),
-
-    supabase
-      .from('bookings')
-      .select('pickup_city')
-      .gte('created_at', new Date(Date.now() - 30 * 86_400_000).toISOString())
-      .not('pickup_city', 'is', null),
-
-    // Was driver_payouts.amount_cents — a column that doesn't exist on that
-    // table (it has gross_cents / movvy_margin_cents / net_cents), so the tile
-    // read "0 · All caught up" while crews waited. It also disagreed with the
-    // sidebar badge, which counts payout_requests. Payouts are requested and
-    // paid by hand through payout_requests now, so read the same table the badge
-    // does — one number, one source.
-    supabase
-      .from('payout_requests')
-      .select('id, amount_cents', { count: 'exact' })
-      .eq('status', 'pending'),
-
-    // `notifications.read` doesn't exist — unread is `read_at is null` (0004).
-    // .eq('read', false) 400'd, so the count was null and rendered as 0.
-    supabase
-      .from('notifications')
-      .select('id', { count: 'exact', head: true })
-      .is('read_at', null)
-      .gte('created_at', startOfToday.toISOString()),
-  ]);
-
-  // ── Aggregate revenue ──────────────────────────────────────────────────────
-  const notCancelled = (rows: any[]) => rows.filter((b) => b.status !== 'cancelled');
-
-  const revenueToday = notCancelled(bookingsToday.data ?? []).reduce(
-    (s, b) => s + (b.price_total_cents ?? 0), 0,
-  );
-  const commissionToday = notCancelled(bookingsToday.data ?? []).reduce(
-    (s, b) => s + (b.movvy_margin_cents ?? 0), 0,
-  );
-  const revenueMonth = notCancelled(bookingsMonth.data ?? []).reduce(
-    (s, b) => s + (b.price_total_cents ?? 0), 0,
-  );
-  const commissionMonth = notCancelled(bookingsMonth.data ?? []).reduce(
-    (s, b) => s + (b.movvy_margin_cents ?? 0), 0,
-  );
-  const revenueAllTime = notCancelled(bookingsAllTime.data ?? []).reduce(
-    (s, b) => s + (b.price_total_cents ?? 0), 0,
-  );
-  const commissionAllTime = notCancelled(bookingsAllTime.data ?? []).reduce(
-    (s, b) => s + (b.movvy_margin_cents ?? 0), 0,
-  );
-
-  const totalBookingsToday = (bookingsToday.data ?? []).length;
-  const cancelledTodayCount = cancelledToday.count ?? 0;
-  const cancellationRate =
-    totalBookingsToday > 0
-      ? Math.round((cancelledTodayCount / totalBookingsToday) * 100)
-      : 0;
-  const totalBookingsAllTime = (bookingsAllTime.data ?? []).length;
-  const avgBookingValue =
-    totalBookingsAllTime > 0 ? Math.round(revenueAllTime / totalBookingsAllTime) : 0;
-
-  // ── 7-day trend ────────────────────────────────────────────────────────────
-  const dayLabels: string[] = [];
-  const dayRevenue: number[] = [];
-  for (let i = 6; i >= 0; i--) {
-    // Each bucket is a real Alberta day: [local midnight, next local midnight).
-    // Compare instants, not date strings — the previous version sliced a UTC
-    // date out of the timestamp and compared it as text, which shifted every
-    // bar by six hours and dropped anything after 6 PM off the end.
-    const start = albertaDayStart(new Date(startOfToday.getTime() - i * 86_400_000));
-    const end = albertaDayStart(new Date(start.getTime() + 36 * 3_600_000));
-    dayLabels.push(
-      start.toLocaleDateString('en-CA', {
-        weekday: 'short', month: 'short', day: 'numeric', timeZone: ALBERTA_TZ,
-      }),
-    );
-    const sum = notCancelled(bookingsAllTime.data ?? [])
-      .filter((b) => {
-        const t = new Date(b.created_at).getTime();
-        return t >= start.getTime() && t < end.getTime();
-      })
-      .reduce((s, b) => s + (b.price_total_cents ?? 0), 0);
-    dayRevenue.push(sum);
-  }
-  const maxDayRevenue = Math.max(...dayRevenue, 1);
-
-  // ── Top cities ─────────────────────────────────────────────────────────────
-  const cityCounts: Record<string, number> = {};
-  (topCities.data ?? []).forEach((b: any) => {
-    if (b.pickup_city) cityCounts[b.pickup_city] = (cityCounts[b.pickup_city] ?? 0) + 1;
+  const todayLabel = new Date().toLocaleDateString('en-CA', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: ALBERTA_TZ,
   });
-  const topCitiesSorted = Object.entries(cityCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
 
-  // ── Ratings ────────────────────────────────────────────────────────────────
-  const ratings = ratingsData.data ?? [];
-  const avgRating =
-    ratings.length > 0
-      ? (ratings.reduce((s: number, r: any) => s + (r.overall ?? 0), 0) / ratings.length).toFixed(1)
-      : null;
+  if (error || !data) {
+    return (
+      <div className="px-4 py-6 sm:px-6 max-w-[1400px] mx-auto">
+        <h1 className="text-2xl font-bold text-zinc-900">Operations Dashboard</h1>
+        <p className="text-sm text-zinc-500 mt-0.5">{todayLabel}</p>
+        <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+          <div className="font-semibold">The dashboard numbers didn&apos;t load.</div>
+          <div className="mt-1 text-red-700">
+            {error?.message ?? 'No data came back.'} Refresh to try again. Nothing is wrong with
+            your bookings; only this summary failed.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  // ── Payouts ────────────────────────────────────────────────────────────────
-  const pendingPayoutsCount = payoutRequests.count ?? 0;
-  const pendingPayoutsAmount = (payoutRequests.data ?? []).reduce(
-    (s: number, p: any) => s + (p.amount_cents ?? 0), 0,
-  );
+  const d = data as DashboardStats;
+  const isManagement = d.access === 'management';
+  const money = isManagement ? d.money : null;
 
-  const pendingApprovals = (pendingTeams.count ?? 0) + (pendingCompanies.count ?? 0);
-  const totalPartners = (totalPartnerTeams.count ?? 0) + (totalCompanies.count ?? 0);
-
-  // ── Red flags: known gaps to fix before taking real payments ──────────────
-  // Each flag stays on the dashboard until its gap is fixed in code, and lists
-  // the bookings it is affecting right now. Delete a flag once its fix ships.
-  const albertaToday = new Intl.DateTimeFormat('en-CA', {
-    timeZone: ALBERTA_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(now);
-  const [expiredWithDeposit, acceptedPastDate, stripeLiveFlag] = await Promise.all([
-    // Gap 1: expire_stale_searching_bookings() (migration 0069) cancels a
-    // request nobody accepted but never refunds the deposit.
-    supabase
-      .from('bookings')
-      .select('id, short_code, deposit_cents, deposit_refunded_cents, scheduled_for_date')
-      .eq('status', 'cancelled')
-      .eq('deposit_status', 'paid')
-      .ilike('cancellation_reason', 'Expired%')
-      .order('scheduled_for_date', { ascending: false })
-      .limit(50),
-    // Gap 2: nothing closes a job a crew accepted but never started.
-    supabase
-      .from('bookings')
-      .select('id, short_code, status, scheduled_for_date')
-      .in('status', ['assigned', 'confirmed'])
-      .lt('scheduled_for_date', albertaToday)
-      .order('scheduled_for_date', { ascending: true })
-      .limit(50),
-    supabase.from('feature_flags').select('enabled').eq('key', 'stripe_live_enabled').maybeSingle(),
-  ]);
-  const unrefunded = (expiredWithDeposit.data ?? []).filter(
-    (b: any) => (b.deposit_refunded_cents ?? 0) < (b.deposit_cents ?? 0),
-  );
-  const unrefundedCents = unrefunded.reduce(
-    (sum: number, b: any) => sum + ((b.deposit_cents ?? 0) - (b.deposit_refunded_cents ?? 0)), 0,
-  );
-  const staleAccepted = acceptedPastDate.data ?? [];
-  const paymentsLive = stripeLiveFlag.data?.enabled === true;
+  const pendingApprovals = d.pending_crews + d.pending_companies;
+  const activePartners = d.verified_crews + d.verified_companies;
+  const trend = money?.trend ?? [];
+  const maxDay = Math.max(...trend.map((t) => t.cents), 1);
+  const topCityMax = d.top_cities[0]?.moves ?? 1;
 
   return (
-    <div className="px-6 py-6 max-w-[1400px] mx-auto">
+    <div className="px-4 py-6 sm:px-6 max-w-[1400px] mx-auto">
 
       {/* Page header */}
-      <div className="flex items-end justify-between mb-6">
+      <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-zinc-900">Operations Dashboard</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">
-            {new Date().toLocaleDateString('en-CA', {
-              weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-            })}
-          </p>
+          <p className="text-sm text-zinc-500 mt-0.5">{todayLabel}</p>
         </div>
         <div className="flex items-center gap-2 text-xs text-zinc-500">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
-          Real-time · auto-refreshes on change
+          Live · refreshes when something changes
         </div>
       </div>
 
       {/* ── Red flags ─────────────────────────────────────────────────────── */}
-      <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5">
-        <div className="flex items-center gap-2">
+      <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 sm:p-5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <RedFlagIcon />
           <h2 className="text-sm font-bold uppercase tracking-wider text-red-800">Red flags</h2>
           <span className="text-xs text-red-700">· fix before taking real payments</span>
         </div>
         <p className="mt-1 text-xs text-red-700">
-          {paymentsLive
+          {d.payments_live
             ? 'Payments are LIVE, so real customers are affected by these.'
             : 'Payments are in Stripe test mode, so no real money is affected yet.'}
         </p>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <RedFlag
             title="Unrefunded deposits"
-            body="When the hourly job closes a request nobody accepted before the move date, the customer's 20% deposit is not refunded. That's fine in test mode, but it needs fixing before live Stripe."
-            affected={unrefunded}
+            body="When the hourly job closes a request nobody accepted, the customer's deposit is not refunded automatically. Each one waits in Refunds, one click per move, back to the card they paid with."
+            affected={d.deposits_owed}
             affectedNote={
-              unrefunded.length > 0 && isManagement ? `${fmtCents(unrefundedCents)} in deposits not refunded` : undefined
+              d.deposits_owed.length > 0 && d.deposits_owed_cents != null
+                ? `${fmtCents(d.deposits_owed_cents)} in deposits still held`
+                : d.deposits_owed.length > 0
+                ? 'Cancelled moves still holding a deposit'
+                : undefined
             }
-            action={unrefunded.length > 0 ? { label: 'Refunds', href: '/admin-management/refunds' } : undefined}
+            action={
+              d.deposits_owed.length > 0 && isManagement
+                ? { label: 'Refund them', href: '/admin-management/refunds' }
+                : undefined
+            }
           />
           <RedFlag
             title="Accepted jobs never close"
-            body="A job a crew accepted but never started is not closed automatically when its date passes. It stays open in the crew's Scheduled list and the customer's app until someone cancels it."
-            affected={staleAccepted}
-            affectedNote={staleAccepted.length > 0 ? 'Past their move date and still open' : undefined}
+            body="A job a crew accepted but never started is not closed automatically when its date passes. It stays open in the crew's Scheduled list and the customer's app until someone cancels it from the move page."
+            affected={d.stale_accepted}
+            affectedNote={d.stale_accepted.length > 0 ? 'Past their move date and still open' : undefined}
           />
         </div>
       </div>
 
       {/* Alert banner */}
-      {((openDisputes.count ?? 0) > 0 || (waitingSupportCount.count ?? 0) > 0) && (
-        <div className="mb-6 rounded-2xl bg-amber-50 border border-amber-200 px-5 py-3 flex items-center gap-4">
+      {(d.open_disputes > 0 || d.support_waiting > 0) && (
+        <div className="mb-6 rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3 sm:px-5 flex flex-wrap items-center gap-x-4 gap-y-2">
           <svg className="text-amber-600 shrink-0" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
             <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
-          <div className="text-sm text-amber-800 flex-1">
-            {(openDisputes.count ?? 0) > 0 && (
-              <span className="font-semibold">{openDisputes.count} open dispute{(openDisputes.count ?? 0) !== 1 ? 's' : ''} · </span>
-            )}
-            {(waitingSupportCount.count ?? 0) > 0 && (
-              <span className="font-semibold">{waitingSupportCount.count} support message{(waitingSupportCount.count ?? 0) !== 1 ? 's' : ''} waiting for reply</span>
-            )}
+          <div className="text-sm text-amber-800 flex-1 font-semibold">
+            {[
+              d.open_disputes > 0 ? `${plural(d.open_disputes, 'open dispute')}` : null,
+              d.support_waiting > 0 ? `${plural(d.support_waiting, 'support chat')} waiting for a reply` : null,
+            ].filter(Boolean).join(' · ')}
           </div>
-          <Link href="/admin-management/support" className="text-xs font-semibold text-amber-700 hover:text-amber-900 underline underline-offset-2 whitespace-nowrap">
+          <Link
+            href={d.support_waiting > 0 ? '/admin-management/support' : '/admin-management/disputes'}
+            className="text-xs font-semibold text-amber-700 hover:text-amber-900 underline underline-offset-2 whitespace-nowrap"
+          >
             View now →
           </Link>
         </div>
       )}
 
       {/* ── Revenue KPIs (management only) ─────────────────────────────────── */}
-      {isManagement ? (
+      {money ? (
         <>
-          <SectionHeader title="Revenue" />
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            <KpiCard label="GMV Today" value={fmtCents(revenueToday)} sub={`${totalBookingsToday} booking${totalBookingsToday !== 1 ? 's' : ''}`} accent />
+          <SectionHeader title="Revenue" action={{ label: 'Revenue details', href: '/admin-management/revenue' }} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+            <KpiCard label="Booked Today" value={fmtCents(money.gmv_today)} sub={plural(d.bookings_today, 'booking')} accent />
             <KpiCard
               label="Commission Today"
-              value={fmtCents(commissionToday)}
-              sub={revenueToday > 0 ? `${Math.round((commissionToday / revenueToday) * 100)}% take rate` : 'No bookings yet'}
+              value={fmtCents(money.commission_today)}
+              sub={money.gmv_today > 0 ? `${Math.round((money.commission_today / money.gmv_today) * 100)}% take rate` : 'No bookings yet today'}
             />
-            <KpiCard label="MTD Revenue" value={fmtCents(revenueMonth)} sub={`${fmtCents(commissionMonth)} commission MTD`} />
-            <KpiCard label="All-Time GMV" value={fmtCents(revenueAllTime)} sub={`${totalBookingsAllTime} total bookings`} />
+            <KpiCard label="This Month" value={fmtCents(money.gmv_month)} sub={`${fmtCents(money.commission_month)} commission`} />
+            <KpiCard label="All-Time Booked" value={fmtCents(money.gmv_all)} sub={plural(d.booked_all, 'booking')} />
             <KpiCard
               label="All-Time Commission"
-              value={fmtCents(commissionAllTime)}
-              sub={revenueAllTime > 0 ? `${Math.round((commissionAllTime / revenueAllTime) * 100)}% blended take rate` : '—'}
+              value={fmtCents(money.commission_all)}
+              sub={money.gmv_all > 0 ? `${Math.round((money.commission_all / money.gmv_all) * 100)}% blended take rate` : '—'}
             />
             <KpiCard
               label="Avg Booking Value"
-              value={fmtCents(avgBookingValue)}
-              sub={`${cancellationRate}% cancellation rate today`}
-              tone={cancellationRate > 20 ? 'warning' : 'default'}
+              value={fmtCents(money.avg_booking_cents)}
+              sub={`${d.cancel_rate_30d}% of bookings cancelled (30 days)`}
+              tone={d.cancel_rate_30d > 20 ? 'warning' : 'default'}
             />
           </div>
+          <p className="-mt-4 mb-6 text-xs text-zinc-400">
+            Booked value counts paid bookings only, not abandoned checkouts or cancellations.
+            Finished moves count at what they actually billed.
+          </p>
         </>
       ) : null}
 
       {/* ── Live Operations ────────────────────────────────────────────── */}
       <SectionHeader title="Live Operations" />
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <ActionCard
           label="Active Moves"
-          count={activeBookings.count ?? 0}
-          description="Moves currently in progress"
+          count={d.active_moves}
+          description="Crew assigned or on the job"
           href="/admin-management/moves?tab=active"
-          tone="success"
+          tone={d.active_moves > 0 ? 'success' : 'neutral'}
           icon="truck"
+        />
+        <ActionCard
+          label="Moves Today"
+          count={d.moves_today}
+          description={d.searching > 0 ? `${d.searching} still looking for a crew` : 'Scheduled for today'}
+          href="/admin-management/moves?tab=today"
+          tone={d.searching > 0 ? 'warning' : d.moves_today > 0 ? 'success' : 'neutral'}
+          icon="calendar"
         />
         <ActionCard
           label="Pending Approvals"
           count={pendingApprovals}
-          description={`${pendingTeams.count ?? 0} crews · ${pendingCompanies.count ?? 0} companies`}
+          description={`${plural(d.pending_crews, 'crew')} · ${plural(d.pending_companies, 'company', 'companies')}`}
           href="/admin-management/approvals"
           tone={pendingApprovals > 0 ? 'warning' : 'neutral'}
           icon="check"
         />
         <ActionCard
-          label="Support Threads"
-          count={openSupportThreads.count ?? 0}
-          description={`${waitingSupportCount.count ?? 0} waiting for reply`}
+          label="Support Waiting"
+          count={d.support_waiting}
+          description={`${plural(d.support_threads_7d, 'chat')} active this week`}
           href="/admin-management/support"
-          tone={(waitingSupportCount.count ?? 0) > 0 ? 'warning' : 'neutral'}
+          tone={d.support_waiting > 0 ? 'warning' : 'neutral'}
           icon="chat"
         />
         <ActionCard
           label="Open Disputes"
-          count={openDisputes.count ?? 0}
-          description="Requiring admin resolution"
-          href="/admin-management/support"
-          tone={(openDisputes.count ?? 0) > 0 ? 'danger' : 'neutral'}
+          count={d.open_disputes}
+          description="Need an admin decision"
+          href="/admin-management/disputes"
+          tone={d.open_disputes > 0 ? 'danger' : 'neutral'}
           icon="alert"
         />
       </div>
 
       {/* ── 7-day Revenue Trend (management only) ───────────────────────── */}
-      {isManagement ? (
+      {money ? (
         <>
-          <SectionHeader title="7-Day Revenue Trend" />
-          <div className="bg-white border border-zinc-200 rounded-2xl p-5 mb-6">
-            <div className="flex items-end gap-2 h-28">
-              {dayRevenue.map((rev, i) => {
-                const pct = (rev / maxDayRevenue) * 100;
-                const isToday = i === 6;
+          <SectionHeader title="Booked, Last 7 Days" />
+          <div className="bg-white border border-zinc-200 rounded-2xl p-4 sm:p-5 mb-6">
+            <div className="flex items-end gap-1.5 sm:gap-2 h-28">
+              {trend.map((t, i) => {
+                const pct = (t.cents / maxDay) * 100;
+                const isToday = i === trend.length - 1;
                 return (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-0">
-                    <div className="text-xs text-zinc-400 font-medium truncate w-full text-center">{fmtCents(rev)}</div>
+                  <div key={t.day} className="flex-1 flex flex-col items-center gap-1 min-w-0 h-full justify-end">
+                    <div className="text-[10px] sm:text-xs text-zinc-400 font-medium truncate w-full text-center">
+                      {t.cents > 0 ? fmtCents(t.cents) : ''}
+                    </div>
                     <div
                       className={`w-full rounded-t-lg ${isToday ? 'bg-emerald-500' : 'bg-emerald-200'}`}
                       style={{ height: `${Math.max(pct, 3)}%`, minHeight: '4px' }}
+                      title={`${fmtDate(t.day)}: ${fmtCents(t.cents)}`}
                     />
-                    <div className="text-xs text-zinc-500 text-center leading-tight whitespace-nowrap overflow-hidden text-ellipsis w-full">
-                      {dayLabels[i].split(',')[0]}
+                    <div className="text-xs text-zinc-500 text-center leading-tight w-full truncate">
+                      {isToday ? 'Today' : weekday(t.day)}
                     </div>
                   </div>
                 );
@@ -521,65 +311,73 @@ export default async function DashboardPage() {
 
       {/* ── Network Health ───────────────────────────────────────────────── */}
       <SectionHeader title="Network Health" />
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <StatCard label="Total Customers" value={String(totalCustomers.count ?? 0)} hint="Registered users" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <StatCard label="Customers" value={String(d.customers)} hint="Registered accounts" />
         <StatCard
           label="Active Partners"
-          value={String(totalPartners)}
-          hint={`${totalPartnerTeams.count ?? 0} crews · ${totalCompanies.count ?? 0} companies`}
+          value={String(activePartners)}
+          hint={`${plural(d.verified_crews, 'crew')} · ${plural(d.verified_companies, 'company', 'companies')}`}
         />
         <StatCard
           label="Avg Rating"
-          value={avgRating ? `${avgRating} / 5` : '—'}
-          hint={`${ratings.length} total rating${ratings.length !== 1 ? 's' : ''}`}
+          value={d.rating_avg != null ? `${Number(d.rating_avg).toFixed(1)} / 5` : '—'}
+          hint={plural(d.rating_count, 'rating')}
         />
-        <StatCard
-          label="Completed Moves"
-          value={String(completedAllTime.count ?? 0)}
-          hint="All-time completed bookings"
-        />
+        <StatCard label="Completed Moves" value={String(d.completed_all)} hint="All time" />
       </div>
 
       {/* ── Finance & Payouts ────────────────────────────────────────────── */}
       <SectionHeader title="Finance & Payouts" />
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <StatCard
           label="Pending Payouts"
-          value={String(pendingPayoutsCount)}
-          hint={pendingPayoutsCount > 0 ? `${fmtCents(pendingPayoutsAmount)} to release` : 'All caught up'}
-          tone={pendingPayoutsCount > 5 ? 'warning' : 'default'}
+          value={String(d.payouts_pending)}
+          hint={
+            d.payouts_pending === 0
+              ? 'All caught up'
+              : d.payouts_pending_cents != null
+              ? `${fmtCents(d.payouts_pending_cents)} to release`
+              : 'Crews waiting to be paid'
+          }
+          tone={d.payouts_pending > 5 ? 'warning' : 'default'}
+          href={isManagement ? '/admin-management/payouts' : undefined}
+        />
+        <StatCard
+          label="Refunds Owed"
+          value={String(d.deposits_owed.length)}
+          hint={
+            d.deposits_owed.length === 0
+              ? 'Nothing held'
+              : d.deposits_owed_cents != null
+              ? `${fmtCents(d.deposits_owed_cents)} to send back`
+              : 'Deposits on cancelled moves'
+          }
+          tone={d.deposits_owed.length > 0 ? 'warning' : 'default'}
+          href={isManagement ? '/admin-management/refunds' : undefined}
         />
         <StatCard
           label="Cancelled Today"
-          value={String(cancelledTodayCount)}
-          hint={`${cancellationRate}% of today's bookings`}
-          tone={cancellationRate > 25 ? 'warning' : 'default'}
-        />
-        <StatCard
-          label="Unread Notifications"
-          value={String(unreadNotifications.count ?? 0)}
-          hint="System notifications today"
+          value={String(d.cancelled_today)}
+          hint={`${d.cancel_rate_30d}% of bookings in the last 30 days`}
+          tone={d.cancel_rate_30d > 25 ? 'warning' : 'default'}
         />
       </div>
 
       {/* ── Top Cities ───────────────────────────────────────────────────── */}
-      {topCitiesSorted.length > 0 && (
+      {d.top_cities.length > 0 && (
         <>
           <SectionHeader title="Top Cities · Last 30 Days" />
           <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden mb-6">
-            {topCitiesSorted.map(([city, count], i) => {
-              const pct = Math.round((count / (topCitiesSorted[0]?.[1] ?? 1)) * 100);
-              return (
-                <div key={city} className="flex items-center gap-4 px-5 py-3 border-b border-zinc-100 last:border-b-0">
-                  <div className="w-5 text-sm font-bold text-zinc-400">{i + 1}</div>
-                  <div className="w-32 text-sm font-semibold text-zinc-900 truncate">{city}</div>
-                  <div className="flex-1 bg-zinc-100 rounded-full h-2 overflow-hidden">
-                    <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pct}%` }} />
-                  </div>
-                  <div className="w-20 text-right text-sm font-semibold text-zinc-600">{count} move{count !== 1 ? 's' : ''}</div>
+            {d.top_cities.map(({ city, moves }, i) => (
+              <div key={city} className="flex items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3 border-b border-zinc-100 last:border-b-0">
+                <div className="w-5 text-sm font-bold text-zinc-400">{i + 1}</div>
+                <div className="w-24 sm:w-32 text-sm font-semibold text-zinc-900 truncate">{city}</div>
+                <div className="flex-1 bg-zinc-100 rounded-full h-2 overflow-hidden">
+                  <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.round((moves / topCityMax) * 100)}%` }} />
                 </div>
-              );
-            })}
+                <div className="w-20 text-right text-sm font-semibold text-zinc-600">{plural(moves, 'move')}</div>
+              </div>
+            ))}
           </div>
         </>
       )}
@@ -587,7 +385,7 @@ export default async function DashboardPage() {
       {/* ── Recent Bookings ────────────────────────────────────────────── */}
       <SectionHeader title="Recent Bookings" action={{ label: 'View all moves', href: '/admin-management/moves' }} />
       <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden mb-6">
-        {(recentBookings.data ?? []).length === 0 ? (
+        {d.recent.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-zinc-500">No bookings yet.</div>
         ) : (
           <div className="overflow-x-auto">
@@ -598,12 +396,8 @@ export default async function DashboardPage() {
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">Route</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">Date</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">Status</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">GMV</th>
-                  {/* Commission is Movvy's cut — management only. This table sits
-                      AFTER the isManagement block closes, so the column used to
-                      render for staff-tier employees too, on the one screen they
-                      can reach. /revenue redirects them away; this showed them
-                      the same figures per booking. */}
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Value</th>
+                  {/* Commission is Movvy's cut — management only. */}
                   {isManagement ? (
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">Commission</th>
                   ) : null}
@@ -611,23 +405,23 @@ export default async function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {(recentBookings.data ?? []).map((b: any) => (
+                {d.recent.map((b) => (
                   <tr key={b.id} className="border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 transition-colors">
                     <td className="px-4 py-3">
-                      <Link href="/admin-management/moves" className="font-mono text-xs font-bold text-emerald-700 hover:underline">
+                      <Link href={`/admin-management/moves/${b.id}`} className="font-mono text-xs font-bold text-emerald-700 hover:underline">
                         {b.short_code ?? b.id.slice(0, 8).toUpperCase()}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-zinc-700">
+                    <td className="px-4 py-3 text-zinc-700 whitespace-nowrap">
                       <span className="font-medium">{b.pickup_city ?? '—'}</span>
                       <span className="text-zinc-400 mx-1">→</span>
                       <span className="font-medium">{b.dropoff_city ?? '—'}</span>
                     </td>
                     <td className="px-4 py-3 text-zinc-600 whitespace-nowrap">{fmtDate(b.scheduled_for_date)}</td>
                     <td className="px-4 py-3"><StatusBadge status={b.status} /></td>
-                    <td className="px-4 py-3 text-right font-semibold text-zinc-900">{fmtCents(b.price_total_cents)}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-zinc-900">{fmtCents(b.value_cents)}</td>
                     {isManagement ? (
-                      <td className="px-4 py-3 text-right font-semibold text-emerald-700">{fmtCents(b.movvy_margin_cents)}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-emerald-700">{fmtCents(b.commission_cents)}</td>
                     ) : null}
                     <td className="px-4 py-3 text-right text-zinc-400 whitespace-nowrap text-xs">{fmtRelative(b.created_at)}</td>
                   </tr>
@@ -758,18 +552,27 @@ function StatCard({
   value,
   hint,
   tone = 'default',
+  href,
 }: {
   label: string;
   value: string;
   hint?: string;
   tone?: 'default' | 'warning';
+  href?: string;
 }) {
-  return (
-    <div className="rounded-2xl bg-white border border-zinc-200 p-5">
+  const body = (
+    <>
       <div className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{label}</div>
       <div className={`text-2xl font-bold mt-2 ${tone === 'warning' ? 'text-amber-700' : 'text-zinc-900'}`}>{value}</div>
       {hint && <div className={`text-xs mt-1 ${tone === 'warning' ? 'text-amber-600' : 'text-zinc-500'}`}>{hint}</div>}
-    </div>
+    </>
+  );
+  return href ? (
+    <Link href={href} className="block rounded-2xl bg-white border border-zinc-200 p-5 hover:border-zinc-300 hover:shadow-sm transition-all">
+      {body}
+    </Link>
+  ) : (
+    <div className="rounded-2xl bg-white border border-zinc-200 p-5">{body}</div>
   );
 }
 
@@ -786,7 +589,7 @@ function ActionCard({
   tone: 'success' | 'warning' | 'danger' | 'neutral';
   href: string;
   description: string;
-  icon: 'truck' | 'check' | 'chat' | 'alert';
+  icon: 'truck' | 'check' | 'chat' | 'alert' | 'calendar';
 }) {
   const badgeClasses = {
     success: 'bg-emerald-600 text-white',
@@ -804,6 +607,11 @@ function ActionCard({
     ) : icon === 'check' ? (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="10" />
+      </svg>
+    ) : icon === 'calendar' ? (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
       </svg>
     ) : icon === 'chat' ? (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

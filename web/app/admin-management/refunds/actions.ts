@@ -7,7 +7,8 @@ import { getAdminAccess } from '@/lib/adminAccess';
 export type RefundState = { ok?: string; error?: string };
 
 /**
- * Issue the deposit surplus back to a customer's card.
+ * Send money Movvy is holding back to the customer's card: the deposit on a
+ * cancelled move, or the part of a deposit a finished move didn't use.
  *
  * The amount is NOT taken from the form. It is re-derived from
  * admin_refunds_owed() at the moment of clicking, so a stale page — one opened
@@ -29,15 +30,18 @@ export async function issueOwedRefund(
     return { error: 'Issuing a refund is management-only.' };
   }
 
-  const { data: owed, error: owedErr } = await supabase.rpc('admin_refunds_owed');
+  const { data: owed, error: owedErr } = await supabase.rpc('admin_refunds_owed', {
+    p_booking_id: bookingId,
+  });
   if (owedErr) return { error: 'Could not confirm what is owed. Try again.' };
 
-  const row = (owed ?? []).find((r: any) => r.booking_id === bookingId);
+  const row = (owed ?? [])[0] as any;
   if (!row) {
     // Already refunded, or the bill changed underneath. Either way this is not
     // an error the admin caused — tell them what happened and refresh.
     revalidatePath('/admin-management/refunds');
-    return { ok: 'Nothing is owed on that move any more — the list has been refreshed.' };
+    revalidatePath(`/admin-management/moves/${bookingId}`);
+    return { ok: 'Nothing is owed on that move any more. The list has been refreshed.' };
   }
 
   const amountCents = Number(row.owed_cents ?? 0);
@@ -50,7 +54,11 @@ export async function issueOwedRefund(
     body: {
       booking_id: bookingId,
       amount_cents: amountCents,
-      reason: `Deposit exceeded the final bill on ${row.short_code}`,
+      source: 'deposit',
+      reason:
+        row.kind === 'cancelled'
+          ? `Deposit returned: ${row.short_code} was cancelled`
+          : `Deposit exceeded the final bill on ${row.short_code}`,
     },
   });
   if (error || (data as any)?.error) {
@@ -59,6 +67,7 @@ export async function issueOwedRefund(
 
   revalidatePath('/admin-management/refunds');
   revalidatePath(`/admin-management/moves/${bookingId}`);
+  revalidatePath('/admin-management/dashboard');
   const dollars = (((data as any)?.refunded_cents ?? amountCents) / 100).toFixed(2);
   return { ok: `$${dollars} refunded to ${row.customer_name ?? 'the customer'}.` };
 }

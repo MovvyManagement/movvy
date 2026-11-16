@@ -12,6 +12,7 @@ import { supabaseServer } from '@/lib/supabase/server';
 import { getAdminAccess } from '@/lib/adminAccess';
 import { fmtCents, fmtStatus, fmtDate } from '@/lib/format';
 import { MoveActions } from './MoveActions';
+import { RefundButton } from '../../refunds/RefundButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,6 +50,15 @@ export default async function MoveDetailPage({ params }: { params: Promise<{ id:
     ...(companies ?? []).map((c: any) => ({ value: `company:${c.id}`, label: `${c.display_name} (company)` })),
   ];
   const isTerminal = TERMINAL.includes(b.status);
+
+  // A cancelled (or under-billed) move whose deposit Movvy still holds. Same
+  // source as the Refunds page, so the button here and the one there always
+  // agree on whether, and how much, is owed.
+  const owed = isManagement && isTerminal
+    ? (((await supabase.rpc('admin_refunds_owed', { p_booking_id: b.id })).data ?? [])[0] as
+        | { owed_cents: number; kind: 'cancelled' | 'overpaid'; customer_name: string | null; deposit_payment_intent_id: string | null }
+        | undefined)
+    : undefined;
   // Reassignment closes the moment a crew presses "I've left HQ". Mirrors the
   // guard in admin-reassign-booking — the button shouldn't offer something the
   // server will refuse.
@@ -99,7 +109,39 @@ export default async function MoveDetailPage({ params }: { params: Promise<{ id:
       ) : null}
 
       <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 mb-2">Actions</h2>
-      <MoveActions bookingId={b.id} crewOptions={crewOptions} canCancel={isManagement} isTerminal={isTerminal} canReassign={canReassign} />
+      {owed ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-amber-900">
+                {owed.kind === 'cancelled' ? 'Deposit still held' : 'Billed under the deposit'}
+              </div>
+              <p className="mt-1 text-sm text-amber-800">
+                {owed.kind === 'cancelled'
+                  ? 'This move was cancelled but the customer\u2019s deposit was never refunded.'
+                  : 'The final bill came in under the deposit, so part of it belongs to the customer.'}{' '}
+                The refund goes back to the card they paid with.
+              </p>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="text-xl font-bold text-amber-900">{fmtCents(owed.owed_cents)}</div>
+              <div className="mb-2 text-xs text-amber-700">owed back</div>
+              {owed.deposit_payment_intent_id ? (
+                <RefundButton
+                  bookingId={b.id}
+                  amount={fmtCents(owed.owed_cents)}
+                  shortCode={b.short_code ?? 'this move'}
+                  customer={owed.customer_name ?? 'the customer'}
+                />
+              ) : (
+                <p className="text-xs text-red-700">No card payment on file. Settle it manually.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <MoveActions bookingId={b.id} crewOptions={crewOptions} canCancel={isManagement} isTerminal={isTerminal} canReassign={canReassign} />
+      )}
     </div>
   );
 }

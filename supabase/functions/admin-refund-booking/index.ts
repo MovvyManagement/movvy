@@ -4,7 +4,8 @@
 // Management-only STANDALONE refund for a booking (does NOT cancel the move).
 //
 // Contract:
-//   POST { booking_id: string (uuid), amount_cents: int > 0, reason?: string }
+//   POST { booking_id: string (uuid), amount_cents: int > 0, reason?: string,
+//          source?: 'deposit' }
 //   -> 200 { ok: true, refunded_cents, refundable_remaining_cents, refund_id }
 //   -> 4xx { error: string }
 //
@@ -41,6 +42,11 @@ const Body = z.object({
   booking_id: z.string().uuid(),
   amount_cents: z.number().int().positive(),
   reason: z.string().trim().max(500).optional(),
+  // 'deposit' refunds the deposit payment specifically. The Refunds queue
+  // always sends it: what it lists is money held from a deposit, and only a
+  // refund ON the deposit payment updates deposit_refunded_cents (through the
+  // webhook), which is what takes the move off the list.
+  source: z.enum(['deposit']).optional(),
 });
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -118,11 +124,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!booking) return json({ error: 'Booking not found.' }, 404);
 
   // Refund the FINAL payment when there is one, otherwise the deposit. A move
-  // that was cancelled before completion has only ever taken a deposit.
+  // that was cancelled before completion has only ever taken a deposit. The
+  // Refunds queue asks for the deposit explicitly.
   const piId: string | null =
-    (booking as any).stripe_payment_intent_id ??
-    (booking as any).stripe_deposit_payment_intent_id ??
-    null;
+    input.source === 'deposit'
+      ? (booking as any).stripe_deposit_payment_intent_id ?? null
+      : (booking as any).stripe_payment_intent_id ??
+        (booking as any).stripe_deposit_payment_intent_id ??
+        null;
   if (!piId) return json({ error: 'No payment on file to refund.' }, 409);
 
   // --- Ask Stripe what is still refundable -----------------------------------

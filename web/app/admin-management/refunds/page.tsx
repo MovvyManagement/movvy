@@ -1,26 +1,26 @@
 // =============================================================================
-// /admin-management/refunds — money Movvy owes back.
+// /admin-management/refunds — money Movvy is holding that belongs to customers.
 //
-// A deposit is 20% of the ESTIMATE; the bill is the ACTUAL time. A crew that
-// beats the estimate badly enough leaves the customer in credit, and until this
-// existed nothing surfaced it: the receipt clamped the deposit line so the
-// arithmetic still balanced, the final-charge path saw a zero balance and
-// marked the move captured, and the difference stayed with Movvy.
+// Two ways a customer ends up owed:
+//   • CANCELLED with the deposit still held. The hourly expiry job cancels a
+//     request nobody accepted without refunding it, and a cancellation whose
+//     Stripe refund call failed leaves the deposit 'paid' on purpose so a
+//     person follows up. Deposits kept under the 48-hour rule are 'forfeited'
+//     and never appear here.
+//   • FINISHED under the deposit. A deposit is 20% of the estimate and the bill
+//     is the actual time, so a move finished far faster than estimated (or a
+//     crew tapping Finish early) leaves the customer in credit. Rare.
 //
-// Refunds are issued HERE by hand rather than automatically at completion.
-// Completion is the moment a bill is most likely to be wrong — a crew taps
-// Finish early, skips a status, or backdates a step — and money that has
+// Refunds are issued HERE by hand rather than automatically: money that has
 // already left is far harder to walk back than money still in a list.
 //
 // The list is derived, not a table of flags: a move is here exactly while
-// deposit + credit exceeds the bill, and it disappears the moment
-// deposit_refunded_cents covers the difference. Nothing to tick off, nothing to
-// forget to clear.
+// Movvy holds more of its deposit than it earned, and it disappears the moment
+// the Stripe webhook records the refund. Nothing to tick off.
 //
 // MANAGEMENT ONLY. Rows carry payment intent ids and customer contact details,
-// and issuing moves real money. The RLS policy on bookings admits the staff
-// tier, so this check is the control — admin_refunds_owed() gates on
-// is_full_admin() independently.
+// and issuing moves real money. admin_refunds_owed() also checks
+// movvy_admin_access() on its own.
 // =============================================================================
 
 import Link from 'next/link';
@@ -35,7 +35,9 @@ export const dynamic = 'force-dynamic';
 type Owed = {
   booking_id: string;
   short_code: string | null;
-  completed_at: string | null;
+  kind: 'cancelled' | 'overpaid';
+  happened_at: string | null;
+  cancellation_reason: string | null;
   customer_name: string | null;
   customer_email: string | null;
   estimate_cents: number | null;
@@ -57,15 +59,27 @@ export default async function RefundsPage() {
   const { data, error } = await supabase.rpc('admin_refunds_owed');
   const rows = (data ?? []) as Owed[];
   const total = rows.reduce((s, r) => s + Number(r.owed_cents ?? 0), 0);
+  const { data: liveFlag } = await supabase
+    .from('feature_flags')
+    .select('enabled')
+    .eq('key', 'stripe_live_enabled')
+    .maybeSingle();
+  const testMode = liveFlag?.enabled !== true;
 
   return (
-    <div className="px-6 py-6">
+    <div className="px-4 py-6 sm:px-6">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-zinc-900">Refunds</h1>
-          <p className="mt-0.5 text-sm text-zinc-500">
-            Moves that finished under their estimate, so the deposit covered more than the bill.
+          <h1 className="text-2xl font-bold text-zinc-900">Refunds owed</h1>
+          <p className="mt-0.5 max-w-2xl text-sm text-zinc-500">
+            Deposits Movvy is still holding that belong to customers. Each refund goes back to the
+            card the customer paid with, and the move leaves this list once Stripe confirms it.
           </p>
+          {testMode ? (
+            <p className="mt-1 text-xs font-semibold text-zinc-500">
+              Stripe is in test mode, so these refunds move test money only.
+            </p>
+          ) : null}
         </div>
         {rows.length > 0 ? (
           <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-2">
@@ -85,7 +99,8 @@ export default async function RefundsPage() {
         <div className="rounded-2xl border border-zinc-200 bg-white px-5 py-10 text-center">
           <p className="text-sm font-semibold text-zinc-900">Nothing owed</p>
           <p className="mt-1 text-sm text-zinc-500">
-            Every completed move has been billed at or above its deposit.
+            Every cancelled move&apos;s deposit has been refunded or kept under the 48-hour rule,
+            and every finished move was billed at or above its deposit.
           </p>
         </div>
       ) : (
@@ -103,6 +118,13 @@ export default async function RefundsPage() {
                       >
                         {r.short_code ?? 'Move'}
                       </Link>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          r.kind === 'cancelled' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'
+                        }`}
+                      >
+                        {r.kind === 'cancelled' ? 'Cancelled, deposit held' : 'Billed under the deposit'}
+                      </span>
                       {partial ? (
                         <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-600">
                           {fmtCents(r.deposit_refunded_cents)} already refunded
@@ -112,7 +134,7 @@ export default async function RefundsPage() {
                           uncharged — the deposit covered everything, so the
                           final charge never ran. Say so, or it reads as a
                           missing payment. */}
-                      {r.payment_status === 'uncharged' ? (
+                      {r.kind === 'overpaid' && r.payment_status === 'uncharged' ? (
                         <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-600">
                           No final charge — deposit covered it
                         </span>
@@ -121,15 +143,20 @@ export default async function RefundsPage() {
                     <div className="mt-0.5 text-xs text-zinc-500">
                       {r.customer_name ?? 'Customer'}
                       {r.customer_email ? ` · ${r.customer_email}` : ''}
-                      {r.completed_at
-                        ? ` · finished ${fmtRelative(r.completed_at)} (${fmtDateTime(r.completed_at)})`
+                      {r.happened_at
+                        ? ` · ${r.kind === 'cancelled' ? 'cancelled' : 'finished'} ${fmtRelative(r.happened_at)} (${fmtDateTime(r.happened_at)})`
                         : ''}
                     </div>
+                    {r.kind === 'cancelled' && r.cancellation_reason ? (
+                      <div className="mt-1 text-xs text-zinc-600">{r.cancellation_reason}</div>
+                    ) : null}
 
                     <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs">
                       <Fig label="Estimate" value={fmtCents(r.estimate_cents ?? 0)} />
-                      <Fig label="Actual bill" value={fmtCents(r.actual_total_cents ?? 0)} strong />
-                      <Fig label="Deposit paid" value={fmtCents(r.deposit_cents ?? 0)} />
+                      {r.kind === 'overpaid' ? (
+                        <Fig label="Actual bill" value={fmtCents(r.actual_total_cents ?? 0)} strong />
+                      ) : null}
+                      <Fig label="Deposit paid" value={fmtCents(r.deposit_cents ?? 0)} strong={r.kind === 'cancelled'} />
                       {r.credit_applied_cents > 0 ? (
                         <Fig label="Credit applied" value={fmtCents(r.credit_applied_cents)} />
                       ) : null}
