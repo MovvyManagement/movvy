@@ -320,6 +320,42 @@ export default async function DashboardPage() {
   const pendingApprovals = (pendingTeams.count ?? 0) + (pendingCompanies.count ?? 0);
   const totalPartners = (totalPartnerTeams.count ?? 0) + (totalCompanies.count ?? 0);
 
+  // ── Red flags: known gaps to fix before taking real payments ──────────────
+  // Each flag stays on the dashboard until its gap is fixed in code, and lists
+  // the bookings it is affecting right now. Delete a flag once its fix ships.
+  const albertaToday = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ALBERTA_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(now);
+  const [expiredWithDeposit, acceptedPastDate, stripeLiveFlag] = await Promise.all([
+    // Gap 1: expire_stale_searching_bookings() (migration 0069) cancels a
+    // request nobody accepted but never refunds the deposit.
+    supabase
+      .from('bookings')
+      .select('id, short_code, deposit_cents, deposit_refunded_cents, scheduled_for_date')
+      .eq('status', 'cancelled')
+      .eq('deposit_status', 'paid')
+      .ilike('cancellation_reason', 'Expired%')
+      .order('scheduled_for_date', { ascending: false })
+      .limit(50),
+    // Gap 2: nothing closes a job a crew accepted but never started.
+    supabase
+      .from('bookings')
+      .select('id, short_code, status, scheduled_for_date')
+      .in('status', ['assigned', 'confirmed'])
+      .lt('scheduled_for_date', albertaToday)
+      .order('scheduled_for_date', { ascending: true })
+      .limit(50),
+    supabase.from('feature_flags').select('enabled').eq('key', 'stripe_live_enabled').maybeSingle(),
+  ]);
+  const unrefunded = (expiredWithDeposit.data ?? []).filter(
+    (b: any) => (b.deposit_refunded_cents ?? 0) < (b.deposit_cents ?? 0),
+  );
+  const unrefundedCents = unrefunded.reduce(
+    (sum: number, b: any) => sum + ((b.deposit_cents ?? 0) - (b.deposit_refunded_cents ?? 0)), 0,
+  );
+  const staleAccepted = acceptedPastDate.data ?? [];
+  const paymentsLive = stripeLiveFlag.data?.enabled === true;
+
   return (
     <div className="px-6 py-6 max-w-[1400px] mx-auto">
 
@@ -336,6 +372,37 @@ export default async function DashboardPage() {
         <div className="flex items-center gap-2 text-xs text-zinc-500">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
           Real-time · auto-refreshes on change
+        </div>
+      </div>
+
+      {/* ── Red flags ─────────────────────────────────────────────────────── */}
+      <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5">
+        <div className="flex items-center gap-2">
+          <RedFlagIcon />
+          <h2 className="text-sm font-bold uppercase tracking-wider text-red-800">Red flags</h2>
+          <span className="text-xs text-red-700">· fix before taking real payments</span>
+        </div>
+        <p className="mt-1 text-xs text-red-700">
+          {paymentsLive
+            ? 'Payments are LIVE, so real customers are affected by these.'
+            : 'Payments are in Stripe test mode, so no real money is affected yet.'}
+        </p>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <RedFlag
+            title="Unrefunded deposits"
+            body="When the hourly job closes a request nobody accepted before the move date, the customer's 20% deposit is not refunded. That's fine in test mode, but it needs fixing before live Stripe."
+            affected={unrefunded}
+            affectedNote={
+              unrefunded.length > 0 && isManagement ? `${fmtCents(unrefundedCents)} in deposits not refunded` : undefined
+            }
+            action={unrefunded.length > 0 ? { label: 'Refunds', href: '/admin-management/refunds' } : undefined}
+          />
+          <RedFlag
+            title="Accepted jobs never close"
+            body="A job a crew accepted but never started is not closed automatically when its date passes. It stays open in the crew's Scheduled list and the customer's app until someone cancels it."
+            affected={staleAccepted}
+            affectedNote={staleAccepted.length > 0 ? 'Past their move date and still open' : undefined}
+          />
         </div>
       </div>
 
@@ -576,6 +643,72 @@ export default async function DashboardPage() {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+function RedFlagIcon() {
+  return (
+    <svg className="text-red-600 shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 22V4" /><path d="M4 4h12l-2 4 2 4H4" />
+    </svg>
+  );
+}
+
+/** One known gap, and the bookings it is affecting right now. */
+function RedFlag({
+  title,
+  body,
+  affected,
+  affectedNote,
+  action,
+}: {
+  title: string;
+  body: string;
+  affected: { id: string; short_code: string }[];
+  affectedNote?: string;
+  action?: { label: string; href: string };
+}) {
+  return (
+    <div className="rounded-xl border border-red-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-sm font-bold text-red-800">{title}</div>
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${
+            affected.length > 0 ? 'bg-red-600 text-white' : 'bg-red-100 text-red-700'
+          }`}
+          title="Bookings affected right now"
+        >
+          {affected.length}
+        </span>
+      </div>
+      <p className="mt-1 text-xs leading-relaxed text-zinc-700">{body}</p>
+      {affected.length > 0 ? (
+        <div className="mt-3">
+          {affectedNote ? <div className="text-xs font-semibold text-red-700">{affectedNote}</div> : null}
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {affected.slice(0, 12).map((b) => (
+              <Link
+                key={b.id}
+                href={`/admin-management/moves/${b.id}`}
+                className="rounded-md bg-red-50 px-2 py-0.5 font-mono text-xs font-semibold text-red-800 hover:bg-red-100"
+              >
+                #{b.short_code}
+              </Link>
+            ))}
+            {affected.length > 12 ? (
+              <span className="px-1 text-xs text-zinc-500">+{affected.length - 12} more</span>
+            ) : null}
+          </div>
+          {action ? (
+            <Link href={action.href} className="mt-2 inline-block text-xs font-semibold text-red-700 underline underline-offset-2 hover:text-red-900">
+              {action.label} →
+            </Link>
+          ) : null}
+        </div>
+      ) : (
+        <div className="mt-3 text-xs text-zinc-500">No bookings affected right now. The gap is still open.</div>
+      )}
+    </div>
+  );
+}
 
 function SectionHeader({
   title,

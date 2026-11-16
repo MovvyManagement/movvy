@@ -553,7 +553,7 @@ export default function ConfirmStep() {
             { i: 'car-outline',              t: 'Truck, fuel, and dollies' },
             { i: 'cube-outline',             t: 'Packing materials (boxes, wrap, tape)' },
             { i: 'construct-outline',        t: 'Assembly + disassembly of furniture' },
-            { i: 'shield-checkmark-outline', t: `${COVERAGE_AMOUNT} damage coverage` },
+            { i: 'shield-checkmark-outline', t: `${COVERAGE_AMOUNT} damage coverage through Movvy` },
           ].map((row, idx, arr) => (
             <View
               key={row.t}

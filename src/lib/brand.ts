@@ -29,13 +29,12 @@ export const TOTAL_MOVES_TAGLINE: string | null = null;
  *  null until there are enough real ratings to average. */
 export const AVG_RATING_TAGLINE: string | null = null;
 
-/** Insurance coverage cap shown to customers + on booking confirm.
- *  Dollar value covered per move under Movvy's policy (or partner's where
- *  applicable). Keep a single string so we never have $5,000 in one place
- *  and $5000 in another. */
+/** Damage coverage per move, provided through Movvy (founder's decision, Nov
+ *  2026). Every coverage figure in the app reads from here, so the amount can
+ *  never differ between screens again (it used to say $2,500 in two places). */
 export const COVERAGE_AMOUNT = '$5,000';
-export const COVERAGE_LABEL = `Up to ${COVERAGE_AMOUNT} in coverage included`;
-export const COVERAGE_SHORT = `${COVERAGE_AMOUNT} coverage`;
+export const COVERAGE_LABEL = `Up to ${COVERAGE_AMOUNT} in damage coverage through Movvy`;
+export const COVERAGE_SHORT = `${COVERAGE_AMOUNT} damage coverage through Movvy`;
 
 /** Movvy commission rate as a fraction of the booking total. Single source
  *  of truth for every partner-payout estimate across the driver/company UI —

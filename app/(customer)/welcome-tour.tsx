@@ -7,6 +7,7 @@ import { CREW_CALLING_ENABLED } from '@/lib/features';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Button } from '@/components/Button';
+import { COVERAGE_AMOUNT } from '@/lib/brand';
 import { haptic } from '@/lib/haptics';
 
 /**
@@ -65,7 +66,7 @@ const SLIDES: Slide[] = [
       : 'Every Movvy crew is background-checked and verified. You message your crew inside the app, so your real number stays private.',
     highlights: [
       'Photo-ID + criminal record check',
-      'Damage protection up to $2,500',
+      `Damage coverage up to ${COVERAGE_AMOUNT} through Movvy`,
       'Tip your crew — it goes straight to them',
     ],
   },

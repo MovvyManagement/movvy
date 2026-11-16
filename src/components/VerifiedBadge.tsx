@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Pressable, Text, View, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { COVERAGE_AMOUNT } from '@/lib/brand';
 
 interface Props {
   size?: 'sm' | 'md';
@@ -39,7 +40,7 @@ export function VerifiedBadge({ size = 'sm', explainable = true }: Props) {
             </View>
             <Text className="mt-4 text-xl font-bold text-ink-900 text-center">Verified by Movvy</Text>
             <Text className="mt-2 text-sm text-silver-500 text-center leading-5">
-              Government ID confirmed · Background-checked · Insured up to $2,500 of damage protection · Has completed at least one verified move.
+              Government ID confirmed · Background-checked · Insured · Moves covered up to {COVERAGE_AMOUNT} through Movvy · Has completed at least one verified move.
             </Text>
             <Pressable
               onPress={() => setOpen(false)}

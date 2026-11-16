@@ -136,7 +136,7 @@ export function PriceBreakdownView({ price }: { price: PB }) {
           starts a timer the moment they leave HQ and stops it the moment they
           finish your drop-off. You pay for the actual time at the same{' '}
           {rateLabel(price.hourlyRateCustomerCents)} rate — finish early, you
-          pay less. {COVERAGE_AMOUNT} damage protection included.
+          pay less. Up to {COVERAGE_AMOUNT} in damage coverage through Movvy included.
         </Text>
       </View>
     </View>
